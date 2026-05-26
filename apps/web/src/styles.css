@@ -1344,6 +1344,30 @@ button:not([class*="btn"]):disabled {
   color: #f0a060;
 }
 
+.convivencia-versao {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  color: var(--fx-subtle);
+}
+
+.convivencia-alerta {
+  padding: 1rem 1.1rem;
+  margin-bottom: 1rem;
+  border-radius: var(--fx-radius, 12px);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.convivencia-alerta--aviso {
+  border: 1px solid rgba(240, 160, 96, 0.45);
+  background: rgba(240, 160, 96, 0.08);
+}
+
+.convivencia-alerta--erro {
+  border: 1px solid rgba(255, 100, 100, 0.45);
+  background: rgba(255, 100, 100, 0.08);
+}
+
 .chart-bars {
   list-style: none;
   margin: 0;

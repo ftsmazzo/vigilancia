@@ -12,6 +12,7 @@ from .familia_mview import _qi, _table_exists, ensure_vig_functions
 
 SISC_TABLE = "sisc__sisc"
 MVIEW_NAME = "mvw_sisc_qualificado"
+PAINEL_VERSAO = 2
 
 
 def _columns(conn: Connection, schema: str, table: str) -> set[str]:
@@ -318,6 +319,37 @@ def _mview_exists(conn: Connection) -> bool:
     return _table_exists(conn, "vig", MVIEW_NAME)
 
 
+def _mview_has_column(conn: Connection, column: str) -> bool:
+    """Colunas da MV via catálogo PG (information_schema nem sempre lista matviews)."""
+    r = conn.execute(
+        text(
+            """
+            SELECT EXISTS (
+              SELECT 1
+              FROM pg_attribute a
+              JOIN pg_class c ON c.oid = a.attrelid
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+              WHERE n.nspname = 'vig'
+                AND c.relname = :tbl
+                AND a.attname = :col
+                AND a.attnum > 0
+                AND NOT a.attisdropped
+            )
+            """
+        ),
+        {"tbl": MVIEW_NAME, "col": column},
+    ).scalar()
+    return bool(r)
+
+
+def _painel_dados_versao(conn: Connection) -> int:
+    if not _mview_exists(conn):
+        return 0
+    if _mview_has_column(conn, "classificacao_sexo"):
+        return PAINEL_VERSAO
+    return 1
+
+
 def _count_bucket(
     conn: Connection,
     group_col: str,
@@ -348,15 +380,7 @@ def _count_bucket(
 _VINC = "classificacao_vinculo = 'vinculado_cadu'"
 
 
-def sisc_kpis_from_mview(conn: Connection) -> dict:
-    if not _mview_exists(conn):
-        return {
-            "disponivel": False,
-            "mensagem": (
-                "Qualificação ainda não gerada. Ingeste o SISC e clique em «Qualificar atendidos» no painel Convivência."
-            ),
-        }
-
+def _sisc_kpis_base(conn: Connection) -> dict | None:
     base = conn.execute(
         text(
             f"""
@@ -367,28 +391,21 @@ def sisc_kpis_from_mview(conn: Connection) -> dict:
               COUNT(*) FILTER (WHERE classificacao_vinculo = 'sem_vinculo_cadu')::bigint AS sem_vinculo,
               COUNT(*) FILTER (WHERE classificacao_atendimento = 'prioritario')::bigint AS prioritarios,
               COUNT(*) FILTER (WHERE familia_na_folha_pbf)::bigint AS com_bolsa_familia,
-              COUNT(*) FILTER (WHERE classificacao_social = 'cadu_renda_ate_218')::bigint AS renda_ate_218,
-              COUNT(*) FILTER (WHERE {_VINC} AND classificacao_sexo = 'feminino')::bigint AS mulheres,
-              COUNT(*) FILTER (WHERE {_VINC} AND classificacao_sexo = 'masculino')::bigint AS homens,
-              COUNT(*) FILTER (WHERE tem_deficiencia)::bigint AS com_deficiencia,
-              COUNT(*) FILTER (WHERE situacao_rua)::bigint AS situacao_rua,
-              COUNT(*) FILTER (WHERE {_VINC} AND classificacao_faixa_idade = 'idoso_60_mais')::bigint AS idosos_60
+              COUNT(*) FILTER (WHERE classificacao_social = 'cadu_renda_ate_218')::bigint AS renda_ate_218
             FROM vig.{MVIEW_NAME}
             """
         )
     ).mappings().first()
     if not base:
-        return {"disponivel": False, "mensagem": "Sem dados na qualificação SISC."}
+        return None
 
     total = int(base["total_linhas"] or 0)
     vinc = int(base["vinculados"] or 0)
     pct_vinc = round(100.0 * vinc / total, 2) if total else 0.0
-    mulheres = int(base["mulheres"] or 0)
-    homens = int(base["homens"] or 0)
-    denom_sexo = mulheres + homens
 
     return {
         "disponivel": True,
+        "painel_versao_api": PAINEL_VERSAO,
         "view": f"vig.{MVIEW_NAME}",
         "total_linhas": total,
         "nis_distintos": int(base["nis_distintos"] or 0),
@@ -400,24 +417,83 @@ def sisc_kpis_from_mview(conn: Connection) -> dict:
         "prioritarios": int(base["prioritarios"] or 0),
         "com_bolsa_familia": int(base["com_bolsa_familia"] or 0),
         "renda_ate_218": int(base["renda_ate_218"] or 0),
-        "mulheres": mulheres,
-        "homens": homens,
-        "pct_mulheres": round(100.0 * mulheres / denom_sexo, 2) if denom_sexo else 0.0,
-        "pct_homens": round(100.0 * homens / denom_sexo, 2) if denom_sexo else 0.0,
-        "com_deficiencia": int(base["com_deficiencia"] or 0),
-        "situacao_rua": int(base["situacao_rua"] or 0),
-        "idosos_60": int(base["idosos_60"] or 0),
         "por_vinculo": _count_bucket(conn, "classificacao_vinculo", 5),
         "por_classificacao_social": _count_bucket(conn, "classificacao_social", 12),
         "por_grupo": _count_bucket(conn, "grupo", 12),
         "por_cras": _count_bucket(conn, "cras_nome", 10),
         "por_faixa_etaria": _count_bucket(conn, "faixa_etaria", 10),
-        "por_sexo": _count_bucket(conn, "classificacao_sexo", 6, where_sql=_VINC),
-        "por_raca": _count_bucket(conn, "classificacao_raca", 8, where_sql=_VINC),
-        "por_escolaridade": _count_bucket(conn, "classificacao_escolaridade", 10, where_sql=_VINC),
-        "por_faixa_idade_cadu": _count_bucket(conn, "classificacao_faixa_idade", 8, where_sql=_VINC),
-        "por_deficiencia": _count_bucket(conn, "classificacao_deficiencia", 10, where_sql=_VINC),
         "por_atendimento": _count_bucket(conn, "classificacao_atendimento", 5),
-        "por_intergeracional": _count_bucket(conn, "classificacao_intergeracional", 5),
-        "por_frequenta_escola": _count_bucket(conn, "classificacao_frequenta_escola", 5, where_sql=_VINC),
     }
+
+
+def sisc_kpis_from_mview(conn: Connection) -> dict:
+    meta = {
+        "painel_versao_api": PAINEL_VERSAO,
+        "painel_versao_ui_esperada": PAINEL_VERSAO,
+    }
+    if not _mview_exists(conn):
+        return {
+            **meta,
+            "disponivel": False,
+            "painel_versao_dados": 0,
+            "precisa_requalificar": True,
+            "mensagem": (
+                "Qualificação ainda não gerada. Vá em Convivência (menu superior) e clique em "
+                "«Qualificar atendidos (NIS × CADU)» — não basta só ingerir o CSV."
+            ),
+        }
+
+    dados_versao = _painel_dados_versao(conn)
+    precisa_requalificar = dados_versao < PAINEL_VERSAO
+
+    payload = _sisc_kpis_base(conn)
+    if not payload:
+        return {**meta, "disponivel": False, "painel_versao_dados": dados_versao, "mensagem": "Sem dados na qualificação SISC."}
+
+    payload["painel_versao_dados"] = dados_versao
+    payload["precisa_requalificar"] = precisa_requalificar
+
+    if precisa_requalificar:
+        payload["aviso_layout"] = (
+            "A qualificação no banco é de uma versão antiga (sem sexo, raça, escolaridade, deficiência). "
+            "Clique em «Qualificar atendidos» nesta página para recriar a visão — só atualizar Pessoas/Família não basta."
+        )
+        return payload
+
+    ext = conn.execute(
+        text(
+            f"""
+            SELECT
+              COUNT(*) FILTER (WHERE {_VINC} AND classificacao_sexo = 'feminino')::bigint AS mulheres,
+              COUNT(*) FILTER (WHERE {_VINC} AND classificacao_sexo = 'masculino')::bigint AS homens,
+              COUNT(*) FILTER (WHERE tem_deficiencia)::bigint AS com_deficiencia,
+              COUNT(*) FILTER (WHERE situacao_rua)::bigint AS situacao_rua,
+              COUNT(*) FILTER (WHERE {_VINC} AND classificacao_faixa_idade = 'idoso_60_mais')::bigint AS idosos_60
+            FROM vig.{MVIEW_NAME}
+            """
+        )
+    ).mappings().first() or {}
+
+    mulheres = int(ext.get("mulheres") or 0)
+    homens = int(ext.get("homens") or 0)
+    denom_sexo = mulheres + homens
+
+    payload.update(
+        {
+            "mulheres": mulheres,
+            "homens": homens,
+            "pct_mulheres": round(100.0 * mulheres / denom_sexo, 2) if denom_sexo else 0.0,
+            "pct_homens": round(100.0 * homens / denom_sexo, 2) if denom_sexo else 0.0,
+            "com_deficiencia": int(ext.get("com_deficiencia") or 0),
+            "situacao_rua": int(ext.get("situacao_rua") or 0),
+            "idosos_60": int(ext.get("idosos_60") or 0),
+            "por_sexo": _count_bucket(conn, "classificacao_sexo", 6, where_sql=_VINC),
+            "por_raca": _count_bucket(conn, "classificacao_raca", 8, where_sql=_VINC),
+            "por_escolaridade": _count_bucket(conn, "classificacao_escolaridade", 10, where_sql=_VINC),
+            "por_faixa_idade_cadu": _count_bucket(conn, "classificacao_faixa_idade", 8, where_sql=_VINC),
+            "por_deficiencia": _count_bucket(conn, "classificacao_deficiencia", 10, where_sql=_VINC),
+            "por_intergeracional": _count_bucket(conn, "classificacao_intergeracional", 5),
+            "por_frequenta_escola": _count_bucket(conn, "classificacao_frequenta_escola", 5, where_sql=_VINC),
+        }
+    )
+    return payload

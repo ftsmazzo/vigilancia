@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+/** Se esta versão não aparecer no rodapé da página, o frontend em produção está desatualizado (rebuild + Ctrl+F5). */
+const PAINEL_UI_VERSAO = 2;
 
 type Props = {
   token: string;
@@ -67,6 +69,11 @@ function rotuloAmigavel(chave: string): string {
 
 type SiscKpis = {
   disponivel: boolean;
+  painel_versao_api?: number;
+  painel_versao_ui_esperada?: number;
+  painel_versao_dados?: number;
+  precisa_requalificar?: boolean;
+  aviso_layout?: string;
   mensagem?: string;
   total_linhas?: number;
   nis_distintos?: number;
@@ -196,11 +203,24 @@ export default function ConvivenciaPage({ token }: Props) {
   }, [token]);
 
   const vinc = kpis?.vinculo_cadu;
+  const apiOk = (kpis?.painel_versao_api ?? 0) >= PAINEL_UI_VERSAO;
+  const dadosOk = (kpis?.painel_versao_dados ?? 0) >= PAINEL_UI_VERSAO;
+  const painelRico = dadosOk && Array.isArray(kpis?.por_sexo) && (kpis.por_sexo?.length ?? 0) > 0;
 
   return (
     <section className="kpi-page convivencia-page">
       <div className="kpi-head fx-card">
         <h1>SISC — Serviço de Convivência</h1>
+        <p className="convivencia-versao" aria-live="polite">
+          Interface v{PAINEL_UI_VERSAO}
+          {kpis?.painel_versao_api != null && (
+            <>
+              {" "}
+              · API v{kpis.painel_versao_api}
+              {kpis.painel_versao_dados != null && <> · dados qualificados v{kpis.painel_versao_dados}</>}
+            </>
+          )}
+        </p>
         <p>
           Painel enriquecido com dados do Cadastro Único (sexo, raça, escolaridade, deficiência, renda, situação de
           rua). Chave de vínculo: <strong>NIS</strong>. Ingestão em <Link to="/ingestao">Ingestão RAW</Link>; visões em{" "}
@@ -224,6 +244,21 @@ export default function ConvivenciaPage({ token }: Props) {
       {error && <p className="error">{error}</p>}
       {status && <p className="status-ok">{status}</p>}
 
+      {kpis && kpis.disponivel && !apiOk && (
+        <div className="convivencia-alerta convivencia-alerta--erro fx-card">
+          <strong>API desatualizada.</strong> O servidor ainda não tem o painel rico (v{PAINEL_UI_VERSAO}). Faça{" "}
+          <strong>rebuild/restart do serviço da API</strong> no EasyPanel e tente de novo.
+        </div>
+      )}
+
+      {kpis && kpis.disponivel && apiOk && (kpis.precisa_requalificar || !dadosOk) && (
+        <div className="convivencia-alerta convivencia-alerta--aviso fx-card">
+          <strong>Qualificação antiga no banco.</strong>{" "}
+          {kpis.aviso_layout ??
+            "Clique no botão azul «Qualificar atendidos (NIS × CADU)» nesta mesma página. Só gerar Pessoas/Família em Vigilância não atualiza sexo, raça, escolaridade nem deficiência."}
+        </div>
+      )}
+
       {kpis && !kpis.disponivel && (
         <p className="ingestao-desc fx-card" style={{ padding: "1rem" }}>
           {kpis.mensagem}
@@ -232,6 +267,13 @@ export default function ConvivenciaPage({ token }: Props) {
 
       {kpis?.disponivel && (
         <>
+          {!painelRico && apiOk && dadosOk && (
+            <p className="ingestao-desc fx-card" style={{ padding: "1rem" }}>
+              Qualificação v{dadosOk ? kpis.painel_versao_dados : "?"} ativa, mas os gráficos demográficos ainda estão
+              vazios (pode ser falta de vínculo NIS com o CADU). Confira os cards de vínculo abaixo.
+            </p>
+          )}
+
           <h2 className="kpi-section-title">Panorama geral</h2>
           <div className="kpi-grid">
             <article className="kpi-card">
@@ -266,6 +308,8 @@ export default function ConvivenciaPage({ token }: Props) {
             </article>
           </div>
 
+          {dadosOk && (
+            <>
           <h2 className="kpi-section-title">Perfil demográfico (vinculados ao CADU)</h2>
           <div className="kpi-grid kpi-grid-3">
             <article className="kpi-card">
@@ -314,6 +358,8 @@ export default function ConvivenciaPage({ token }: Props) {
             <BarChart title="Perfil social (família)" items={kpis.por_classificacao_social ?? []} />
             <BarChart title="Vínculo com CADU" items={kpis.por_vinculo ?? []} maxBars={5} />
           </div>
+            </>
+          )}
 
           <h2 className="kpi-section-title">Serviço de convivência (SISC)</h2>
           <div className="chart-grid">

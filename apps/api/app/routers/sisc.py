@@ -10,7 +10,11 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..deps import get_current_user
 from ..models import User
-from ..vigilance.sisc_qualificacao import refresh_sisc_qualificacao_mview, sisc_kpis_from_mview
+from ..vigilance.sisc_qualificacao import (
+    PAINEL_VERSAO,
+    refresh_sisc_qualificacao_mview,
+    sisc_kpis_from_mview,
+)
 
 router = APIRouter(prefix="/sisc", tags=["sisc"])
 
@@ -51,6 +55,7 @@ def refresh_sisc_qualificacao(
         "status": "success",
         "view_schema": "vig",
         "view_name": "mvw_sisc_qualificado",
+        "painel_versao": PAINEL_VERSAO,
         "row_count": result.row_count,
         "nis_distintos": result.nis_distintos,
         "elapsed_ms": elapsed_ms,
