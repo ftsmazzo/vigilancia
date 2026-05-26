@@ -1328,10 +1328,20 @@ button:not([class*="btn"]):disabled {
 }
 
 .chart-panel-title {
-  margin: 0 0 0.85rem;
+  margin: 0 0 0.35rem;
   font-size: 0.95rem;
   font-weight: 600;
   color: var(--fx-text);
+}
+
+.chart-panel-sub {
+  margin: 0 0 0.75rem;
+  font-size: 0.78rem;
+  color: var(--fx-subtle);
+}
+
+.kpi-card--warn strong {
+  color: #f0a060;
 }
 
 .chart-bars {

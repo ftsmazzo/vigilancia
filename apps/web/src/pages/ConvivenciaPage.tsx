@@ -25,6 +25,40 @@ const ROTULO_AMIGAVEL: Record<string, string> = {
   cadu_sem_indicador_renda: "CADU sem renda informada",
   prioritario: "Prioritário (SISC)",
   regular: "Regular (SISC)",
+  masculino: "Masculino",
+  feminino: "Feminino",
+  nao_informado: "Não informado",
+  branca: "Branca",
+  preta: "Preta",
+  amarela: "Amarela",
+  parda: "Parda",
+  indigena: "Indígena",
+  outro_codigo: "Outro código",
+  analfabeto: "Analfabeto",
+  fundamental_incompleto: "Fundamental incompleto",
+  fundamental_completo: "Fundamental completo",
+  medio_incompleto: "Médio incompleto",
+  medio_completo: "Médio completo",
+  superior_incompleto: "Superior incompleto",
+  superior_completo: "Superior completo",
+  crianca_0_11: "0–11 anos",
+  adolescente_12_17: "12–17 anos",
+  adulto_18_59: "18–59 anos",
+  idoso_60_mais: "60 anos ou mais",
+  idade_nao_informada: "Idade não informada",
+  sem_deficiencia: "Sem deficiência",
+  deficiencia_fisica: "Deficiência física",
+  deficiencia_visual: "Deficiência visual",
+  deficiencia_auditiva: "Deficiência auditiva",
+  deficiencia_mental_cognitiva: "Deficiência mental / cognitiva",
+  deficiencia_multipla: "Deficiência múltipla",
+  com_deficiencia_sem_tipo: "Com deficiência (tipo não detalhado)",
+  intergeracional_sim: "Intergeracional (sim)",
+  intergeracional_nao: "Intergeracional (não)",
+  intergeracional_nao_informado: "Intergeracional (não informado)",
+  frequenta_escola_sim: "Frequenta escola",
+  frequenta_escola_nao: "Não frequenta escola",
+  frequenta_escola_nao_informado: "Frequenta escola (não informado)",
 };
 
 function rotuloAmigavel(chave: string): string {
@@ -40,19 +74,45 @@ type SiscKpis = {
   prioritarios?: number;
   com_bolsa_familia?: number;
   renda_ate_218?: number;
+  mulheres?: number;
+  homens?: number;
+  pct_mulheres?: number;
+  pct_homens?: number;
+  com_deficiencia?: number;
+  situacao_rua?: number;
+  idosos_60?: number;
   por_vinculo?: BarItem[];
   por_classificacao_social?: BarItem[];
   por_grupo?: BarItem[];
   por_cras?: BarItem[];
   por_faixa_etaria?: BarItem[];
+  por_sexo?: BarItem[];
+  por_raca?: BarItem[];
+  por_escolaridade?: BarItem[];
+  por_faixa_idade_cadu?: BarItem[];
+  por_deficiencia?: BarItem[];
+  por_atendimento?: BarItem[];
+  por_intergeracional?: BarItem[];
+  por_frequenta_escola?: BarItem[];
 };
 
-function BarChart({ title, items, maxBars = 10 }: { title: string; items: BarItem[]; maxBars?: number }) {
+function BarChart({
+  title,
+  subtitle,
+  items,
+  maxBars = 10,
+}: {
+  title: string;
+  subtitle?: string;
+  items: BarItem[];
+  maxBars?: number;
+}) {
   const slice = items.slice(0, maxBars);
   const max = Math.max(...slice.map((i) => i.total), 1);
   return (
     <div className="chart-panel fx-card">
       <h3 className="chart-panel-title">{title}</h3>
+      {subtitle && <p className="chart-panel-sub">{subtitle}</p>}
       {slice.length === 0 ? (
         <p className="ingestao-desc">Sem dados.</p>
       ) : (
@@ -121,7 +181,7 @@ export default function ConvivenciaPage({ token }: Props) {
         throw new Error(typeof data.detail === "string" ? data.detail : "Falha ao qualificar SISC.");
       }
       setStatus(
-        `Qualificação atualizada: ${String(data.row_count ?? 0)} linhas, ${String(data.nis_distintos ?? 0)} NIS distintos (${String(data.elapsed_ms ?? 0)} ms).`
+        `Qualificação atualizada: ${String(data.row_count ?? 0)} linhas, ${String(data.nis_distintos ?? 0)} NIS distintos (${String(data.elapsed_ms ?? 0)} ms). Requalifique após cada atualização das visões Pessoas/Família.`
       );
       await loadKpis();
     } catch (e) {
@@ -142,9 +202,9 @@ export default function ConvivenciaPage({ token }: Props) {
       <div className="kpi-head fx-card">
         <h1>SISC — Serviço de Convivência</h1>
         <p>
-          Atendidos vinculados ao Cadastro Único pela chave <strong>NIS</strong>. Ingestão em{" "}
-          <Link to="/ingestao">Ingestão RAW</Link>; visões CADU em{" "}
-          <Link to="/vigilancia">Vigilância</Link> (Família e Pessoas).
+          Painel enriquecido com dados do Cadastro Único (sexo, raça, escolaridade, deficiência, renda, situação de
+          rua). Chave de vínculo: <strong>NIS</strong>. Ingestão em <Link to="/ingestao">Ingestão RAW</Link>; visões em{" "}
+          <Link to="/vigilancia">Vigilância</Link>.
         </p>
         <div className="vig-actions" style={{ flexWrap: "wrap", gap: "0.5rem" }}>
           <button type="button" className="btn btn-secondary" onClick={() => void loadKpis()} disabled={loading}>
@@ -172,7 +232,7 @@ export default function ConvivenciaPage({ token }: Props) {
 
       {kpis?.disponivel && (
         <>
-          <h2 className="kpi-section-title">Panorama</h2>
+          <h2 className="kpi-section-title">Panorama geral</h2>
           <div className="kpi-grid">
             <article className="kpi-card">
               <small>Atendimentos (linhas SISC)</small>
@@ -180,39 +240,88 @@ export default function ConvivenciaPage({ token }: Props) {
               <span>{(kpis.nis_distintos ?? 0).toLocaleString("pt-BR")} NIS distintos</span>
             </article>
             <article className="kpi-card kpi-card--accent">
-              <small>Vinculados ao CADU (NIS)</small>
+              <small>Vinculados ao CADU</small>
               <strong>{(vinc?.vinculados ?? 0).toLocaleString("pt-BR")}</strong>
               <span>{(vinc?.pct_vinculados ?? 0).toLocaleString("pt-BR")}% do público SISC</span>
             </article>
             <article className="kpi-card">
-              <small>Sem vínculo no CADU</small>
+              <small>Sem vínculo (NIS)</small>
               <strong>{(vinc?.sem_vinculo ?? 0).toLocaleString("pt-BR")}</strong>
-              <span>NIS não encontrado em vig.mvw_pessoas</span>
+              <span>Não encontrados em Pessoas</span>
             </article>
             <article className="kpi-card">
-              <small>Na folha Bolsa Família (família)</small>
+              <small>Prioritários (SISC)</small>
+              <strong>{(kpis.prioritarios ?? 0).toLocaleString("pt-BR")}</strong>
+              <span>Situação prioritária no relatório</span>
+            </article>
+            <article className="kpi-card">
+              <small>Folha Bolsa Família</small>
               <strong>{(kpis.com_bolsa_familia ?? 0).toLocaleString("pt-BR")}</strong>
-              <span>Entre os vinculados ao CADU</span>
+              <span>Família na folha PBF</span>
             </article>
             <article className="kpi-card">
               <small>Renda per capita ≤ R$ 218</small>
               <strong>{(kpis.renda_ate_218 ?? 0).toLocaleString("pt-BR")}</strong>
-              <span>Família no CADU (faixa extrema pobreza)</span>
-            </article>
-            <article className="kpi-card">
-              <small>Situação prioritária (SISC)</small>
-              <strong>{(kpis.prioritarios ?? 0).toLocaleString("pt-BR")}</strong>
-              <span>Flag no relatório SISC</span>
+              <span>Extrema pobreza (CADU)</span>
             </article>
           </div>
 
-          <h2 className="kpi-section-title">Classificação e distribuição</h2>
+          <h2 className="kpi-section-title">Perfil demográfico (vinculados ao CADU)</h2>
+          <div className="kpi-grid kpi-grid-3">
+            <article className="kpi-card">
+              <small>Mulheres</small>
+              <strong>{(kpis.mulheres ?? 0).toLocaleString("pt-BR")}</strong>
+              <span>{(kpis.pct_mulheres ?? 0).toLocaleString("pt-BR")}% entre com sexo informado</span>
+            </article>
+            <article className="kpi-card">
+              <small>Homens</small>
+              <strong>{(kpis.homens ?? 0).toLocaleString("pt-BR")}</strong>
+              <span>{(kpis.pct_homens ?? 0).toLocaleString("pt-BR")}% entre com sexo informado</span>
+            </article>
+            <article className="kpi-card">
+              <small>60 anos ou mais (CADU)</small>
+              <strong>{(kpis.idosos_60 ?? 0).toLocaleString("pt-BR")}</strong>
+              <span>Idade calculada na visão Pessoas</span>
+            </article>
+            <article className="kpi-card kpi-card--warn">
+              <small>Com deficiência (CADU)</small>
+              <strong>{(kpis.com_deficiencia ?? 0).toLocaleString("pt-BR")}</strong>
+              <span>Marcadores ou tipos de deficiência</span>
+            </article>
+            <article className="kpi-card kpi-card--warn">
+              <small>Situação de rua (CADU)</small>
+              <strong>{(kpis.situacao_rua ?? 0).toLocaleString("pt-BR")}</strong>
+              <span>Marcador de situação de rua</span>
+            </article>
+          </div>
+
           <div className="chart-grid">
+            <BarChart
+              title="Sexo"
+              subtitle="Somente vinculados ao CADU"
+              items={kpis.por_sexo ?? []}
+              maxBars={6}
+            />
+            <BarChart title="Raça / cor" subtitle="Códigos CadÚnico" items={kpis.por_raca ?? []} />
+            <BarChart title="Escolaridade" subtitle="Grau de instrução (CADU)" items={kpis.por_escolaridade ?? []} />
+            <BarChart title="Faixa etária (idade CADU)" items={kpis.por_faixa_idade_cadu ?? []} />
+            <BarChart title="Frequenta escola" items={kpis.por_frequenta_escola ?? []} maxBars={5} />
+          </div>
+
+          <h2 className="kpi-section-title">Deficiência e vulnerabilidades</h2>
+          <div className="chart-grid">
+            <BarChart title="Tipo de deficiência" subtitle="Vinculados ao CADU" items={kpis.por_deficiencia ?? []} />
+            <BarChart title="Perfil social (família)" items={kpis.por_classificacao_social ?? []} />
             <BarChart title="Vínculo com CADU" items={kpis.por_vinculo ?? []} maxBars={5} />
-            <BarChart title="Perfil social (família CADU)" items={kpis.por_classificacao_social ?? []} />
-            <BarChart title="Faixa etária (SISC)" items={kpis.por_faixa_etaria ?? []} />
+          </div>
+
+          <h2 className="kpi-section-title">Serviço de convivência (SISC)</h2>
+          <div className="chart-grid">
+            <BarChart title="Faixa etária (relatório SISC)" items={kpis.por_faixa_etaria ?? []} />
+            <BarChart title="Atendimento prioritário" items={kpis.por_atendimento ?? []} maxBars={5} />
+            <BarChart title="Intergeracional" items={kpis.por_intergeracional ?? []} maxBars={5} />
             <BarChart title="Grupos / turmas" items={kpis.por_grupo ?? []} />
-            <BarChart title="Por CRAS (unidade)" items={kpis.por_cras ?? []} maxBars={8} />
+            <BarChart title="Por CRAS" items={kpis.por_cras ?? []} maxBars={8} />
           </div>
         </>
       )}
