@@ -3,6 +3,23 @@ import { Link } from "react-router-dom";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
+function formatFetchError(e: unknown, context: string): string {
+  if (e instanceof TypeError && /fetch/i.test(e.message)) {
+    return (
+      `Não foi possível contactar a API (${context}). Verifique se o serviço da API está no ar, ` +
+      `se VITE_API_URL no build do frontend aponta para a URL pública correta (atual: ${API_URL}) ` +
+      `e se CORS_ORIGINS na API inclui o domínio do site. Detalhe: ${e.message}`
+    );
+  }
+  return e instanceof Error ? e.message : `Erro em ${context}.`;
+}
+
+async function apiGet(path: string, token: string): Promise<Response> {
+  return fetch(`${API_URL}${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
 type Props = {
   token: string;
 };
@@ -83,14 +100,21 @@ export default function CrasPage({ token }: Props) {
   const [error, setError] = useState("");
 
   const loadCatalog = useCallback(async () => {
-    const res = await fetch(`${API_URL}/api/v1/cras/catalog`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const data = (await res.json().catch(() => ({}))) as { items?: CrasCatalogItem[]; detail?: unknown };
-    if (!res.ok) {
-      throw new Error(typeof data.detail === "string" ? data.detail : "Falha ao listar CRAS.");
+    try {
+      const res = await apiGet("/api/v1/cras/catalog", token);
+      const data = (await res.json().catch(() => ({}))) as { items?: CrasCatalogItem[]; detail?: unknown };
+      if (res.status === 404) {
+        throw new Error(
+          "Rota /api/v1/cras não encontrada. Faça rebuild/restart da API no EasyPanel (commit com painel CRAS).",
+        );
+      }
+      if (!res.ok) {
+        throw new Error(typeof data.detail === "string" ? data.detail : `Falha ao listar CRAS (${res.status}).`);
+      }
+      setCatalog(data.items ?? []);
+    } catch (e) {
+      throw new Error(formatFetchError(e, "catálogo CRAS"));
     }
-    setCatalog(data.items ?? []);
   }, [token]);
 
   const loadPainel = useCallback(
@@ -99,16 +123,14 @@ export default function CrasPage({ token }: Props) {
       setError("");
       try {
         const q = cod && cod !== "__todos__" ? `?cras_cod=${encodeURIComponent(cod)}` : "?cras_cod=__todos__";
-        const res = await fetch(`${API_URL}/api/v1/cras/painel${q}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await apiGet(`/api/v1/cras/painel${q}`, token);
         const data = (await res.json().catch(() => ({}))) as CrasPainel & { detail?: unknown };
         if (!res.ok) {
-          throw new Error(typeof data.detail === "string" ? data.detail : "Falha ao carregar painel CRAS.");
+          throw new Error(typeof data.detail === "string" ? data.detail : `Falha no painel CRAS (${res.status}).`);
         }
         setPainel(data);
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Erro ao consultar CRAS.");
+        setError(formatFetchError(e, "painel CRAS"));
         setPainel(null);
       } finally {
         setLoading(false);

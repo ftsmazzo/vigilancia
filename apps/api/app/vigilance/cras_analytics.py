@@ -7,8 +7,8 @@ from sqlalchemy.engine import Connection
 
 from .familia_mview import _table_exists
 
-SEXO_MASC = "UPPER(COALESCE(p.cod_sexo, '')) IN ('1', '01', 'M', 'MASCULINO')"
-SEXO_FEM = "UPPER(COALESCE(p.cod_sexo, '')) IN ('2', '02', 'F', 'FEMININO')"
+SEXO_MASC = "UPPER(COALESCE(pes.cod_sexo, '')) IN ('1', '01', 'M', 'MASCULINO')"
+SEXO_FEM = "UPPER(COALESCE(pes.cod_sexo, '')) IN ('2', '02', 'F', 'FEMININO')"
 
 
 def _require_views(conn: Connection) -> None:

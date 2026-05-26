@@ -24,6 +24,11 @@ def get_cras_catalog(
             items = cras_catalog_from_views(conn)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Falha ao listar CRAS: {exc}",
+        ) from exc
     return {"total_unidades": len(items), "items": items}
 
 
@@ -45,3 +50,8 @@ def get_cras_painel(
             return cras_painel_from_views(conn, cras_cod)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Falha no painel CRAS: {exc}",
+        ) from exc
