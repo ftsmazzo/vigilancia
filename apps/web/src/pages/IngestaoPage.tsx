@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-type TabId = "cadu" | "pbf" | "bpc" | "sibec" | "geo";
+type TabId = "cadu" | "pbf" | "bpc" | "sibec" | "sisc" | "geo";
 
 type UploadResult = { ok: boolean; data: Record<string, unknown>; errorText?: string };
 
@@ -85,6 +85,7 @@ const TARGET_LABELS: Record<string, string> = {
   bpc__beneficio_prestacao_continuada: "BPC — Prestação Continuada",
   sibec__manutencoes: "SIBEC — Manutenções mensais",
   geo__tbl_geo: "Geo — logradouros (Ribeirão / CEP)",
+  sisc__sisc: "SISC — Serviço de Convivência",
 };
 
 function humanBaseTitle(run: IngestionRunRow): string {
@@ -104,6 +105,8 @@ function formatSourceLabel(source: string): string {
     cecad: "CECAD",
     sibec: "SIBEC",
     bpc: "BPC",
+    sisc: "SISC",
+    geo: "Geo",
   };
   return map[source.toLowerCase()] ?? source.toUpperCase();
 }
@@ -211,6 +214,13 @@ export default function IngestaoPage({ token }: Props) {
   const [sibecStatus, setSibecStatus] = useState("");
   const [sibecProgress, setSibecProgress] = useState(0);
   const [sibecUploading, setSibecUploading] = useState(false);
+
+  // SISC — Serviço de Convivência (CSV com ponto e vírgula, chave NIS)
+  const [siscFile, setSiscFile] = useState<File | null>(null);
+  const [siscStrategy, setSiscStrategy] = useState("replace");
+  const [siscStatus, setSiscStatus] = useState("");
+  const [siscProgress, setSiscProgress] = useState(0);
+  const [siscUploading, setSiscUploading] = useState(false);
 
   // Base geográfica (tbl_geo — CSV com vírgula)
   const [geoFile, setGeoFile] = useState<File | null>(null);
@@ -360,6 +370,35 @@ export default function IngestaoPage({ token }: Props) {
       await loadRuns();
     } else {
       setSibecStatus(res.errorText || "Falha na ingestão.");
+    }
+  }
+
+  async function submitSisc(e: FormEvent) {
+    e.preventDefault();
+    setSiscStatus("");
+    setSiscProgress(0);
+    if (!siscFile) {
+      setSiscStatus("Selecione o arquivo SISC.csv.");
+      return;
+    }
+    const fd = new FormData();
+    fd.append("file", siscFile);
+    fd.append("source", "sisc");
+    fd.append("dataset", "sisc");
+    fd.append("strategy", siscStrategy);
+    fd.append("csv_delimiter", ";");
+    setSiscUploading(true);
+    const res = await runIngestionUpload(fd, token, setSiscProgress);
+    setSiscUploading(false);
+    if (res.ok) {
+      setSiscProgress(100);
+      setSiscStatus(
+        `Tabela raw.sisc__sisc atualizada. ${String(res.data.row_count ?? 0)} linhas. Em seguida, atualize Pessoas e Família em Vigilância e qualifique em Convivência.`,
+      );
+      setSiscFile(null);
+      await loadRuns();
+    } else {
+      setSiscStatus(res.errorText || "Falha na ingestão SISC.");
     }
   }
 
@@ -594,6 +633,7 @@ export default function IngestaoPage({ token }: Props) {
     { id: "pbf", label: "Bolsa Família", hint: "Programa Bolsa Família" },
     { id: "bpc", label: "BPC", hint: "Benefício Prestação Continuada" },
     { id: "sibec", label: "SIBEC Manutenções", hint: "Analíticos mensais por competência" },
+    { id: "sisc", label: "SISC Convivência", hint: "Atendidos — vínculo por NIS" },
     { id: "geo", label: "Geo / CEP", hint: "Logradouros e teste de cruzamento" },
   ];
 
@@ -853,6 +893,54 @@ export default function IngestaoPage({ token }: Props) {
                 <small>{sibecUploading ? `Enviando: ${sibecProgress}%` : "Aguardando envio"}</small>
               </div>
               {sibecStatus && <p className={sibecStatus.includes("sucesso") ? "status-ok" : "error"}>{sibecStatus}</p>}
+            </section>
+          )}
+
+          {tab === "sisc" && (
+            <section className="ingestao-panel">
+              <h1>SISC — Serviço de Convivência</h1>
+              <p className="ingestao-desc">
+                Relatório de atendidos (SCFV). O arquivo <code className="inline-code">SISC.csv</code> usa{" "}
+                <strong>ponto e vírgula (;)</strong> e a chave <strong>nu_nis_pessoa</strong> para cruzar com o CADU.
+                Após a carga: atualize as visões <Link to="/vigilancia">Pessoas</Link> e{" "}
+                <Link to="/vigilancia">Família</Link>, depois qualifique em{" "}
+                <Link to="/convivencia">Convivência</Link>.
+              </p>
+              <form onSubmit={submitSisc} className="auth-form">
+                <label>
+                  Estratégia
+                  <select
+                    value={siscStrategy}
+                    onChange={(ev) => setSiscStrategy(ev.target.value)}
+                    disabled={siscUploading}
+                  >
+                    <option value="replace">Substituir tabela inteira</option>
+                    <option value="append">Acrescentar linhas</option>
+                  </select>
+                </label>
+                <label>
+                  Arquivo CSV (SISC)
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={(ev) => setSiscFile(ev.target.files?.[0] || null)}
+                    disabled={siscUploading}
+                    required
+                  />
+                </label>
+                <button type="submit" disabled={siscUploading}>
+                  {siscUploading ? "Enviando…" : "Carregar SISC"}
+                </button>
+              </form>
+              <div className="progress-wrap" aria-live="polite">
+                <div className="progress-track">
+                  <div className="progress-fill" style={{ width: `${siscProgress}%` }} />
+                </div>
+                <small>{siscUploading ? `Enviando: ${siscProgress}%` : "Aguardando envio"}</small>
+              </div>
+              {siscStatus && (
+                <p className={siscStatus.includes("atualizada") ? "status-ok" : "error"}>{siscStatus}</p>
+              )}
             </section>
           )}
 

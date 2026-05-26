@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, NavLink, Route, Routes } from "react-router-do
 import IngestaoPage from "./pages/IngestaoPage";
 import PainelIndicadoresInicio from "./pages/PainelIndicadoresInicio";
 import UsuariosPage from "./pages/UsuariosPage";
+import ConvivenciaPage from "./pages/ConvivenciaPage";
 import VigilanciaPage from "./pages/VigilanciaPage";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -65,6 +66,9 @@ function AppShell({
           </NavLink>
           <NavLink to="/vigilancia" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             Vigilância
+          </NavLink>
+          <NavLink to="/convivencia" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+            Convivência
           </NavLink>
           {me?.role === "superadmin" && (
             <NavLink to="/usuarios" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
@@ -336,6 +340,18 @@ export default function App() {
               token ? (
                 <AppShell loadingMe={loadingMe} me={me} onLogout={handleLogout}>
                   <VigilanciaPage token={token} />
+                </AppShell>
+              ) : (
+                <Navigate to="/" replace />
+              )
+            }
+          />
+          <Route
+            path="/convivencia"
+            element={
+              token ? (
+                <AppShell loadingMe={loadingMe} me={me} onLogout={handleLogout}>
+                  <ConvivenciaPage token={token} />
                 </AppShell>
               ) : (
                 <Navigate to="/" replace />

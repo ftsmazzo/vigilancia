@@ -15,7 +15,7 @@ PESSOAS_FIELDS: list[tuple[str, str, str]] = [
     ("codigo_familiar", "p_cod_familiar_fam", "fam"),
     ("ind_trabalho_infantil", "p_ind_trabalho_infantil_pessoa", "code"),
     ("nome", "p_nom_pessoa", "nome"),
-    ("num_nis", "p_num_nis_pessoa_atual", "text"),
+    ("num_nis", "p_num_nis_pessoa_atual", "nis"),
     ("cod_sexo", "p_cod_sexo_pessoa", "code"),
     ("data_nascimento", "p_dta_nasc_pessoa", "date"),
     ("cod_parentesco_rf", "p_cod_parentesco_rf_pessoa", "code"),
@@ -133,8 +133,8 @@ def _expr(ref: str, mode: str) -> str:
         return f"vig.ltrim_zeros_text({ref}::text)"
     if mode == "text":
         return f"vig.clean_spaces({ref}::text)"
-    if mode == "cpf":
-        # Exportações suprimem zeros à esquerda: completa até 11 dígitos; >11 dígitos = inválido.
+    if mode in ("cpf", "nis"):
+        # NIS/CPF: somente dígitos, 11 posições (zeros à esquerda).
         return f"""CASE
           WHEN vig.only_digits({ref}::text) IS NULL
             OR btrim(vig.only_digits({ref}::text)) = '' THEN NULL

@@ -146,6 +146,19 @@ AS $$
 $$;
 """,
     r"""
+CREATE OR REPLACE FUNCTION vig.norm_nis(t text)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT CASE
+    WHEN vig.only_digits(t) IS NULL OR btrim(vig.only_digits(t)) = '' THEN NULL
+    WHEN length(vig.only_digits(t)) > 11 THEN NULL
+    ELSE lpad(vig.only_digits(t), 11, '0')
+  END
+$$;
+""",
+    r"""
 CREATE OR REPLACE FUNCTION vig.ltrim_zeros_text(t text)
 RETURNS text
 LANGUAGE sql
