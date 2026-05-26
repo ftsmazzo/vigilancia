@@ -11,6 +11,18 @@ from ..vigilance.familia_mview import _table_exists
 from .dictionary import build_dictionary_prompt
 
 CATALOG_STATIC = """
+## Fonte verdade e medidas (modelo VigSocial)
+
+**Fonte verdade = CADU** (`vig.mvw_familia`, `vig.mvw_pessoas`, `vig.mvw_familia_domicilio`):
+universo de famílias e pessoas do município. Toda pergunta parte daqui.
+
+**Medidas e cruzamentos** (sempre ligados ao CADU por `codigo_familiar` ou `num_nis` / `nis_norm`):
+- **Folha PBF** (SIBEC): quem recebe pagamento — KPI folha pode incluir famílias fora do CADU local; no CADU use `marc_pbf`.
+- **SISC (Convivência)**: matrícula no serviço — `vig.mvw_sisc_qualificado`; divisão territorial do atendimento: `s.cras_codigo`, `s.cras_nome`.
+- **Território CADU**: referência da família no cadastro — `f.num_cras`, `f.nom_cras` (pode diferir do CRAS do SISC na mesma pessoa).
+
+Conversas em sequência ("dessas crianças… depois por CRAS"): mantenha filtros anteriores e acrescente `GROUP BY s.cras_nome, s.cras_codigo`.
+
 ## Visões disponíveis (PostgreSQL, schema vig)
 
 ### vig.mvw_familia — uma linha por família (CADU)
@@ -58,7 +70,9 @@ CATALOG_STATIC = """
 - Família ↔ domicílio: d.codigo_familiar = f.codigo_familiar
 - Use COUNT(DISTINCT f.codigo_familiar) para contar famílias.
 - Use COUNT(p.cadu_row_id) ou COUNT(*) em pessoas para contar indivíduos.
-- Filtro por CRAS: f.num_cras = 'código' ou f.nom_cras ILIKE '%nome%'.
+- CRAS no CADU (família): f.num_cras, f.nom_cras.
+- CRAS no SISC (atendimento convivência): s.cras_codigo, s.cras_nome — use para "dividir por CRAS" após pergunta sobre SISC.
+- Desdobramento: GROUP BY s.cras_codigo, s.cras_nome ORDER BY COUNT(DISTINCT s.nis_norm) DESC.
 """
 
 

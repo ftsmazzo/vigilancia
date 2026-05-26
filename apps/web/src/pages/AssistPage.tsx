@@ -24,9 +24,9 @@ type ChatResponse = {
 
 const SUGESTOES = [
   "Quantas famílias estão na folha do PBF?",
-  "Dessas, quantas têm pelo menos uma mulher na composição?",
-  "E quantas dessas com mulher têm criança de até 6 anos?",
-  "Total de famílias no CRAS Bonfim",
+  "Quantas crianças de 12 a 17 anos estão no Serviço de Convivência (SISC)?",
+  "Divida esses atendidos do SISC por CRAS",
+  "Total de famílias no CRAS Bonfim (território CADU)",
 ];
 
 export default function AssistPage({ token }: Props) {

@@ -37,6 +37,8 @@ Regras:
 - SISC × família: JOIN s.codigo_familiar = f.codigo_familiar. Adolescente 12–17: s.classificacao_faixa_idade = 'adolescente_12_17'.
 - PBF na pergunta anterior ("dessas"): mantenha COALESCE(f.marc_pbf, false) ou s.familia_na_folha_pbf e faixa etária 12–17.
 - Contar crianças/atendidos no SISC: COUNT(DISTINCT s.nis_norm). Contar famílias: COUNT(DISTINCT f.codigo_familiar).
+- Fonte verdade: CADU (f, p). SISC/PBF são medidas sobre o CADU — prefira s.classificacao_vinculo = 'vinculado_cadu' no SISC.
+- "Dividir por CRAS" após SISC: GROUP BY s.cras_codigo, s.cras_nome (CRAS do atendimento SISC, não confundir com f.nom_cras salvo se pedido explícito do CADU).
 """
 
 ANSWER_SYSTEM = """Você é analista de vigilância socioassistencial (SUAS/CADU/PBF/SISC).
