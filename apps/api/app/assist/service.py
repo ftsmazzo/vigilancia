@@ -24,7 +24,7 @@ Regras:
 - Apenas SELECT; uma instrução; sem ponto e vírgula no final.
 - Use somente: vig.mvw_familia (alias f), vig.mvw_pessoas (p), vig.mvw_familia_domicilio (d), vig.mvw_sisc_qualificado (s).
 - Contagens de famílias: COUNT(DISTINCT f.codigo_familiar).
-- PBF na família: f.marc_pbf = true OR f.marc_pbf_cadu = true (confirme colunas no catálogo).
+- PBF na família: COALESCE(f.marc_pbf, false) = true OR btrim(COALESCE(f.marc_pbf_cadu::text, '')) IN ('1', '01', 'sim', 's', 'true').
 - Mulher: p.cod_sexo = '2'. Criança até 6 anos: p.idade <= 6 AND p.idade IS NOT NULL.
 - Se a pergunta referir filtro anterior ("dessas", "entre elas"), aplique os mesmos filtros da conversa.
 - Prefira resultados agregados (COUNT, SUM) em vez de listar linhas.
@@ -38,6 +38,54 @@ Com base na pergunta do usuário, na SQL executada e nos resultados, redija resp
 - Se houver incerteza ou dados vazios, diga explicitamente.
 - Não invente números que não estejam nos resultados.
 - Seja conciso (2–4 parágrafos curtos no máximo)."""
+
+CHAT_SYSTEM = """Você é o assistente de vigilância socioassistencial do município (orquestrador).
+Converse de forma cordial, clara e profissional em português do Brasil.
+- Cumprimentos e conversa geral: responda sem inventar estatísticas.
+- Se pedirem dados ou indicadores, diga que pode consultar o CADU (famílias, PBF, CRAS, SISC) e sugira uma pergunta objetiva.
+- Não gere SQL nesta etapa; apenas dialogue."""
+
+_DATA_QUERY_HINT = re.compile(
+    r"\b("
+    r"quantos|quantas|quanto|total|número|numero|percentual|proporção|proporcao|"
+    r"família|familia|familias|famílias|pbf|bolsa|cras|nis|cadu|sisc|renda|"
+    r"mulher|mulheres|criança|crianca|idoso|deficiência|deficiencia|"
+    r"domicílio|domicilio|indicador|cadastr|atualiz|vincul|território|territorio"
+    r")\b",
+    re.I,
+)
+
+_SMALL_TALK_HINT = re.compile(
+    r"^(oi|olá|ola|hey|bom\s+dia|boa\s+tarde|boa\s+noite|obrigad|valeu|"
+    r"tudo\s+bem|como\s+vai|e\s+aí|eai|hello|hi)\b",
+    re.I,
+)
+
+
+def _needs_data_query(message: str) -> bool:
+    text = message.strip()
+    if _DATA_QUERY_HINT.search(text):
+        return True
+    if _SMALL_TALK_HINT.search(text) and len(text) < 120:
+        return False
+    if len(text) < 50 and not _DATA_QUERY_HINT.search(text):
+        return False
+    return True
+
+
+def _conversational_reply(
+    message: str,
+    transcript: list[dict[str, str]],
+    schema: str,
+) -> str:
+    messages: list[dict[str, str]] = [
+        {
+            "role": "system",
+            "content": CHAT_SYSTEM + "\n\nContexto disponível (não cite números sem consulta):\n" + schema[:2000],
+        },
+        *transcript,
+    ]
+    return chat_completion(messages, temperature=0.5).strip()
 
 
 def _json_safe(value: Any) -> Any:
@@ -97,6 +145,18 @@ def chat_turn(
     with db.bind.connect() as conn:
         schema = build_schema_context(conn, db)
 
+        if not _needs_data_query(message):
+            answer = _conversational_reply(message, transcript, schema)
+            append_message(db, session.id, "assistant", answer, sql_executed=None)
+            return {
+                "session_id": session.id,
+                "answer": answer,
+                "sql": None,
+                "row_count": 0,
+                "preview": [],
+                "mode": "chat",
+            }
+
         sql_messages: list[dict[str, str]] = [
             {"role": "system", "content": SQL_SYSTEM + "\n\n" + schema},
             *transcript,
@@ -120,6 +180,7 @@ def chat_turn(
                 "row_count": 0,
                 "preview": [],
                 "error": str(exc),
+                "mode": "data",
             }
 
         try:
@@ -137,6 +198,7 @@ def chat_turn(
                 "row_count": 0,
                 "preview": [],
                 "error": str(exc),
+                "mode": "data",
             }
 
     preview = _rows_to_preview(rows)
@@ -162,4 +224,5 @@ def chat_turn(
         "sql": safe_sql,
         "row_count": len(rows),
         "preview": preview,
+        "mode": "data",
     }

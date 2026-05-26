@@ -38,9 +38,9 @@ def _normalize(sql: str) -> str:
 
 
 def _referenced_relations(sql: str) -> set[str]:
-    """Extrai referências schema.tabela (heurística)."""
+    """Extrai apenas vig.nome_tabela (ignora alias f., p., d., s.)."""
     found: set[str] = set()
-    for m in re.finditer(r"\b([a-z_][a-z0-9_]*)\.([a-z_][a-z0-9_]*)\b", sql, re.I):
+    for m in re.finditer(r"\b(vig)\.(mvw_[a-z0-9_]+)\b", sql, re.I):
         found.add(f"{m.group(1).lower()}.{m.group(2).lower()}")
     return found
 
