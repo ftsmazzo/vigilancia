@@ -25,8 +25,11 @@ No primeiro deploy, defina no EasyPanel:
 - `BOOTSTRAP_SUPERADMIN_EMAIL`
 - `BOOTSTRAP_SUPERADMIN_PASSWORD`
 - `BOOTSTRAP_SUPERADMIN_NAME`
+- `BOOTSTRAP_SUPERADMIN_SYNC_PASSWORD` (opcional, `true` para **atualizar** a senha se o usuario ja existir)
 
 Ao iniciar a API, se esse email ainda nao existir no banco, o usuario `superadmin` e criado automaticamente.
+
+**Login falha?** Abra `GET /api/v1/auth/bootstrap-status` na URL da API. Se o usuario ja existia com outra senha, defina `BOOTSTRAP_SUPERADMIN_SYNC_PASSWORD=true`, reinicie a API, faca login e volte para `false`.
 
 ## Estrutura do projeto
 
@@ -58,6 +61,7 @@ Configure **Build Path** como `/` (raiz) e aponte o Dockerfile de cada servico:
 | `BOOTSTRAP_SUPERADMIN_EMAIL` | Primeiro deploy | Email do primeiro SuperAdmin. |
 | `BOOTSTRAP_SUPERADMIN_PASSWORD` | Primeiro deploy | Senha inicial (troque apos o primeiro login se desejar). |
 | `BOOTSTRAP_SUPERADMIN_NAME` | Nao | Nome exibido; padrao: `Super Admin`. |
+| `BOOTSTRAP_SUPERADMIN_SYNC_PASSWORD` | Nao | `true` atualiza senha do e-mail de bootstrap no restart (use uma vez apos mudar senha no painel). |
 
 **Dica:** no EasyPanel, use o hostname **interno** do servico PostgreSQL que o painel fornece (nao `localhost` dentro do container da API).
 

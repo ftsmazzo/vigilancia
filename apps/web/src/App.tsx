@@ -172,19 +172,30 @@ export default function App() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
       });
 
+      const raw = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error("Credenciais inválidas");
+        const detail = (raw as { detail?: unknown }).detail;
+        const msg =
+          typeof detail === "string"
+            ? detail
+            : response.status === 401
+              ? "Credenciais inválidas."
+              : `Erro ${response.status} na API.`;
+        setAuthError(msg);
+        return;
       }
 
-      const data: LoginResponse = await response.json();
+      const data = raw as LoginResponse;
       localStorage.setItem(TOKEN_KEY, data.access_token);
       setToken(data.access_token);
       setPassword("");
     } catch {
-      setAuthError("Login inválido. Verifique email e senha.");
+      setAuthError(
+        `Não foi possível contactar a API em ${API_URL}. Verifique VITE_API_URL no build do frontend, CORS e se a API está no ar.`
+      );
     }
   }
 

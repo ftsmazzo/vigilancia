@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from .config import settings
 from .db import Base, SessionLocal, engine
@@ -35,14 +35,23 @@ def bootstrap_superadmin() -> None:
     if not settings.bootstrap_superadmin_email or not settings.bootstrap_superadmin_password:
         return
 
+    email = settings.bootstrap_superadmin_email
+
     with SessionLocal() as db:
-        existing = db.scalar(select(User).where(User.email == settings.bootstrap_superadmin_email))
+        existing = db.scalar(select(User).where(func.lower(User.email) == email))
         if existing:
+            if settings.bootstrap_superadmin_sync_password:
+                existing.email = email
+                existing.password_hash = hash_password(settings.bootstrap_superadmin_password)
+                existing.role = UserRole.SUPERADMIN
+                if settings.bootstrap_superadmin_name:
+                    existing.name = settings.bootstrap_superadmin_name
+                db.commit()
             return
 
         user = User(
             name=settings.bootstrap_superadmin_name,
-            email=settings.bootstrap_superadmin_email,
+            email=email,
             password_hash=hash_password(settings.bootstrap_superadmin_password),
             role=UserRole.SUPERADMIN,
         )
