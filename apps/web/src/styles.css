@@ -1368,6 +1368,66 @@ button:not([class*="btn"]):disabled {
   background: rgba(255, 100, 100, 0.08);
 }
 
+.cras-select-wrap {
+  display: block;
+  margin-top: 1rem;
+  max-width: 36rem;
+}
+
+.cras-select-wrap span {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fx-subtle);
+  margin-bottom: 0.35rem;
+}
+
+.cras-select {
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid var(--fx-border);
+  background: var(--fx-surface, #12141a);
+  color: var(--fx-text);
+  font-size: 0.9rem;
+}
+
+.cras-table-wrap {
+  overflow-x: auto;
+  padding: 0.5rem 0;
+}
+
+.cras-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+}
+
+.cras-table th,
+.cras-table td {
+  padding: 0.5rem 0.65rem;
+  text-align: left;
+  border-bottom: 1px solid var(--fx-border);
+}
+
+.cras-table th {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fx-subtle);
+}
+
+.cras-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.cras-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
 .chart-bars {
   list-style: none;
   margin: 0;
