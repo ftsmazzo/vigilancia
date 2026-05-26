@@ -995,6 +995,20 @@ button:not([class*="btn"]):disabled {
   gap: 0.5rem;
 }
 
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--fx-accent, #5b8def);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.link-button:hover {
+  opacity: 0.85;
+}
+
 .vig-actions .btn,
 .vig-actions button {
   min-width: 12rem;

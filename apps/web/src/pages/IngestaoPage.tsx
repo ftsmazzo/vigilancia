@@ -393,7 +393,7 @@ export default function IngestaoPage({ token }: Props) {
     if (res.ok) {
       setSiscProgress(100);
       setSiscStatus(
-        `Tabela raw.sisc__sisc atualizada. ${String(res.data.row_count ?? 0)} linhas. Em seguida, atualize Pessoas e Família em Vigilância e qualifique em Convivência.`,
+        `Tabela raw.sisc__sisc atualizada. ${String(res.data.row_count ?? 0)} linhas. Próximo passo: Vigilância → aba «SISC Convivência» (atualize Pessoas e Família antes de qualificar).`,
       );
       setSiscFile(null);
       await loadRuns();

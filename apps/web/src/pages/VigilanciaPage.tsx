@@ -7,7 +7,22 @@ type Props = {
   token: string;
 };
 
-type VigilanciaTab = "familia" | "domicilio" | "pessoas";
+type VigilanciaTab = "familia" | "domicilio" | "pessoas" | "sisc";
+
+type SiscQualificacaoResponse = {
+  status: string;
+  row_count: number;
+  nis_distintos: number;
+  elapsed_ms: number;
+};
+
+type SiscKpisResumo = {
+  disponivel: boolean;
+  mensagem?: string;
+  total_linhas?: number;
+  nis_distintos?: number;
+  vinculo_cadu?: { vinculados: number; sem_vinculo: number; pct_vinculados: number };
+};
 
 type FamiliaRefreshResponse = {
   status: string;
@@ -49,6 +64,9 @@ export default function VigilanciaPage({ token }: Props) {
   const [familiaResult, setFamiliaResult] = useState<FamiliaRefreshResponse | null>(null);
   const [domicilioResult, setDomicilioResult] = useState<DomicilioRefreshResponse | null>(null);
   const [pessoasResult, setPessoasResult] = useState<PessoasRefreshResponse | null>(null);
+  const [siscResult, setSiscResult] = useState<SiscQualificacaoResponse | null>(null);
+  const [siscKpis, setSiscKpis] = useState<SiscKpisResumo | null>(null);
+  const [siscStatus, setSiscStatus] = useState("");
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -136,6 +154,57 @@ export default function VigilanciaPage({ token }: Props) {
     }
   }
 
+  async function loadSiscKpis() {
+    try {
+      const response = await fetch(`${API_URL}/api/v1/sisc/kpis`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = (await response.json().catch(() => ({}))) as SiscKpisResumo & { detail?: unknown };
+      if (response.ok) setSiscKpis(data);
+    } catch {
+      /* resumo opcional */
+    }
+  }
+
+  useEffect(() => {
+    if (tab === "sisc") void loadSiscKpis();
+  }, [tab, token]);
+
+  async function refreshSiscQualificacao() {
+    setError("");
+    setSiscResult(null);
+    setSiscStatus("");
+    setBusy(true);
+    startProgressAnimation();
+    try {
+      const response = await fetch(`${API_URL}/api/v1/sisc/qualificacao/refresh`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = (await response.json().catch(() => ({}))) as SiscQualificacaoResponse & { detail?: unknown };
+      if (!response.ok) {
+        const msg =
+          typeof data.detail === "string"
+            ? data.detail
+            : Array.isArray(data.detail)
+              ? JSON.stringify(data.detail)
+              : "Falha ao qualificar SISC × CADU.";
+        throw new Error(msg);
+      }
+      stopProgressAnimation(100);
+      setSiscResult(data);
+      setSiscStatus(
+        `Qualificação vig.mvw_sisc_qualificado: ${data.row_count.toLocaleString("pt-BR")} linhas, ${data.nis_distintos.toLocaleString("pt-BR")} NIS distintos.`,
+      );
+      await loadSiscKpis();
+    } catch (e) {
+      stopProgressAnimation(0);
+      setError(e instanceof Error ? e.message : "Erro inesperado.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function refreshDomicilio() {
     setError("");
     setDomicilioResult(null);
@@ -205,7 +274,18 @@ export default function VigilanciaPage({ token }: Props) {
             }}
           >
             <span className="ingestao-nav-label">Pessoas</span>
-            <span className="ingestao-nav-hint">Membros, escolaridade, rua (CADU)</span>
+            <span className="ingestao-nav-hint">Membros, NIS, escolaridade (CADU)</span>
+          </button>
+          <button
+            type="button"
+            className={`ingestao-nav-item ${tab === "sisc" ? "active" : ""}`}
+            onClick={() => {
+              setError("");
+              setTab("sisc");
+            }}
+          >
+            <span className="ingestao-nav-label">SISC Convivência</span>
+            <span className="ingestao-nav-hint">Atendidos × CADU (NIS)</span>
           </button>
         </nav>
         <Link to="/" className="ingestao-back">
@@ -342,10 +422,13 @@ export default function VigilanciaPage({ token }: Props) {
                 <strong>Todas as linhas</strong> de <code className="inline-code">raw.cecad__cadu</code> (uma por membro
                 no arquivo “tudo”), com nomes de campos simplificados e sanitização. O <strong>CPF</strong> (
                 <code className="inline-code">num_cpf</code>) é normalizado só com dígitos e preenchido com zeros à
-                esquerda até 11 posições quando a exportação cortou zeros. <strong>idade</strong> é calculada
-                em anos completos a partir de <code className="inline-code">data_nascimento</code> (parser igual ao das
-                outras views). <strong>cadu_row_id</strong> é o <code className="inline-code">id</code> da linha na RAW.
-                Tabela: <strong>vig.mvw_pessoas</strong>.
+                esquerda até 11 posições quando a exportação cortou zeros. O <strong>NIS</strong> (
+                <code className="inline-code">num_nis</code>) é normalizado com 11 dígitos — chave para cruzar com o{" "}
+                <Link to="/vigilancia" onClick={() => setTab("sisc")}>
+                  SISC Convivência
+                </Link>
+                . <strong>idade</strong> é calculada em anos completos a partir de{" "}
+                <code className="inline-code">data_nascimento</code>. Tabela: <strong>vig.mvw_pessoas</strong>.
               </p>
 
               <div className="vig-actions">
@@ -388,6 +471,91 @@ export default function VigilanciaPage({ token }: Props) {
                     </ul>
                   )}
                 </div>
+              )}
+            </section>
+          )}
+
+          {tab === "sisc" && (
+            <section className="ingestao-panel">
+              <h1>SISC — qualificação × CADU (NIS)</h1>
+              <p className="ingestao-desc">
+                Depois de ingerir o <code className="inline-code">SISC.csv</code> em{" "}
+                <Link to="/ingestao">Ingestão</Link>, gere as visões <strong>Pessoas</strong> e{" "}
+                <strong>Família</strong> (abas ao lado) e então clique abaixo para montar{" "}
+                <code className="inline-code">vig.mvw_sisc_qualificado</code> e liberar os indicadores em tela.
+              </p>
+
+              <ol className="vig-steps" style={{ margin: "0 0 1rem", paddingLeft: "1.25rem", color: "var(--fx-muted)" }}>
+                <li>Ingestão RAW → aba SISC Convivência</li>
+                <li>
+                  Aba <button type="button" className="link-button" onClick={() => setTab("pessoas")}>Pessoas</button> →
+                  Gerar / atualizar visão
+                </li>
+                <li>
+                  Aba <button type="button" className="link-button" onClick={() => setTab("familia")}>Família</button> →
+                  Gerar / atualizar visão
+                </li>
+                <li>Botão abaixo → qualificar e ver resumo (gráficos completos em Convivência)</li>
+              </ol>
+
+              <div className="vig-actions" style={{ flexWrap: "wrap", gap: "0.5rem" }}>
+                <button type="button" className="btn btn-primary" onClick={() => void refreshSiscQualificacao()} disabled={busy}>
+                  {busy ? "Qualificando…" : "Qualificar atendidos SISC × CADU"}
+                </button>
+                <Link to="/convivencia" className="btn btn-secondary" style={{ textDecoration: "none" }}>
+                  Abrir painel Convivência (gráficos)
+                </Link>
+              </div>
+
+              <div className="progress-wrap" aria-live="polite">
+                <div className="progress-track">
+                  <div className="progress-fill" style={{ width: `${progress}%` }} />
+                </div>
+                <small>
+                  {busy
+                    ? "Cruzando NIS com mvw_pessoas e mvw_familia…"
+                    : progress === 100
+                      ? "Concluído."
+                      : "Aguardando comando."}
+                </small>
+              </div>
+
+              {error && <p className="error">{error}</p>}
+              {siscStatus && <p className="status-ok">{siscStatus}</p>}
+
+              {siscResult && (
+                <div className="vig-result">
+                  <p className="ingestao-desc" style={{ marginBottom: 0 }}>
+                    Tempo: {(siscResult.elapsed_ms / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} s.
+                    Tabela <code className="inline-code">vig.mvw_sisc_qualificado</code> pronta para consulta e KPIs.
+                  </p>
+                </div>
+              )}
+
+              {siscKpis?.disponivel && (
+                <div className="kpi-grid" style={{ marginTop: "1.25rem" }}>
+                  <article className="kpi-card">
+                    <small>Atendimentos SISC</small>
+                    <strong>{(siscKpis.total_linhas ?? 0).toLocaleString("pt-BR")}</strong>
+                    <span>{(siscKpis.nis_distintos ?? 0).toLocaleString("pt-BR")} NIS distintos</span>
+                  </article>
+                  <article className="kpi-card kpi-card--accent">
+                    <small>Vinculados ao CADU</small>
+                    <strong>{(siscKpis.vinculo_cadu?.vinculados ?? 0).toLocaleString("pt-BR")}</strong>
+                    <span>{(siscKpis.vinculo_cadu?.pct_vinculados ?? 0).toLocaleString("pt-BR")}%</span>
+                  </article>
+                  <article className="kpi-card">
+                    <small>Sem vínculo (NIS)</small>
+                    <strong>{(siscKpis.vinculo_cadu?.sem_vinculo ?? 0).toLocaleString("pt-BR")}</strong>
+                    <span>Não encontrados em Pessoas</span>
+                  </article>
+                </div>
+              )}
+
+              {siscKpis && !siscKpis.disponivel && (
+                <p className="ingestao-desc" style={{ marginTop: "1rem" }}>
+                  {siscKpis.mensagem ?? "Ainda não há qualificação. Use o botão acima."}
+                </p>
               )}
             </section>
           )}
