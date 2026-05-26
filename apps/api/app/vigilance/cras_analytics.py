@@ -7,10 +7,27 @@ import re
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
+from .cadu_classificacao import (
+    cadu_sim,
+    classificacao_deficiencia_sql,
+    classificacao_escolaridade_sql,
+    classificacao_idade_sql,
+    classificacao_raca_sql,
+    tem_deficiencia_expr,
+)
 from .familia_mview import _table_exists
+
+SISC_MVIEW = "mvw_sisc_qualificado"
+PAINEL_CRAS_VERSAO = 2
 
 SEXO_MASC = "UPPER(COALESCE(pes.cod_sexo, '')) IN ('1', '01', 'M', 'MASCULINO')"
 SEXO_FEM = "UPPER(COALESCE(pes.cod_sexo, '')) IN ('2', '02', 'F', 'FEMININO')"
+
+IDADE_EXPR = classificacao_idade_sql("pes.idade")
+ESCOLARIDADE_EXPR = classificacao_escolaridade_sql("pes.grau_instrucao")
+RACA_EXPR = classificacao_raca_sql("pes.cod_raca_cor")
+DEFICIENCIA_EXPR = classificacao_deficiencia_sql("pes")
+TEM_DEFICIENCIA = tem_deficiencia_expr("pes")
 
 
 def _require_views(conn: Connection) -> None:
@@ -144,6 +161,41 @@ def cras_catalog_from_views(conn: Connection) -> list[dict]:
     return _sort_cras_items(out)
 
 
+def _fam_pes_cte(where_extra: str) -> str:
+    return f"""
+    WITH fam AS (
+      SELECT f.* FROM vig.mvw_familia f WHERE TRUE {where_extra}
+    ),
+    pes AS (
+      SELECT p.* FROM vig.mvw_pessoas p
+      INNER JOIN fam ON fam.codigo_familiar = p.codigo_familiar
+    )
+    """
+
+
+def _pessoas_bucket(
+    conn: Connection,
+    where_extra: str,
+    params: dict,
+    group_expr: str,
+    limit: int = 12,
+) -> list[dict]:
+    sql = f"""
+    {_fam_pes_cte(where_extra)}
+    SELECT
+      bucket AS rotulo,
+      COUNT(*)::bigint AS total,
+      ROUND(100.0 * COUNT(*) / NULLIF((SELECT COUNT(*) FROM pes), 0), 2) AS pct
+    FROM (
+      SELECT ({group_expr}) AS bucket FROM pes
+    ) sub
+    GROUP BY 1
+    ORDER BY total DESC
+    LIMIT :lim
+    """
+    return _bucket(conn, sql, params, limit)
+
+
 def _bucket(
     conn: Connection,
     sql: str,
@@ -159,6 +211,142 @@ def _bucket(
         }
         for r in rows
     ]
+
+
+def _sisc_disponivel(conn: Connection) -> bool:
+    return _table_exists(conn, "vig", SISC_MVIEW)
+
+
+def _sisc_filter_clause(cras_sel: str) -> tuple[str, dict]:
+    if cras_sel in ("", "__todos__"):
+        return "", {}
+    if cras_sel == "__sem_cras__":
+        return " AND (cras_codigo IS NULL OR btrim(cras_codigo::text) = '') ", {}
+    return " AND btrim(cras_codigo::text) = :sisc_cras_cod ", {"sisc_cras_cod": cras_sel}
+
+
+def _sisc_painel(conn: Connection, cras_sel: str) -> dict:
+    if not _sisc_disponivel(conn):
+        return {
+            "disponivel": False,
+            "mensagem": (
+                "Qualificação SISC não gerada. Em Convivência, clique em «Qualificar atendidos» "
+                "após ingerir o SISC.csv."
+            ),
+        }
+
+    where_sisc, params = _sisc_filter_clause(cras_sel)
+
+    if cras_sel in ("", "__todos__"):
+        rows = conn.execute(
+            text(
+                f"""
+                SELECT
+                  COALESCE(NULLIF(btrim(cras_codigo::text), ''), '__sem_codigo__') AS cras_cod,
+                  MAX(cras_nome) AS cras_nome,
+                  COUNT(*)::bigint AS atendimentos,
+                  COUNT(DISTINCT nis_norm)::bigint AS nis_distintos,
+                  COUNT(*) FILTER (WHERE classificacao_vinculo = 'vinculado_cadu')::bigint AS vinculados_cadu,
+                  COUNT(*) FILTER (WHERE classificacao_atendimento = 'prioritario')::bigint AS prioritarios,
+                  COUNT(*) FILTER (WHERE tem_deficiencia)::bigint AS com_deficiencia
+                FROM vig.{SISC_MVIEW}
+                GROUP BY 1
+                ORDER BY atendimentos DESC
+                """
+            )
+        ).mappings().all()
+        return {
+            "disponivel": True,
+            "modo": "municipal",
+            "tabela_por_cras": [
+                {
+                    "cras_cod": r["cras_cod"],
+                    "cras_nome": r["cras_nome"],
+                    "atendimentos": int(r["atendimentos"] or 0),
+                    "nis_distintos": int(r["nis_distintos"] or 0),
+                    "vinculados_cadu": int(r["vinculados_cadu"] or 0),
+                    "prioritarios": int(r["prioritarios"] or 0),
+                    "com_deficiencia": int(r["com_deficiencia"] or 0),
+                }
+                for r in rows
+            ],
+        }
+
+    resumo = conn.execute(
+        text(
+            f"""
+            SELECT
+              COUNT(*)::bigint AS atendimentos,
+              COUNT(DISTINCT nis_norm)::bigint AS nis_distintos,
+              COUNT(*) FILTER (WHERE classificacao_vinculo = 'vinculado_cadu')::bigint AS vinculados_cadu,
+              COUNT(*) FILTER (WHERE classificacao_atendimento = 'prioritario')::bigint AS prioritarios,
+              COUNT(*) FILTER (WHERE tem_deficiencia)::bigint AS com_deficiencia,
+              COUNT(*) FILTER (WHERE classificacao_vinculo = 'sem_vinculo_cadu')::bigint AS sem_vinculo_cadu
+            FROM vig.{SISC_MVIEW}
+            WHERE TRUE {where_sisc}
+            """
+        ),
+        params,
+    ).mappings().first()
+
+    por_faixa_sisc = _bucket(
+        conn,
+        f"""
+        SELECT
+          COALESCE(NULLIF(btrim(faixa_etaria::text), ''), '(não informado)') AS rotulo,
+          COUNT(*)::bigint AS total,
+          ROUND(
+            100.0 * COUNT(*) / NULLIF((SELECT COUNT(*) FROM vig.{SISC_MVIEW} WHERE TRUE {where_sisc}), 0),
+            2
+          ) AS pct
+        FROM vig.{SISC_MVIEW}
+        WHERE TRUE {where_sisc}
+        GROUP BY 1
+        ORDER BY total DESC
+        LIMIT :lim
+        """,
+        params,
+        10,
+    )
+
+    por_grupo_sisc = _bucket(
+        conn,
+        f"""
+        SELECT
+          COALESCE(NULLIF(btrim(grupo::text), ''), '(sem grupo)') AS rotulo,
+          COUNT(*)::bigint AS total,
+          ROUND(
+            100.0 * COUNT(*) / NULLIF((SELECT COUNT(*) FROM vig.{SISC_MVIEW} WHERE TRUE {where_sisc}), 0),
+            2
+          ) AS pct
+        FROM vig.{SISC_MVIEW}
+        WHERE TRUE {where_sisc}
+        GROUP BY 1
+        ORDER BY total DESC
+        LIMIT :lim
+        """,
+        params,
+        8,
+    )
+
+    r = resumo or {}
+    atend = int(r.get("atendimentos") or 0)
+    vinc = int(r.get("vinculados_cadu") or 0)
+    return {
+        "disponivel": True,
+        "modo": "unidade",
+        "resumo": {
+            "atendimentos": atend,
+            "nis_distintos": int(r.get("nis_distintos") or 0),
+            "vinculados_cadu": vinc,
+            "pct_vinculados_cadu": round(100.0 * vinc / atend, 2) if atend else 0.0,
+            "prioritarios": int(r.get("prioritarios") or 0),
+            "com_deficiencia": int(r.get("com_deficiencia") or 0),
+            "sem_vinculo_cadu": int(r.get("sem_vinculo_cadu") or 0),
+        },
+        "por_faixa_etaria": por_faixa_sisc,
+        "por_grupo": por_grupo_sisc,
+    }
 
 
 def cras_painel_from_views(conn: Connection, cras_cod: str | None = None) -> dict:
@@ -197,6 +385,9 @@ def cras_painel_from_views(conn: Connection, cras_cod: str | None = None) -> dic
               COUNT(DISTINCT fam.codigo_familiar) FILTER (
                 WHERE fam.meses_desatualizado IS NOT NULL AND fam.meses_desatualizado <= 24
               )::bigint AS familias_tac_24m,
+              COUNT(pes.cadu_row_id) FILTER (WHERE {TEM_DEFICIENCIA})::bigint AS pessoas_com_deficiencia,
+              COUNT(pes.cadu_row_id) FILTER (WHERE {cadu_sim('pes.marc_sit_rua')})::bigint AS pessoas_situacao_rua,
+              COUNT(pes.cadu_row_id) FILTER (WHERE {cadu_sim('pes.ind_atend_cras')})::bigint AS pessoas_atendidas_cras,
               MAX({cn}) AS cras_nome,
               MAX({ck}) AS cras_cod_raw
             FROM fam
@@ -227,14 +418,20 @@ def cras_painel_from_views(conn: Connection, cras_cod: str | None = None) -> dic
         cod_exib = cras_sel
 
     denom_fam = familias or 1
+    pessoas_def = int(base.get("pessoas_com_deficiencia") or 0)
     payload: dict = {
         "disponivel": True,
+        "painel_versao": PAINEL_CRAS_VERSAO,
         "cras_selecionado": cod_exib,
         "cras_titulo": titulo,
         "dicionario": {
             "codigo_campo": "d.cod_unidade_territorial_fam → vig.mvw_familia.num_cras",
             "nome_campo": "d.nom_unidade_territorial_fam → vig.mvw_familia.nom_cras",
             "fonte": "Cadastro Único (visões Família + Pessoas)",
+            "campos_pessoa": (
+                "p.dta_nasc_pessoa/idade, p.cod_sexo_pessoa, p.cod_raca_cor_pessoa, "
+                "p.grau_instrucao, p.cod_deficiencia_memb, p.ind_atend_cras_memb, p.marc_sit_rua"
+            ),
         },
         "resumo": {
             "familias": familias,
@@ -249,12 +446,21 @@ def cras_painel_from_views(conn: Connection, cras_cod: str | None = None) -> dic
             "familias_renda_219_706": int(base["familias_renda_219_706"] or 0),
             "familias_tac_24m": int(base["familias_tac_24m"] or 0),
             "pct_renda_ate_218": round(100.0 * int(base["familias_renda_ate_218"] or 0) / denom_fam, 2),
+            "pessoas_com_deficiencia": pessoas_def,
+            "pct_pessoas_deficiencia": round(100.0 * pessoas_def / pessoas, 2) if pessoas else 0.0,
+            "pessoas_situacao_rua": int(base.get("pessoas_situacao_rua") or 0),
+            "pessoas_atendidas_cras": int(base.get("pessoas_atendidas_cras") or 0),
         },
+        "por_faixa_idade": _pessoas_bucket(conn, where_extra, params, IDADE_EXPR, 8),
+        "sisc": _sisc_painel(conn, cras_sel),
     }
 
     if cras_sel in ("", "__todos__"):
         payload["tabela_cras"] = cras_catalog_from_views(conn)
     else:
+        payload["por_escolaridade"] = _pessoas_bucket(conn, where_extra, params, ESCOLARIDADE_EXPR, 10)
+        payload["por_deficiencia"] = _pessoas_bucket(conn, where_extra, params, DEFICIENCIA_EXPR, 10)
+        payload["por_raca"] = _pessoas_bucket(conn, where_extra, params, RACA_EXPR, 8)
         payload["por_bairro"] = _bucket(
             conn,
             f"""
