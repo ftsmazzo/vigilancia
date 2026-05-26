@@ -5,6 +5,8 @@ import PainelIndicadoresInicio from "./pages/PainelIndicadoresInicio";
 import UsuariosPage from "./pages/UsuariosPage";
 import ConvivenciaPage from "./pages/ConvivenciaPage";
 import CrasPage from "./pages/CrasPage";
+import AssistPage from "./pages/AssistPage";
+import MunicipioPage from "./pages/MunicipioPage";
 import VigilanciaPage from "./pages/VigilanciaPage";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -73,6 +75,12 @@ function AppShell({
           </NavLink>
           <NavLink to="/cras" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             CRAS
+          </NavLink>
+          <NavLink to="/assistente" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+            Assistente
+          </NavLink>
+          <NavLink to="/municipio" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+            Município
           </NavLink>
           {me?.role === "superadmin" && (
             <NavLink to="/usuarios" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
@@ -368,6 +376,37 @@ export default function App() {
               token ? (
                 <AppShell loadingMe={loadingMe} me={me} onLogout={handleLogout}>
                   <CrasPage token={token} />
+                </AppShell>
+              ) : (
+                <Navigate to="/" replace />
+              )
+            }
+          />
+          <Route
+            path="/assistente"
+            element={
+              token ? (
+                <AppShell loadingMe={loadingMe} me={me} onLogout={handleLogout}>
+                  <AssistPage token={token} />
+                </AppShell>
+              ) : (
+                <Navigate to="/" replace />
+              )
+            }
+          />
+          <Route
+            path="/municipio"
+            element={
+              token ? (
+                <AppShell loadingMe={loadingMe} me={me} onLogout={handleLogout}>
+                  <MunicipioPage
+                    token={token}
+                    canEdit={
+                      me?.role === "superadmin" ||
+                      me?.role === "gestor" ||
+                      me?.role === "admin_local"
+                    }
+                  />
                 </AppShell>
               ) : (
                 <Navigate to="/" replace />

@@ -58,6 +58,9 @@ Configure **Build Path** como `/` (raiz) e aponte o Dockerfile de cada servico:
 | `JWT_ALGORITHM` | Nao | Padrao: `HS256` |
 | `JWT_EXPIRE_MINUTES` | Nao | Padrao: `60` |
 | `REDIS_URL` | Nao por enquanto | Ex.: `redis://host-interno:6379/0` (reservado para filas de ingestao). |
+| `ASSIST_LLM_API_KEY` | Assistente IA | Chave OpenAI (ou compatível). Sem ela, `/assistente` retorna 503. |
+| `ASSIST_LLM_BASE_URL` | Nao | Padrao: `https://api.openai.com/v1` (Ollama, Azure OpenAI, etc.). |
+| `ASSIST_LLM_MODEL` | Nao | Padrao: `gpt-4o-mini`. |
 | `BOOTSTRAP_SUPERADMIN_EMAIL` | Primeiro deploy | Email do primeiro SuperAdmin. |
 | `BOOTSTRAP_SUPERADMIN_PASSWORD` | Primeiro deploy | Senha inicial (troque apos o primeiro login se desejar). |
 | `BOOTSTRAP_SUPERADMIN_NAME` | Nao | Nome exibido; padrao: `Super Admin`. |

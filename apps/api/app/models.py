@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, JSON, String
+from sqlalchemy import DateTime, Enum, ForeignKey, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
@@ -44,3 +44,40 @@ class IngestionRun(Base):
     created_by_email: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class AssistSession(Base):
+    __tablename__ = "assist_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class MunicipioContext(Base):
+    """Caracterização do município e rede de serviços (contexto para o assistente)."""
+
+    __tablename__ = "municipio_context"
+
+    id: Mapped[int] = mapped_column(primary_key=True, default=1)
+    nome_municipio: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    uf: Mapped[str] = mapped_column(String(2), nullable=False, default="")
+    codigo_ibge: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    caracterizacao: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    servicos: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_by_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
+class AssistMessage(Base):
+    __tablename__ = "assist_messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("assist_sessions.id"), nullable=False, index=True
+    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    sql_executed: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)

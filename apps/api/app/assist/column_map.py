@@ -1,0 +1,59 @@
+"""Mapeamento colunas das views vig → campos do dicionário CADU (dicionariotudo.csv)."""
+
+from __future__ import annotations
+
+# view → { coluna_na_view: [campos no CSV, prefixo d. ou p.] }
+VIEW_COLUMN_MAP: dict[str, dict[str, list[str]]] = {
+    "vig.mvw_familia": {
+        "codigo_familiar": ["d.cod_familiar_fam"],
+        "data_cadastro": ["d.dat_cadastramento_fam"],
+        "data_atualizacao": ["d.dat_atual_fam"],
+        "tipo_coleta": ["d.cod_forma_coleta_fam"],
+        "data_entrevista": ["d.dta_entrevista_fam"],
+        "bairro": ["d.nom_localidade_fam"],
+        "endereco": ["d.nom_logradouro_fam", "d.nom_tip_logradouro_fam"],
+        "cep": ["d.num_cep_logradouro_fam"],
+        "num_cras": ["d.cod_unidade_territorial_fam"],
+        "nom_cras": ["d.nom_unidade_territorial_fam"],
+        "renda_per_capita": ["d.vlr_renda_media_fam"],
+        "faixa_renda": ["d.fx_rfpc"],
+        "renda_total": ["d.vlr_renda_total_fam"],
+        "marc_pbf_cadu": ["d.marc_pbf"],
+        "meses_desatualizado": ["d.qtde_meses_desat_cat"],
+        "marc_pbf": ["d.marc_pbf"],
+    },
+    "vig.mvw_pessoas": {
+        "codigo_familiar": ["d.cod_familiar_fam"],
+        "num_nis": ["p.num_nis_pessoa_atual"],
+        "num_cpf": ["p.num_cpf_pessoa"],
+        "nome": ["p.nom_pessoa"],
+        "data_nascimento": ["p.dta_nasc_pessoa"],
+        "cod_sexo": ["p.cod_sexo_pessoa"],
+        "cod_raca_cor": ["p.cod_raca_cor_pessoa"],
+        "grau_instrucao": ["p.grau_instrucao"],
+        "cod_deficiencia": ["p.cod_deficiencia_memb"],
+        "marc_sit_rua": ["p.cod_situacao_rua_pessoa"],
+        "ind_frequenta_escola": ["p.ind_frequenta_escola_memb"],
+        "ind_atend_cras": ["p.ind_atend_cras_memb"],
+        "ind_trabalho_infantil": ["p.ind_trabalho_infantil_pessoa"],
+        "idade": ["p.dta_nasc_pessoa"],
+    },
+    "vig.mvw_familia_domicilio": {
+        "codigo_familiar": ["d.cod_familiar_fam"],
+        "situacao_domicilio": ["d.cod_local_domic_fam"],
+        "tipo_piso": ["d.cod_material_piso_fam"],
+        "tipo_parede": ["d.cod_material_domic_fam"],
+        "agua_canalizada": ["d.cod_agua_canalizada_fam"],
+        "existencia_banheiro": ["d.cod_banheiro_domic_fam"],
+        "inseguranca_alimentar": ["d.ind_risco_scl_inseg_alim"],
+        "risco_violacao_direitos": ["d.ind_risco_scl_vlco_drts"],
+        "total_pessoas": ["d.qtd_pessoas_domic_fam"],
+    },
+    "vig.mvw_sisc_qualificado": {
+        "nis_norm": ["p.num_nis_pessoa_atual"],
+        "classificacao_vinculo": [],
+        "classificacao_sexo": ["p.cod_sexo_pessoa"],
+        "classificacao_raca": ["p.cod_raca_cor_pessoa"],
+        "renda_per_capita": ["d.vlr_renda_media_fam"],
+    },
+}

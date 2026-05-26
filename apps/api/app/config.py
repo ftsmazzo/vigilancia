@@ -38,5 +38,13 @@ class Settings(BaseSettings):
     # Origens CORS permitidas, separadas por vírgula. Use "*" só em desenvolvimento.
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
+    # Assistente de vigilância (text-to-SQL + resposta)
+    assist_llm_api_key: str | None = None
+    assist_llm_base_url: str = "https://api.openai.com/v1"
+    assist_llm_model: str = "gpt-4o-mini"
+
+    # Dicionário CADU (dicionariotudo.csv) para o assistente
+    cadu_dictionary_path: str | None = None
+
 
 settings = Settings()

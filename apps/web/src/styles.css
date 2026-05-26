@@ -1535,3 +1535,185 @@ button:not([class*="btn"]):disabled {
     grid-template-columns: 1fr;
   }
 }
+
+/* Assistente de vigilância */
+.assist-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) 1fr;
+  gap: 1rem;
+  margin-top: 1rem;
+  align-items: start;
+}
+
+.assist-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+  padding: 0.5rem 0;
+  margin-bottom: 1rem;
+}
+
+.assist-bubble {
+  padding: 0.75rem 1rem;
+  border-radius: var(--fx-radius, 12px);
+  border: 1px solid var(--fx-border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.assist-bubble--user {
+  margin-left: 2rem;
+  border-color: rgba(99, 179, 237, 0.35);
+}
+
+.assist-bubble--bot {
+  margin-right: 2rem;
+}
+
+.assist-bubble-label {
+  display: block;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.65;
+  margin-bottom: 0.35rem;
+}
+
+.assist-bubble-text {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.assist-sql-details {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+}
+
+.assist-sql-pre {
+  margin: 0.35rem 0 0;
+  padding: 0.5rem;
+  overflow-x: auto;
+  font-size: 0.75rem;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 6px;
+}
+
+.assist-form {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+
+.assist-input {
+  flex: 1;
+  resize: vertical;
+  min-height: 2.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--fx-border);
+  background: var(--fx-surface, #0f1419);
+  color: inherit;
+  font: inherit;
+}
+
+.assist-suggestion-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.assist-suggestion-btn {
+  width: 100%;
+  text-align: left;
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.assist-empty,
+.assist-loading {
+  opacity: 0.7;
+  font-size: 0.9rem;
+}
+
+.assist-hint code {
+  font-size: 0.75rem;
+}
+
+@media (max-width: 768px) {
+  .assist-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .assist-bubble--user,
+  .assist-bubble--bot {
+    margin-left: 0;
+    margin-right: 0;
+  }
+}
+
+.municipio-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.municipio-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.municipio-grid {
+  display: grid;
+  grid-template-columns: 2fr 80px 140px;
+  gap: 0.75rem;
+}
+
+.municipio-field-block textarea,
+.municipio-grid input,
+.municipio-servico-card input {
+  width: 100%;
+  margin-top: 0.25rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--fx-border);
+  background: var(--fx-surface, #0f1419);
+  color: inherit;
+  font: inherit;
+}
+
+.municipio-servicos-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.municipio-servico-card {
+  padding: 0.75rem;
+  border: 1px dashed var(--fx-border);
+  border-radius: 8px;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.municipio-remove {
+  justify-self: start;
+}
+
+p.success {
+  color: var(--fx-accent, #6ee7b7);
+  margin: 0.5rem 0;
+}
+
+@media (max-width: 768px) {
+  .municipio-grid {
+    grid-template-columns: 1fr;
+  }
+}
