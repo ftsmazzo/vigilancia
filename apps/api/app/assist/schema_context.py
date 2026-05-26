@@ -17,7 +17,8 @@ CATALOG_STATIC = """
 - codigo_familiar (text, chave familiar)
 - num_cras, nom_cras (unidade territorial / CRAS de referência)
 - renda_per_capita (numeric), faixa_renda (text), renda_total
-- marc_pbf (boolean, na folha PBF), marc_pbf_cadu (marcador CADU)
+- marc_pbf (boolean: família do CADU presente na folha SIBEC importada)
+- marc_pbf_cadu (texto: marcador "recebe PBF" no CADU — não é a mesma coisa que a folha de pagamento)
 - bairro, endereco, cep
 - meses_desatualizado (int), data_atualizacao, data_cadastro
 
@@ -43,6 +44,11 @@ CATALOG_STATIC = """
 - classificacao_sexo, classificacao_raca, classificacao_escolaridade
 - classificacao_faixa_idade, classificacao_deficiencia, tem_deficiencia (bool)
 - renda_per_capita (da família CADU quando vinculado)
+
+## Métricas oficiais (alinhar com o painel Início)
+- **Famílias na folha PBF**: contagem na base SIBEC (`raw.sibec__programa_bolsa_familia`, última competência) — pode ser maior que `marc_pbf` no CADU.
+- **% sobre CADU**: folha PBF ÷ total `vig.mvw_familia`.
+- **Marcador PBF no CADU**: filtrar `marc_pbf_cadu`, não confundir com folha.
 
 ## Regras de junção
 - Família ↔ pessoa: p.codigo_familiar = f.codigo_familiar

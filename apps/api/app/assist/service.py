@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from ..models import User
 from .llm import AssistLlmError, AssistNotConfiguredError, chat_completion
 from .memory import append_message, get_or_create_session, load_history
+from .canonical_metrics import try_canonical_metric
 from .schema_context import build_schema_context
 from .sql_guard import SqlGuardError, wrap_limit
 
@@ -24,7 +25,8 @@ Regras:
 - Apenas SELECT; uma instrução; sem ponto e vírgula no final.
 - Use somente: vig.mvw_familia (alias f), vig.mvw_pessoas (p), vig.mvw_familia_domicilio (d), vig.mvw_sisc_qualificado (s).
 - Contagens de famílias: COUNT(DISTINCT f.codigo_familiar).
-- PBF na família: COALESCE(f.marc_pbf, false) = true OR btrim(COALESCE(f.marc_pbf_cadu::text, '')) IN ('1', '01', 'sim', 's', 'true').
+- Famílias na FOLHA de pagamento (KPI do painel): COALESCE(f.marc_pbf, false) = true (join SIBEC↔CADU). Não some marc_pbf_cadu.
+- Marcador PBF só no CADU (não é folha): btrim(COALESCE(f.marc_pbf_cadu::text, '')) IN ('1', '01', 'sim', 's', 'true').
 - Mulher: p.cod_sexo = '2'. Criança até 6 anos: p.idade <= 6 AND p.idade IS NOT NULL.
 - Se a pergunta referir filtro anterior ("dessas", "entre elas"), aplique os mesmos filtros da conversa.
 - Prefira resultados agregados (COUNT, SUM) em vez de listar linhas.
@@ -155,6 +157,25 @@ def chat_turn(
                 "row_count": 0,
                 "preview": [],
                 "mode": "chat",
+            }
+
+        canonical = try_canonical_metric(conn, message)
+        if canonical:
+            answer = canonical["answer"]
+            append_message(
+                db,
+                session.id,
+                "assistant",
+                answer,
+                sql_executed=canonical.get("sql"),
+            )
+            return {
+                "session_id": session.id,
+                "answer": answer,
+                "sql": canonical.get("sql"),
+                "row_count": canonical.get("row_count", 0),
+                "preview": canonical.get("preview") or [],
+                "mode": canonical.get("mode", "canonical"),
             }
 
         sql_messages: list[dict[str, str]] = [
