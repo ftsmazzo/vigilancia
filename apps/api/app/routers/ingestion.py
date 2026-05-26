@@ -20,6 +20,9 @@ ALLOWED_EXTENSIONS = {".csv", ".xlsx"}
 ALLOWED_STRATEGIES = {"replace", "append"}
 COMPETENCIA_PATTERN = re.compile(r"^\d{6}$")
 
+# Limite de identificadores no PostgreSQL (bytes; nomes só usam ASCII após normalização).
+PG_IDENTIFIER_MAX_LEN = 63
+
 # Cargas mensais / por competência (mesmo fluxo: competência obrigatória + coluna competencia na RAW).
 DATASETS_REQUIRING_COMPETENCIA = frozenset(
     {"manutencoes", "programa_bolsa_familia", "beneficio_prestacao_continuada"}
@@ -35,6 +38,32 @@ def _normalize_identifier(value: str) -> str:
     if normalized[0].isdigit():
         normalized = f"c_{normalized}"
     return normalized
+
+
+def _truncate_pg_identifier(name: str, max_len: int = PG_IDENTIFIER_MAX_LEN) -> str:
+    if len(name) <= max_len:
+        return name
+    trimmed = name[:max_len].rstrip("_")
+    return trimmed or name[:max_len]
+
+
+def _unique_pg_column_name(header: str, used_names: set[str], reserved: set[str]) -> str:
+    """Nome de coluna único, compatível com o limite de 63 caracteres do PostgreSQL."""
+    base = _normalize_identifier(header or "coluna")
+    if base in reserved:
+        base = _truncate_pg_identifier(f"{base}_origem")
+    else:
+        base = _truncate_pg_identifier(base)
+
+    candidate = base
+    suffix = 1
+    while candidate in used_names or candidate in reserved:
+        suffix += 1
+        suf = f"_{suffix}"
+        prefix = base[: PG_IDENTIFIER_MAX_LEN - len(suf)].rstrip("_")
+        candidate = f"{prefix}{suf}"
+    used_names.add(candidate)
+    return candidate
 
 
 def _quoted_identifier(value: str) -> str:
@@ -148,22 +177,23 @@ async def import_raw_table(
     else:
         headers, rows = _parse_xlsx(content)
 
+    if len(headers) == 1 and len(headers[0]) > 120:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "O arquivo parece ter apenas uma coluna no cabeçalho (texto muito longo). "
+                f"Confira o delimitador CSV (enviado: {csv_delimiter!r}). "
+                "Arquivos BPC costumam usar ponto e vírgula (;)."
+            ),
+        )
+
     target_table = f"{normalized_source}__{normalized_dataset}"
 
     normalized_map: dict[str, str] = {}
     used_names: set[str] = set()
-    reserved = {"id"}  # PK BIGSERIAL da tabela RAW
+    reserved = {"id", "competencia"}  # colunas de sistema na tabela RAW
     for header in headers:
-        base = _normalize_identifier(header or "coluna")
-        if base in reserved:
-            base = f"{base}_origem"
-        candidate = base
-        suffix = 1
-        while candidate in used_names or candidate in reserved:
-            suffix += 1
-            candidate = f"{base}_{suffix}"
-        used_names.add(candidate)
-        normalized_map[header] = candidate
+        normalized_map[header] = _unique_pg_column_name(header, used_names, reserved)
 
     run = IngestionRun(
         source=source,
@@ -204,21 +234,23 @@ async def import_raw_table(
                 {"table_name": target_table},
             )
             existing_columns = {row[0] for row in existing_columns_result}
-            for normalized_column in normalized_map.values():
+            for normalized_column in dict.fromkeys(normalized_map.values()):
                 if normalized_column not in existing_columns:
                     connection.execute(
                         text(
                             f"ALTER TABLE raw.{_quoted_identifier(target_table)} "
-                            f"ADD COLUMN {_quoted_identifier(normalized_column)} TEXT"
+                            f"ADD COLUMN IF NOT EXISTS {_quoted_identifier(normalized_column)} TEXT"
                         )
                     )
+                    existing_columns.add(normalized_column)
             if competencia and "competencia" not in existing_columns:
                 connection.execute(
                     text(
                         f"ALTER TABLE raw.{_quoted_identifier(target_table)} "
-                        "ADD COLUMN competencia TEXT"
+                        "ADD COLUMN IF NOT EXISTS competencia TEXT"
                     )
                 )
+                existing_columns.add("competencia")
 
             if strategy == "replace":
                 connection.execute(text(f"TRUNCATE TABLE raw.{_quoted_identifier(target_table)}"))
