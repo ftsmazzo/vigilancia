@@ -7,7 +7,7 @@ import re
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-from ..vigilance.familia_mview import bolsa_folha_kpis_from_raw
+from ..vigilance.familia_mview import _table_exists, bolsa_folha_kpis_from_raw
 
 _FOLHA_PBF = re.compile(
     r"(?:"
@@ -29,7 +29,106 @@ def _fmt_int(n: int) -> str:
     return f"{n:,}".replace(",", ".")
 
 
-def try_canonical_metric(conn: Connection, message: str) -> dict | None:
+_SISC = re.compile(r"sisc|conviv|scfv|servi[cç]o\s+de\s+conviv", re.I)
+_ADOL_12_17 = re.compile(r"12\s*(?:a|-|á)\s*17|adolesc|12\s*17", re.I)
+_PBF_CTX = re.compile(r"pbf|bolsa\s+fam|folha", re.I)
+
+
+def _conversation_blob(message: str, transcript: list[dict[str, str]] | None) -> str:
+    parts = [m.get("content", "") for m in (transcript or [])]
+    parts.append(message)
+    return " ".join(parts)
+
+
+def _try_sisc_cross(
+    conn: Connection,
+    message: str,
+    transcript: list[dict[str, str]] | None,
+) -> dict | None:
+    blob = _conversation_blob(message, transcript)
+    if not _SISC.search(blob):
+        return None
+    if not _table_exists(conn, "vig", "mvw_sisc_qualificado"):
+        return {
+            "answer": (
+                "A base do Serviço de Convivência (SISC) ainda não está qualificada. "
+                "Vá em **Convivência** → **Qualificar atendidos** (após ingestão do SISC.csv) "
+                "e tente novamente."
+            ),
+            "sql": None,
+            "row_count": 0,
+            "preview": [],
+            "mode": "canonical",
+            "metric": "sisc_indisponivel",
+        }
+
+    wheres = ["s.classificacao_vinculo = 'vinculado_cadu'"]
+    if _ADOL_12_17.search(blob):
+        wheres.append("s.classificacao_faixa_idade = 'adolescente_12_17'")
+    if _PBF_CTX.search(blob):
+        wheres.append("COALESCE(s.familia_na_folha_pbf, FALSE)")
+
+    where_sql = " AND ".join(wheres)
+    count_children = bool(
+        re.search(r"criança|crianca|adolesc|pessoas|nis|atendidos", message, re.I)
+        or (_ADOL_12_17.search(blob) and re.search(r"quantas|quantos", message, re.I))
+    )
+
+    if count_children:
+        sql = f"""
+            SELECT COUNT(DISTINCT s.nis_norm)::bigint AS total
+            FROM vig.mvw_sisc_qualificado s
+            INNER JOIN vig.mvw_familia f ON f.codigo_familiar = s.codigo_familiar
+            WHERE {where_sql}
+        """
+        row = conn.execute(text(sql)).mappings().first()
+        n = int((row or {}).get("total") or 0)
+        filtros = []
+        if _PBF_CTX.search(blob):
+            filtros.append("famílias na folha PBF (CADU)")
+        if _ADOL_12_17.search(blob):
+            filtros.append("faixa etária 12–17 anos")
+        ctx = " e ".join(filtros) if filtros else "filtros da conversa"
+        answer = (
+            f"Há **{_fmt_int(n)}** crianças/adolescentes (**NIS distintos**) no **Serviço de Convivência (SISC)** "
+            f"vinculados ao CADU, com {ctx}.\n\n"
+            "Fonte: `vig.mvw_sisc_qualificado` (matrícula SISC × NIS × CADU). "
+            "Isso não usa o campo CADU `ind_atend_cras` (atendimento CRAS declarado na entrevista)."
+        )
+        metric = "criancas_sisc"
+    else:
+        sql = f"""
+            SELECT COUNT(DISTINCT f.codigo_familiar)::bigint AS total
+            FROM vig.mvw_sisc_qualificado s
+            INNER JOIN vig.mvw_familia f ON f.codigo_familiar = s.codigo_familiar
+            WHERE {where_sql}
+        """
+        row = conn.execute(text(sql)).mappings().first()
+        n = int((row or {}).get("total") or 0)
+        answer = (
+            f"Há **{_fmt_int(n)}** famílias com pelo menos um integrante no **SISC (Convivência)** "
+            f"vinculado ao CADU"
+            + (" e na folha PBF" if _PBF_CTX.search(blob) else "")
+            + (", com adolescentes 12–17" if _ADOL_12_17.search(blob) else "")
+            + "."
+        )
+        metric = "familias_sisc"
+
+    return {
+        "answer": answer,
+        "sql": " ".join(sql.split()),
+        "row_count": 1,
+        "preview": [{"total": n}],
+        "mode": "canonical",
+        "metric": metric,
+    }
+
+
+def try_canonical_metric(
+    conn: Connection,
+    message: str,
+    transcript: list[dict[str, str]] | None = None,
+) -> dict | None:
     """
     Resposta sem LLM/SQL quando a pergunta bate com KPI oficial do painel.
     Retorna dict compatível com chat_turn ou None.
@@ -37,6 +136,10 @@ def try_canonical_metric(conn: Connection, message: str) -> dict | None:
     text_msg = message.strip()
     if not text_msg:
         return None
+
+    sisc = _try_sisc_cross(conn, message, transcript)
+    if sisc:
+        return sisc
 
     total_familias_cadu = int(
         conn.execute(text("SELECT COUNT(*)::bigint FROM vig.mvw_familia")).scalar() or 0

@@ -29,7 +29,7 @@ CATALOG_STATIC = """
 - cod_raca_cor ('1' branca … '5' indígena)
 - grau_instrucao ('1' analfabeto … '7' superior completo)
 - cod_deficiencia, ind_def_* (flags deficiência)
-- marc_sit_rua, ind_frequenta_escola, ind_atend_cras
+- marc_sit_rua, ind_frequenta_escola, ind_atend_cras (texto '1'/'0' — atendido CRAS no CADU, ≠ SISC)
 - ind_trabalho_infantil
 
 ### vig.mvw_familia_domicilio — moradia e riscos por família
@@ -38,9 +38,12 @@ CATALOG_STATIC = """
 - inseguranca_alimentar, risco_violacao_direitos, gpte
 - total_pessoas (contagem CPF na família)
 
-### vig.mvw_sisc_qualificado — atendidos SISC × CADU (após qualificação)
-- nis_norm, grupo, cras_nome, cras_codigo, faixa_etaria
+### vig.mvw_sisc_qualificado — atendidos SISC × CADU (Serviço de Convivência; após qualificar)
+- nis_norm (NIS do atendido), codigo_familiar (quando vinculado ao CADU)
+- grupo, cras_nome, cras_codigo, faixa_etaria (texto SISC)
 - classificacao_vinculo ('vinculado_cadu' | 'sem_vinculo_cadu')
+- classificacao_faixa_idade ('adolescente_12_17', 'crianca_0_11', …)
+- familia_na_folha_pbf (boolean — família do atendido na folha PBF)
 - classificacao_sexo, classificacao_raca, classificacao_escolaridade
 - classificacao_faixa_idade, classificacao_deficiencia, tem_deficiencia (bool)
 - renda_per_capita (da família CADU quando vinculado)

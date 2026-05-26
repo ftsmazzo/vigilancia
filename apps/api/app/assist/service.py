@@ -18,6 +18,7 @@ from .memory import append_message, get_or_create_session, load_history
 from .canonical_metrics import try_canonical_metric
 from .schema_context import build_schema_context
 from .sql_guard import SqlGuardError, wrap_limit
+from .sql_sanitize import sanitize_llm_sql
 
 SQL_SYSTEM = """Você gera SQL PostgreSQL somente leitura para vigilância socioassistencial municipal.
 Responda APENAS com JSON válido: {"sql": "SELECT ...", "nota": "breve justificativa"}.
@@ -30,7 +31,12 @@ Regras:
 - Mulher: p.cod_sexo = '2'. Criança até 6 anos: p.idade <= 6 AND p.idade IS NOT NULL.
 - Se a pergunta referir filtro anterior ("dessas", "entre elas"), aplique os mesmos filtros da conversa.
 - Prefira resultados agregados (COUNT, SUM) em vez de listar linhas.
-- CRAS: f.num_cras ou f.nom_cras ILIKE '%texto%'.
+- CRAS territorial: f.num_cras ou f.nom_cras ILIKE '%texto%'.
+- Campos CADU ind_* / marc_sit_rua em p.: são texto ('1'/'0'). NUNCA use = true/false. Sim: btrim(COALESCE(p.ind_atend_cras::text,'')) IN ('1','01','sim','s','true').
+- Serviço de Convivência / SISC / SCFV: use vig.mvw_sisc_qualificado (s), uma linha por NIS atendido. NÃO use p.ind_atend_cras (isso é flag CADU "atendido por CRAS", não matrícula SISC).
+- SISC × família: JOIN s.codigo_familiar = f.codigo_familiar. Adolescente 12–17: s.classificacao_faixa_idade = 'adolescente_12_17'.
+- PBF na pergunta anterior ("dessas"): mantenha COALESCE(f.marc_pbf, false) ou s.familia_na_folha_pbf e faixa etária 12–17.
+- Contar crianças/atendidos no SISC: COUNT(DISTINCT s.nis_norm). Contar famílias: COUNT(DISTINCT f.codigo_familiar).
 """
 
 ANSWER_SYSTEM = """Você é analista de vigilância socioassistencial (SUAS/CADU/PBF/SISC).
@@ -159,7 +165,7 @@ def chat_turn(
                 "mode": "chat",
             }
 
-        canonical = try_canonical_metric(conn, message)
+        canonical = try_canonical_metric(conn, message, transcript)
         if canonical:
             answer = canonical["answer"]
             append_message(
@@ -184,7 +190,7 @@ def chat_turn(
         ]
 
         raw_sql_response = chat_completion(sql_messages, json_mode=True)
-        raw_sql = _extract_sql(raw_sql_response)
+        raw_sql = sanitize_llm_sql(_extract_sql(raw_sql_response))
 
         try:
             safe_sql = wrap_limit(raw_sql, limit=500)
