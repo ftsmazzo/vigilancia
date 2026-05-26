@@ -28,6 +28,8 @@ type CrasCatalogItem = {
   cras_cod: string;
   cras_codigo_exibicao: string;
   cras_nome: string;
+  cras_numero_ordem?: number | null;
+  rotulo_ordenado?: string;
   familias: number;
   pessoas: number;
   homens: number;
@@ -178,7 +180,10 @@ export default function CrasPage({ token }: Props) {
             <option value="__todos__">— Todos os CRAS (visão municipal) —</option>
             {catalog.map((c) => (
               <option key={c.cras_cod} value={c.cras_cod}>
-                {c.cras_nome} ({c.cras_codigo_exibicao}) · {c.familias.toLocaleString("pt-BR")} fam.
+                {(c.rotulo_ordenado ?? c.cras_nome) +
+                  (c.cras_codigo_exibicao !== "—" ? ` [${c.cras_codigo_exibicao}]` : "")}
+                {" · "}
+                {c.familias.toLocaleString("pt-BR")} fam.
               </option>
             ))}
           </select>
@@ -248,6 +253,7 @@ export default function CrasPage({ token }: Props) {
                 <table className="cras-table">
                   <thead>
                     <tr>
+                      <th>Nº</th>
                       <th>Código</th>
                       <th>Nome da unidade</th>
                       <th>Famílias</th>
@@ -261,6 +267,7 @@ export default function CrasPage({ token }: Props) {
                   <tbody>
                     {painel.tabela_cras.map((row) => (
                       <tr key={row.cras_cod}>
+                        <td className="num">{row.cras_numero_ordem ?? "—"}</td>
                         <td>
                           <button
                             type="button"

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
@@ -37,6 +39,32 @@ def _cras_nome_sql(prefix: str = "f") -> str:
       WHEN {p}.nom_cras IS NULL OR btrim({p}.nom_cras::text) = '' THEN '(sem nome no CADU)'
       ELSE btrim({p}.nom_cras::text)
     END"""
+
+
+def _cras_numero_ordem(cras_cod: str, cras_nome: str) -> int:
+    """
+    Ordem de exibição: número após 'CRAS' no nome; Bonfim sem código → 9 (referência local).
+  """
+    nome = cras_nome or ""
+    nome_u = nome.upper()
+    if "BONFIM" in nome_u:
+        return 9
+    m = re.search(r"CRAS\s*(\d+)", nome, flags=re.I)
+    if m:
+        return int(m.group(1))
+    return 999
+
+
+def _sort_cras_items(items: list[dict]) -> list[dict]:
+    sem = [x for x in items if x.get("cras_cod") == "__sem_cras__"]
+    rest = [x for x in items if x.get("cras_cod") != "__sem_cras__"]
+    rest.sort(
+        key=lambda x: (
+            _cras_numero_ordem(str(x.get("cras_cod") or ""), str(x.get("cras_nome") or "")),
+            str(x.get("cras_nome") or "").upper(),
+        )
+    )
+    return rest + sem
 
 
 def _cras_filter_clause(cras_cod: str | None) -> tuple[str, dict]:
@@ -85,18 +113,26 @@ def cras_catalog_from_views(conn: Connection) -> list[dict]:
             FROM fam
             LEFT JOIN pes ON pes.codigo_familiar = fam.codigo_familiar
             GROUP BY fam.cras_cod
-            ORDER BY familias DESC, cras_nome
             """
         )
     ).mappings().all()
     out: list[dict] = []
     for r in rows:
         cod = (r["cras_cod"] or "").strip()
+        nome = str(r["cras_nome"] or "")
+        num_ordem = _cras_numero_ordem(cod, nome)
+        rotulo = (
+            f"CRAS {num_ordem} — {nome}"
+            if num_ordem < 999
+            else nome
+        )
         out.append(
             {
                 "cras_cod": cod if cod else "__sem_cras__",
                 "cras_codigo_exibicao": cod if cod else "—",
-                "cras_nome": r["cras_nome"],
+                "cras_nome": nome,
+                "cras_numero_ordem": num_ordem if num_ordem < 999 else None,
+                "rotulo_ordenado": rotulo,
                 "familias": int(r["familias"] or 0),
                 "pessoas": int(r["pessoas"] or 0),
                 "homens": int(r["homens"] or 0),
@@ -105,7 +141,7 @@ def cras_catalog_from_views(conn: Connection) -> list[dict]:
                 "familias_renda_ate_218": int(r["familias_renda_ate_218"] or 0),
             }
         )
-    return out
+    return _sort_cras_items(out)
 
 
 def _bucket(
@@ -128,8 +164,8 @@ def _bucket(
 def cras_painel_from_views(conn: Connection, cras_cod: str | None = None) -> dict:
     _require_views(conn)
     where_extra, params = _cras_filter_clause(cras_cod)
-    ck = _cras_key_sql("f")
-    cn = _cras_nome_sql("f")
+    ck = _cras_key_sql("fam")
+    cn = _cras_nome_sql("fam")
 
     base = conn.execute(
         text(
