@@ -183,7 +183,7 @@ async def import_raw_table(
             detail=(
                 "O arquivo parece ter apenas uma coluna no cabeçalho (texto muito longo). "
                 f"Confira o delimitador CSV (enviado: {csv_delimiter!r}). "
-                "Arquivos BPC costumam usar ponto e vírgula (;)."
+                "BPC costuma usar vírgula (,) ou ponto e vírgula (;), conforme o export do DATAPREV/portal."
             ),
         )
 

@@ -196,6 +196,7 @@ export default function IngestaoPage({ token }: Props) {
   // BPC
   const [bpcFile, setBpcFile] = useState<File | null>(null);
   const [bpcStrategy, setBpcStrategy] = useState("append");
+  const [bpcCsvDelimiter, setBpcCsvDelimiter] = useState(",");
   const [bpcCompetencia, setBpcCompetencia] = useState("");
   const [bpcOverwrite, setBpcOverwrite] = useState(false);
   const [bpcStatus, setBpcStatus] = useState("");
@@ -309,7 +310,7 @@ export default function IngestaoPage({ token }: Props) {
     fd.append("source", "bpc");
     fd.append("dataset", "beneficio_prestacao_continuada");
     fd.append("strategy", bpcStrategy);
-    fd.append("csv_delimiter", ";");
+    fd.append("csv_delimiter", bpcCsvDelimiter);
     fd.append("competencia", bpcCompetencia);
     fd.append("overwrite_competencia", bpcOverwrite ? "true" : "false");
     setBpcUploading(true);
@@ -724,7 +725,8 @@ export default function IngestaoPage({ token }: Props) {
               <h1>BPC — Benefício de Prestação Continuada</h1>
               <p className="ingestao-desc">
                 Carga por competência (AAAAMM), como na folha Bolsa Família e nas manutenções SIBEC: o mês de
-                referência fica na coluna <strong>competencia</strong> na tabela RAW.
+                referência fica na coluna <strong>competencia</strong> na tabela RAW. Arquivos CSV do BPC costumam usar{" "}
+                <strong>vírgula (,)</strong> como delimitador.
               </p>
               <form onSubmit={submitBpc} className="auth-form">
                 <label>
@@ -744,6 +746,18 @@ export default function IngestaoPage({ token }: Props) {
                   <select value={bpcStrategy} onChange={(ev) => setBpcStrategy(ev.target.value)} disabled={bpcUploading}>
                     <option value="replace">Substituir tabela inteira</option>
                     <option value="append">Agregar linhas (recomendado)</option>
+                  </select>
+                </label>
+                <label>
+                  Delimitador CSV
+                  <select
+                    value={bpcCsvDelimiter}
+                    onChange={(ev) => setBpcCsvDelimiter(ev.target.value)}
+                    disabled={bpcUploading}
+                  >
+                    <option value=",">Vírgula (,)</option>
+                    <option value=";">Ponto e vírgula (;)</option>
+                    <option value={"\t"}>Tabulação</option>
                   </select>
                 </label>
                 <label className="checkbox-inline">
