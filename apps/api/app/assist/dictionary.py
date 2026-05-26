@@ -12,18 +12,24 @@ from .column_map import VIEW_COLUMN_MAP
 _CACHE_MAX_CHARS = 12_000
 
 
-def _default_csv_path() -> Path:
-    # apps/api/app/assist → raiz do monorepo
-    root = Path(__file__).resolve().parents[4]
-    return root / "DadosBrutos" / "CECAD" / "dicionariotudo.csv"
+def _dictionary_candidates() -> list[Path]:
+    """Caminhos possíveis (dev monorepo, Docker /app, env explícito)."""
+    here = Path(__file__).resolve()
+    out: list[Path] = []
+    if settings.cadu_dictionary_path:
+        out.append(Path(settings.cadu_dictionary_path))
+    # Copiado pelo backend/Dockerfile em produção
+    out.append(here.parent / "data" / "dicionariotudo.csv")
+    for parent in here.parents:
+        out.append(parent / "DadosBrutos" / "CECAD" / "dicionariotudo.csv")
+    return out
 
 
 def _resolve_csv_path() -> Path | None:
-    if settings.cadu_dictionary_path:
-        p = Path(settings.cadu_dictionary_path)
-        return p if p.is_file() else None
-    p = _default_csv_path()
-    return p if p.is_file() else None
+    for candidate in _dictionary_candidates():
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 @lru_cache(maxsize=1)

@@ -62,13 +62,19 @@ def build_schema_context(conn: Connection, db: Session | None = None) -> str:
         row = conn.execute(text("SELECT COUNT(*) FROM vig.mvw_pessoas")).scalar()
         parts.append(f"vig.mvw_pessoas tem {int(row or 0):,} registros de pessoas.".replace(",", "."))
 
-    dict_block = build_dictionary_prompt()
-    if dict_block:
-        parts.append("\n" + dict_block)
+    try:
+        dict_block = build_dictionary_prompt()
+        if dict_block:
+            parts.append("\n" + dict_block)
+    except Exception:
+        pass
 
     if db is not None:
-        municipio_block = load_context_prompt(db)
-        if municipio_block:
-            parts.append("\n" + municipio_block)
+        try:
+            municipio_block = load_context_prompt(db)
+            if municipio_block:
+                parts.append("\n" + municipio_block)
+        except Exception:
+            pass
 
     return "\n".join(parts)
