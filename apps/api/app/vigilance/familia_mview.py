@@ -54,16 +54,21 @@ def _qi(ident: str) -> str:
 
 
 def _table_exists(conn: Connection, schema: str, table: str) -> bool:
+    """Tabelas RAW e também materialized views (não aparecem só em information_schema.tables)."""
+    qualified = f"{schema}.{table}"
     r = conn.execute(
         text(
             """
-            SELECT EXISTS (
-              SELECT 1 FROM information_schema.tables
-              WHERE table_schema = :s AND table_name = :t
+            SELECT (
+              to_regclass(:qualified) IS NOT NULL
+              OR EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = :s AND table_name = :t
+              )
             )
             """
         ),
-        {"s": schema, "t": table},
+        {"s": schema, "t": table, "qualified": qualified},
     ).scalar()
     return bool(r)
 
