@@ -21,6 +21,7 @@ from .cras_analytics import (
     _pessoas_bucket,
     _require_views,
 )
+from .familia_mview import _table_exists
 
 PAINEL_CARACTERIZACAO_VERSAO = 3
 
