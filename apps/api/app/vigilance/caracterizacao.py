@@ -22,7 +22,9 @@ from .cras_analytics import (
     _require_views,
 )
 
-PAINEL_CARACTERIZACAO_VERSAO = 2
+PAINEL_CARACTERIZACAO_VERSAO = 3
+
+GEO_TABLE = "geo__tbl_geo"
 
 # Faixas de renda per capita familiar (valores em R$, vig.mvw_familia.renda_per_capita).
 RENDA_FAIXA_ORDER = (
@@ -97,6 +99,96 @@ def _familia_renda_per_capita_buckets(
     return out
 
 
+def _ranking_bairros_geo(
+    conn: Connection,
+    where_extra: str,
+    params: dict,
+    *,
+    limit: int = 10,
+) -> dict:
+    """
+    Top bairros por famílias no CADU, com bairro validado via CEP × raw.geo__tbl_geo.
+    Famílias sem CEP na geo usam o bairro do CADU (marcadas na resposta).
+    """
+    if not _table_exists(conn, "raw", GEO_TABLE):
+        return {
+            "disponivel": False,
+            "mensagem": (
+                "Base geográfica não encontrada. Ingeste tbl_geo.csv "
+                "(source=geo, dataset=tbl_geo) para o ranking por bairro."
+            ),
+            "items": [],
+        }
+
+    sql = f"""
+    WITH geo_bairro AS (
+      SELECT
+        cep_norm,
+        mode() WITHIN GROUP (ORDER BY lower(btrim(bairro::text))) AS bairro_geo
+      FROM raw.{GEO_TABLE}
+      WHERE cep_norm IS NOT NULL
+        AND btrim(bairro::text) <> ''
+      GROUP BY cep_norm
+    ),
+    fam AS (
+      SELECT
+        f.codigo_familiar,
+        vig.norm_cep(f.cep::text) AS cep_n,
+        COALESCE(
+          g.bairro_geo,
+          NULLIF(btrim(f.bairro::text), ''),
+          '(sem bairro)'
+        ) AS bairro_label,
+        (g.cep_norm IS NOT NULL) AS bairro_via_geo,
+        COALESCE(f.marc_pbf, FALSE) AS na_folha_pbf
+      FROM vig.mvw_familia f
+      LEFT JOIN geo_bairro g ON g.cep_norm = vig.norm_cep(f.cep::text)
+      WHERE TRUE {where_extra}
+    ),
+    agg AS (
+      SELECT
+        bairro_label,
+        COUNT(*) FILTER (WHERE bairro_via_geo)::bigint AS familias_com_bairro_geo,
+        COUNT(*) FILTER (WHERE NOT bairro_via_geo)::bigint AS familias_bairro_cadu,
+        COUNT(DISTINCT codigo_familiar)::bigint AS familias,
+        COUNT(DISTINCT codigo_familiar) FILTER (WHERE na_folha_pbf)::bigint AS familias_pbf
+      FROM fam
+      GROUP BY bairro_label
+    )
+    SELECT
+      bairro_label,
+      familias,
+      familias_pbf,
+      familias_com_bairro_geo,
+      familias_bairro_cadu,
+      ROUND(100.0 * familias_pbf / NULLIF(familias, 0), 2) AS pct_pbf,
+      ROUND(100.0 * familias / NULLIF((SELECT SUM(familias) FROM agg), 0), 2) AS pct_do_total
+    FROM agg
+    ORDER BY familias DESC
+    LIMIT :lim
+    """
+    rows = conn.execute(text(sql), {**params, "lim": limit}).mappings().all()
+    items = [
+        {
+            "posicao": i + 1,
+            "bairro": str(r["bairro_label"] or "(sem bairro)"),
+            "familias": int(r["familias"] or 0),
+            "familias_pbf": int(r["familias_pbf"] or 0),
+            "pct_pbf": float(r["pct_pbf"] or 0),
+            "pct_do_total": float(r["pct_do_total"] or 0),
+            "familias_bairro_geo": int(r["familias_com_bairro_geo"] or 0),
+            "familias_bairro_cadu": int(r["familias_bairro_cadu"] or 0),
+        }
+        for i, r in enumerate(rows)
+    ]
+    return {
+        "disponivel": True,
+        "fonte_bairro": "CEP da família (vig.mvw_familia) × bairro em raw.geo__tbl_geo; fallback CADU",
+        "fonte_pbf": "Famílias com marc_pbf na visão (vínculo folha PBF no CADU)",
+        "items": items,
+    }
+
+
 def _titulo_escopo(cras_sel: str, cras_nome: str | None) -> str:
     if cras_sel in ("", "__todos__"):
         return "Município — Cadastro Único (todas as famílias)"
@@ -169,4 +261,5 @@ def caracterizacao_painel_from_views(
         "por_deficiencia": _pessoas_bucket(conn, where_extra, params, DEFICIENCIA_EXPR, 10),
         "por_faixa_idade": _pessoas_bucket(conn, where_extra, params, IDADE_EXPR, 8),
         "por_renda_per_capita": _familia_renda_per_capita_buckets(conn, where_extra, params),
+        "ranking_bairros": _ranking_bairros_geo(conn, where_extra, params),
     }

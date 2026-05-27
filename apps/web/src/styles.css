@@ -1901,6 +1901,93 @@ p.success {
   background: linear-gradient(90deg, #5b9fd4, #6ee7b7);
 }
 
+.caract-ranking-wrap {
+  padding: 1.1rem 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+.caract-ranking-desc {
+  margin: 0 0 0.5rem;
+  line-height: 1.5;
+  font-size: 0.9rem;
+  color: var(--fx-muted);
+}
+
+.caract-ranking-meta {
+  margin: 0 0 1rem;
+}
+
+.caract-ranking-table .caract-ranking-bairro {
+  font-weight: 600;
+  max-width: 220px;
+}
+
+.caract-mini-bar {
+  height: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 0.2rem;
+  min-width: 80px;
+}
+
+.caract-mini-bar-fill--fam {
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #5b9fd4, #6ee7b7);
+}
+
+.caract-pbf-pill {
+  position: relative;
+  height: 22px;
+  min-width: 72px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 11px;
+  overflow: hidden;
+}
+
+.caract-pbf-pill-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, #f0a060, #e87b9f);
+  border-radius: 11px;
+  opacity: 0.85;
+}
+
+.caract-pbf-pill-text {
+  position: relative;
+  z-index: 1;
+  display: block;
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 22px;
+}
+
+.caract-tag {
+  display: inline-block;
+  padding: 0.15rem 0.45rem;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.caract-tag--geo {
+  background: rgba(110, 231, 183, 0.15);
+  color: #6ee7b7;
+  border: 1px solid rgba(110, 231, 183, 0.35);
+}
+
+.caract-tag--mix {
+  background: rgba(240, 160, 96, 0.12);
+  color: #f0a060;
+  border: 1px solid rgba(240, 160, 96, 0.3);
+}
+
 @media (max-width: 900px) {
   .caract-hero {
     grid-template-columns: 1fr;

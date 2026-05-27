@@ -39,6 +39,24 @@ type Painel = {
   por_deficiencia?: BarItem[];
   por_faixa_idade?: BarItem[];
   por_renda_per_capita?: BarItem[];
+  ranking_bairros?: {
+    disponivel: boolean;
+    mensagem?: string;
+    fonte_bairro?: string;
+    fonte_pbf?: string;
+    items: RankingBairroItem[];
+  };
+};
+
+type RankingBairroItem = {
+  posicao: number;
+  bairro: string;
+  familias: number;
+  familias_pbf: number;
+  pct_pbf: number;
+  pct_do_total: number;
+  familias_bairro_geo: number;
+  familias_bairro_cadu: number;
 };
 
 export default function CaracterizacaoPage({ token }: Props) {
@@ -181,6 +199,95 @@ export default function CaracterizacaoPage({ token }: Props) {
               items={painel.por_deficiencia_binario ?? []}
             />
           </div>
+
+          {painel.ranking_bairros && (
+            <>
+              <h2 className="kpi-section-title caract-section-title">Ranking por bairro (GEO)</h2>
+              {!painel.ranking_bairros.disponivel ? (
+                <p className="convivencia-alerta convivencia-alerta--aviso">
+                  {painel.ranking_bairros.mensagem}
+                </p>
+              ) : (
+                <div className="caract-ranking-wrap fx-card">
+                  <p className="caract-ranking-desc">
+                    Top 10 bairros com mais famílias no Cadastro Único. O bairro vem da base{" "}
+                    <strong>geo</strong> quando o CEP da família existe em{" "}
+                    <code className="inline-code">tbl_geo</code>; caso contrário, usa-se o bairro
+                    informado no CADU.
+                  </p>
+                  <p className="fx-card-sub caract-ranking-meta">
+                    {painel.ranking_bairros.fonte_bairro} · {painel.ranking_bairros.fonte_pbf}
+                  </p>
+                  <div className="cras-table-wrap">
+                    <table className="cras-table caract-ranking-table">
+                      <thead>
+                        <tr>
+                          <th>#</th>
+                          <th>Bairro</th>
+                          <th className="num">Famílias</th>
+                          <th>Participação</th>
+                          <th className="num">Com PBF</th>
+                          <th className="num">% PBF</th>
+                          <th>Origem bairro</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {painel.ranking_bairros.items.map((row) => {
+                          const maxFam =
+                            painel.ranking_bairros!.items[0]?.familias || 1;
+                          const geoPct =
+                            row.familias > 0
+                              ? Math.round((100 * row.familias_bairro_geo) / row.familias)
+                              : 0;
+                          return (
+                            <tr key={row.bairro}>
+                              <td className="num">{row.posicao}</td>
+                              <td className="caract-ranking-bairro">{row.bairro}</td>
+                              <td className="num">{row.familias.toLocaleString("pt-BR")}</td>
+                              <td>
+                                <div className="caract-mini-bar">
+                                  <div
+                                    className="caract-mini-bar-fill caract-mini-bar-fill--fam"
+                                    style={{
+                                      width: `${Math.max(6, (row.familias / maxFam) * 100)}%`,
+                                    }}
+                                  />
+                                </div>
+                                <small>{row.pct_do_total.toLocaleString("pt-BR")}%</small>
+                              </td>
+                              <td className="num">{row.familias_pbf.toLocaleString("pt-BR")}</td>
+                              <td>
+                                <div className="caract-pbf-pill">
+                                  <span
+                                    className="caract-pbf-pill-fill"
+                                    style={{ width: `${Math.min(100, row.pct_pbf)}%` }}
+                                  />
+                                  <span className="caract-pbf-pill-text">
+                                    {row.pct_pbf.toLocaleString("pt-BR")}%
+                                  </span>
+                                </div>
+                              </td>
+                              <td>
+                                <span
+                                  className={
+                                    geoPct >= 80
+                                      ? "caract-tag caract-tag--geo"
+                                      : "caract-tag caract-tag--mix"
+                                  }
+                                >
+                                  {geoPct >= 80 ? "GEO" : `${geoPct}% geo`}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
 
           <h2 className="kpi-section-title caract-section-title">Renda familiar per capita</h2>
           <div className="chart-grid caract-charts caract-charts--renda">
