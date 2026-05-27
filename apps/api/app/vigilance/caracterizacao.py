@@ -22,7 +22,17 @@ from .cras_analytics import (
     _require_views,
 )
 
-PAINEL_CARACTERIZACAO_VERSAO = 1
+PAINEL_CARACTERIZACAO_VERSAO = 2
+
+# Faixas de renda per capita familiar (valores em R$, vig.mvw_familia.renda_per_capita).
+RENDA_FAIXA_ORDER = (
+    "renda_0_218",
+    "renda_219_810",
+    "renda_811_1621",
+    "renda_1622_3242",
+    "renda_acima_3242",
+    "renda_nao_informada",
+)
 
 IDADE_EXPR = classificacao_idade_sql("pes.idade")
 SEXO_EXPR = classificacao_sexo_sql("pes.cod_sexo")
@@ -32,6 +42,59 @@ DEFICIENCIA_EXPR = classificacao_deficiencia_sql("pes")
 DEF_BINARIA_EXPR = (
     f"CASE WHEN ({tem_deficiencia_expr('pes')}) THEN 'com_deficiencia' ELSE 'sem_deficiencia' END"
 )
+
+
+def _familia_renda_per_capita_buckets(
+    conn: Connection,
+    where_extra: str,
+    params: dict,
+) -> list[dict]:
+    """Contagem de famílias por faixa de renda per capita (ordem fixa para o gráfico)."""
+    sql = f"""
+    WITH fam AS (
+      SELECT f.codigo_familiar, f.renda_per_capita
+      FROM vig.mvw_familia f
+      WHERE TRUE {where_extra}
+    ),
+    classified AS (
+      SELECT
+        CASE
+          WHEN renda_per_capita IS NULL THEN 'renda_nao_informada'
+          WHEN renda_per_capita < 0 THEN 'renda_nao_informada'
+          WHEN renda_per_capita <= 218 THEN 'renda_0_218'
+          WHEN renda_per_capita <= 810 THEN 'renda_219_810'
+          WHEN renda_per_capita <= 1621 THEN 'renda_811_1621'
+          WHEN renda_per_capita <= 3242 THEN 'renda_1622_3242'
+          ELSE 'renda_acima_3242'
+        END AS rotulo,
+        codigo_familiar
+      FROM fam
+    )
+    SELECT
+      rotulo,
+      COUNT(DISTINCT codigo_familiar)::bigint AS total,
+      ROUND(
+        100.0 * COUNT(DISTINCT codigo_familiar)
+          / NULLIF((SELECT COUNT(DISTINCT codigo_familiar) FROM fam), 0),
+        2
+      ) AS pct
+    FROM classified
+    GROUP BY rotulo
+    """
+    rows = {
+        str(r["rotulo"]): r for r in conn.execute(text(sql), params).mappings().all()
+    }
+    out: list[dict] = []
+    for key in RENDA_FAIXA_ORDER:
+        row = rows.get(key)
+        out.append(
+            {
+                "rotulo": key,
+                "total": int(row["total"] or 0) if row else 0,
+                "pct": float(row["pct"] or 0) if row else 0.0,
+            }
+        )
+    return out
 
 
 def _titulo_escopo(cras_sel: str, cras_nome: str | None) -> str:
@@ -105,4 +168,5 @@ def caracterizacao_painel_from_views(
         "por_escolaridade": _pessoas_bucket(conn, where_extra, params, ESCOLARIDADE_EXPR, 10),
         "por_deficiencia": _pessoas_bucket(conn, where_extra, params, DEFICIENCIA_EXPR, 10),
         "por_faixa_idade": _pessoas_bucket(conn, where_extra, params, IDADE_EXPR, 8),
+        "por_renda_per_capita": _familia_renda_per_capita_buckets(conn, where_extra, params),
     }

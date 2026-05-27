@@ -1786,6 +1786,15 @@ p.success {
   margin-bottom: 2rem;
 }
 
+.caract-charts--renda {
+  grid-template-columns: 1fr;
+  margin-bottom: 1.25rem;
+}
+
+.caract-charts--renda .bar-chart-panel .chart-bar-fill {
+  background: linear-gradient(90deg, #6ee7b7, #5b9fd4, #a78bfa, #f0a060, #e87b9f);
+}
+
 .caract-loading {
   opacity: 0.75;
   padding: 2rem;

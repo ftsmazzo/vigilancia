@@ -28,6 +28,12 @@ export const ROTULO_CADU: Record<string, string> = {
   deficiencia_multipla: "Deficiência múltipla",
   com_deficiencia_sem_tipo: "Com deficiência (tipo não detalhado)",
   com_deficiencia: "Com deficiência",
+  renda_0_218: "R$ 0,00 a R$ 218,00",
+  renda_219_810: "R$ 218,01 a R$ 810,00",
+  renda_811_1621: "R$ 810,01 a R$ 1.621,00",
+  renda_1622_3242: "R$ 1.621,01 a R$ 3.242,00",
+  renda_acima_3242: "Acima de R$ 3.242,00",
+  renda_nao_informada: "Renda não informada",
 };
 
 export function rotuloAmigavel(chave: string): string {

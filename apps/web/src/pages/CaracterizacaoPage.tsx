@@ -38,6 +38,7 @@ type Painel = {
   por_escolaridade?: BarItem[];
   por_deficiencia?: BarItem[];
   por_faixa_idade?: BarItem[];
+  por_renda_per_capita?: BarItem[];
 };
 
 export default function CaracterizacaoPage({ token }: Props) {
@@ -178,6 +179,17 @@ export default function CaracterizacaoPage({ token }: Props) {
               title="Deficiência"
               subtitle="Com ou sem deficiência declarada"
               items={painel.por_deficiencia_binario ?? []}
+            />
+          </div>
+
+          <h2 className="kpi-section-title caract-section-title">Renda familiar per capita</h2>
+          <div className="chart-grid caract-charts caract-charts--renda">
+            <BarChartPanel
+              title="Faixas de renda per capita"
+              subtitle="Por família (vig.mvw_familia.renda_per_capita) — contagem em número de famílias"
+              items={painel.por_renda_per_capita ?? []}
+              maxBars={8}
+              accent="warm"
             />
           </div>
 
