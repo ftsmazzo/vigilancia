@@ -27,6 +27,7 @@ export const ROTULO_CADU: Record<string, string> = {
   deficiencia_mental_cognitiva: "Deficiência mental / cognitiva",
   deficiencia_multipla: "Deficiência múltipla",
   com_deficiencia_sem_tipo: "Com deficiência (tipo não detalhado)",
+  com_deficiencia: "Com deficiência",
 };
 
 export function rotuloAmigavel(chave: string): string {

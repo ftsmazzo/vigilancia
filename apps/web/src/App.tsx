@@ -7,6 +7,7 @@ import ConvivenciaPage from "./pages/ConvivenciaPage";
 import CrasPage from "./pages/CrasPage";
 import AssistPage from "./pages/AssistPage";
 import MunicipioPage from "./pages/MunicipioPage";
+import CaracterizacaoPage from "./pages/CaracterizacaoPage";
 import VigilanciaPage from "./pages/VigilanciaPage";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -75,6 +76,12 @@ function AppShell({
           </NavLink>
           <NavLink to="/cras" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             CRAS
+          </NavLink>
+          <NavLink
+            to="/caracterizacao"
+            className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
+          >
+            Caracterização
           </NavLink>
           <NavLink to="/assistente" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             Assistente
@@ -407,6 +414,18 @@ export default function App() {
                       me?.role === "admin_local"
                     }
                   />
+                </AppShell>
+              ) : (
+                <Navigate to="/" replace />
+              )
+            }
+          />
+          <Route
+            path="/caracterizacao"
+            element={
+              token ? (
+                <AppShell loadingMe={loadingMe} me={me} onLogout={handleLogout}>
+                  <CaracterizacaoPage token={token} />
                 </AppShell>
               ) : (
                 <Navigate to="/" replace />
