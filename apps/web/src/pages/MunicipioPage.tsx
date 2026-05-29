@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { Building2, Link2, Plus, Save, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
@@ -118,7 +119,7 @@ export default function MunicipioPage({ token, canEdit }: Props) {
         throw new Error(detail || `Erro ${res.status}`);
       }
       setData(raw as ContextPayload);
-      setOk("Caracterização salva. O assistente passará a usar este contexto nas respostas.");
+      setOk("Caracterização salva. O VigIA passará a usar este contexto.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao salvar.");
     } finally {
@@ -128,151 +129,203 @@ export default function MunicipioPage({ token, canEdit }: Props) {
 
   if (loading) {
     return (
-      <div className="page">
-        <p>Carregando caracterização do município…</p>
+      <div className="municipio-page">
+        <div className="municipio-shell municipio-shell--loading">
+          <p className="municipio-loading">Carregando caracterização…</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="page municipio-page">
-      <div className="kpi-head fx-card">
-        <h1 className="page-title">Caracterização do município</h1>
-        <p className="ingestao-desc">
-          Cadastro local usado pelo{" "}
-          <Link to="/assistente">Assistente de vigilância</Link>: território, rede de serviços e
-          prioridades. Complementa o dicionário CADU (<code>dicionariotudo.csv</code>) com o que só
-          a equipe municipal sabe.
-        </p>
-        {data.updated_at && (
-          <p className="fx-card-sub">
-            Última atualização: {new Date(data.updated_at).toLocaleString("pt-BR")}
-            {data.updated_by_email ? ` · ${data.updated_by_email}` : ""}
-          </p>
-        )}
-      </div>
-
-      <form className="municipio-form" onSubmit={handleSubmit}>
-        <section className="fx-card municipio-section">
-          <h2 className="fx-card-title">Identificação</h2>
-          <div className="municipio-grid">
-            <label>
-              Município
-              <input
-                type="text"
-                value={data.nome_municipio}
-                disabled={!canEdit}
-                onChange={(e) => setData({ ...data, nome_municipio: e.target.value })}
-              />
-            </label>
-            <label>
-              UF
-              <input
-                type="text"
-                maxLength={2}
-                value={data.uf}
-                disabled={!canEdit}
-                onChange={(e) => setData({ ...data, uf: e.target.value.toUpperCase() })}
-              />
-            </label>
-            <label>
-              Código IBGE
-              <input
-                type="text"
-                value={data.codigo_ibge || ""}
-                disabled={!canEdit}
-                onChange={(e) => setData({ ...data, codigo_ibge: e.target.value || null })}
-              />
-            </label>
+    <div className="municipio-page">
+      <form className="municipio-shell" onSubmit={handleSubmit}>
+        <header className="municipio-header">
+          <div className="municipio-header-brand">
+            <div className="municipio-brand-icon" aria-hidden>
+              <Building2 size={18} />
+            </div>
+            <div>
+              <h1 className="municipio-header-title">Caracterização do município</h1>
+              <p className="municipio-header-sub">
+                Contexto local para o{" "}
+                <Link to="/assistente" className="municipio-inline-link">
+                  VigIA
+                </Link>
+                {data.updated_at && (
+                  <>
+                    {" · "}
+                    Atualizado em {new Date(data.updated_at).toLocaleString("pt-BR")}
+                    {data.updated_by_email ? ` (${data.updated_by_email})` : ""}
+                  </>
+                )}
+              </p>
+            </div>
           </div>
-        </section>
+        </header>
 
-        <section className="fx-card municipio-section">
-          <h2 className="fx-card-title">Caracterização</h2>
-          {CAMPOS_CARACTERIZACAO.map(({ key, label, rows }) => (
-            <label key={key} className="municipio-field-block">
-              {label}
-              <textarea
-                rows={rows}
-                disabled={!canEdit}
-                value={data.caracterizacao[key] || ""}
-                onChange={(e) => setCaracterizacao(key, e.target.value)}
-              />
-            </label>
-          ))}
-        </section>
+        <div className="municipio-body">
+          <section className="municipio-block">
+            <h2 className="municipio-block-title">Identificação</h2>
+            <div className="municipio-grid">
+              <label className="municipio-field">
+                <span>Município</span>
+                <input
+                  type="text"
+                  className="municipio-input"
+                  value={data.nome_municipio}
+                  disabled={!canEdit}
+                  onChange={(e) => setData({ ...data, nome_municipio: e.target.value })}
+                />
+              </label>
+              <label className="municipio-field municipio-field--uf">
+                <span>UF</span>
+                <input
+                  type="text"
+                  className="municipio-input"
+                  maxLength={2}
+                  value={data.uf}
+                  disabled={!canEdit}
+                  onChange={(e) => setData({ ...data, uf: e.target.value.toUpperCase() })}
+                />
+              </label>
+              <label className="municipio-field municipio-field--ibge">
+                <span>IBGE</span>
+                <input
+                  type="text"
+                  className="municipio-input"
+                  value={data.codigo_ibge || ""}
+                  disabled={!canEdit}
+                  onChange={(e) => setData({ ...data, codigo_ibge: e.target.value || null })}
+                />
+              </label>
+            </div>
+          </section>
 
-        <section className="fx-card municipio-section">
-          <div className="municipio-servicos-head">
-            <h2 className="fx-card-title">Rede de serviços</h2>
-            {canEdit && (
-              <button type="button" className="btn btn-ghost" onClick={addServico}>
-                + Serviço
-              </button>
-            )}
-          </div>
-          {data.servicos.length === 0 && (
-            <p className="fx-card-sub">Nenhum serviço cadastrado. Ex.: CRAS, CREAS, Centro POP, SCFV.</p>
-          )}
-          {data.servicos.map((s, i) => (
-            <div key={i} className="municipio-servico-card">
-              <label>
-                Nome
-                <input
-                  type="text"
-                  required
-                  disabled={!canEdit}
-                  value={s.nome}
-                  onChange={(e) => updateServico(i, "nome", e.target.value)}
-                />
-              </label>
-              <label>
-                Tipo
-                <input
-                  type="text"
-                  placeholder="CRAS, CREAS, SCFV…"
-                  disabled={!canEdit}
-                  value={s.tipo}
-                  onChange={(e) => updateServico(i, "tipo", e.target.value)}
-                />
-              </label>
-              <label>
-                Público atendido
-                <input
-                  type="text"
-                  disabled={!canEdit}
-                  value={s.publico}
-                  onChange={(e) => updateServico(i, "publico", e.target.value)}
-                />
-              </label>
-              <label>
-                Observação
-                <input
-                  type="text"
-                  disabled={!canEdit}
-                  value={s.observacao}
-                  onChange={(e) => updateServico(i, "observacao", e.target.value)}
-                />
-              </label>
+          <section className="municipio-block">
+            <h2 className="municipio-block-title">Perfil e prioridades</h2>
+            <div className="municipio-fields-stack">
+              {CAMPOS_CARACTERIZACAO.map(({ key, label, rows }) => (
+                <label key={key} className="municipio-field municipio-field--area">
+                  <span>{label}</span>
+                  <textarea
+                    className="municipio-textarea"
+                    rows={rows}
+                    disabled={!canEdit}
+                    value={data.caracterizacao[key] || ""}
+                    onChange={(e) => setCaracterizacao(key, e.target.value)}
+                  />
+                </label>
+              ))}
+            </div>
+          </section>
+
+          <section className="municipio-block">
+            <div className="municipio-block-head">
+              <h2 className="municipio-block-title">Rede de serviços</h2>
               {canEdit && (
-                <button type="button" className="btn btn-ghost municipio-remove" onClick={() => removeServico(i)}>
-                  Remover
+                <button type="button" className="municipio-add-btn" onClick={addServico}>
+                  <Plus size={16} />
+                  <span>Adicionar</span>
                 </button>
               )}
             </div>
-          ))}
-        </section>
+            {data.servicos.length === 0 && (
+              <p className="municipio-empty">Nenhum serviço cadastrado (CRAS, CREAS, SCFV…).</p>
+            )}
+            <div className="municipio-servicos-list">
+              {data.servicos.map((s, i) => (
+                <article key={i} className="municipio-servico-card">
+                  <div className="municipio-servico-grid">
+                    <label className="municipio-field">
+                      <span>Nome</span>
+                      <input
+                        type="text"
+                        className="municipio-input"
+                        required
+                        disabled={!canEdit}
+                        value={s.nome}
+                        onChange={(e) => updateServico(i, "nome", e.target.value)}
+                      />
+                    </label>
+                    <label className="municipio-field">
+                      <span>Tipo</span>
+                      <input
+                        type="text"
+                        className="municipio-input"
+                        placeholder="CRAS, CREAS, SCFV…"
+                        disabled={!canEdit}
+                        value={s.tipo}
+                        onChange={(e) => updateServico(i, "tipo", e.target.value)}
+                      />
+                    </label>
+                    <label className="municipio-field">
+                      <span>Público atendido</span>
+                      <input
+                        type="text"
+                        className="municipio-input"
+                        disabled={!canEdit}
+                        value={s.publico}
+                        onChange={(e) => updateServico(i, "publico", e.target.value)}
+                      />
+                    </label>
+                    <label className="municipio-field municipio-field--wide">
+                      <span>Observação</span>
+                      <input
+                        type="text"
+                        className="municipio-input"
+                        disabled={!canEdit}
+                        value={s.observacao}
+                        onChange={(e) => updateServico(i, "observacao", e.target.value)}
+                      />
+                    </label>
+                  </div>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      className="municipio-remove-btn"
+                      onClick={() => removeServico(i)}
+                    >
+                      <Trash2 size={14} />
+                      <span>Remover</span>
+                    </button>
+                  )}
+                </article>
+              ))}
+            </div>
+          </section>
+        </div>
 
-        {error && <p className="error">{error}</p>}
-        {ok && <p className="success">{ok}</p>}
-
-        {canEdit ? (
-          <button type="submit" className="btn btn-primary" disabled={saving}>
-            {saving ? "Salvando…" : "Salvar caracterização"}
-          </button>
-        ) : (
-          <p className="fx-card-sub">Somente gestor ou administrador pode editar. Você pode consultar e usar o assistente.</p>
-        )}
+        <footer className="municipio-footer">
+          {error && (
+            <div className="municipio-alert municipio-alert--error" role="alert">
+              {error}
+            </div>
+          )}
+          {ok && (
+            <div className="municipio-alert municipio-alert--ok" role="status">
+              {ok}
+            </div>
+          )}
+          <div className="municipio-footer-actions">
+            {!canEdit && (
+              <p className="municipio-readonly-hint">
+                Somente gestor ou administrador pode editar.
+              </p>
+            )}
+            {canEdit ? (
+              <button type="submit" className="municipio-save-btn" disabled={saving}>
+                <Save size={18} />
+                <span>{saving ? "Salvando…" : "Salvar caracterização"}</span>
+              </button>
+            ) : (
+              <Link to="/assistente" className="municipio-save-btn municipio-save-btn--link">
+                <Link2 size={18} />
+                <span>Abrir VigIA</span>
+              </Link>
+            )}
+          </div>
+        </footer>
       </form>
     </div>
   );
