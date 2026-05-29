@@ -8,7 +8,14 @@ from typing import Literal
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-MetricKind = Literal["familias", "familias_crianca_sisc", "pessoas", "por_cras"]
+MetricKind = Literal["familias", "familias_crianca_sisc", "pessoas", "pessoas_crianca_sisc", "por_cras"]
+
+_ADOL_12_17 = re.compile(r"12\s*(?:a|-|á)\s*17|adolesc|12\s*17", re.I)
+_CRIANCA_COUNT = re.compile(
+    r"quantas?\s+(?:crianç|crianc|adolesc)|quantos?\s+(?:crianç|crianc|adolesc)|"
+    r"(?:crianç|crianc|adolesc)[a-z\s]*/\s*(?:adolesc|crianç)",
+    re.I,
+)
 
 _SISC = re.compile(r"sisc|conviv|scfv|servi[cç]o\s+de\s+conviv", re.I)
 _PBF = re.compile(r"pbf|bolsa\s+fam|folha|benef[ií]cio", re.I)
@@ -47,11 +54,20 @@ def detect_metric_kind(message: str, transcript: list[dict[str, str]] | None) ->
     if _CRAS_BREAKDOWN.search(message) or _CRAS_BREAKDOWN.search(blob):
         return "por_cras"
 
+    # Contagem de crianças/adolescentes (NIS), inclusive follow-up "dessas famílias quantas crianças…"
+    if _CRIANCA_COUNT.search(message) or (
+        _CRIANCA.search(message) and re.search(r"quantas|quantos", message, re.I)
+    ):
+        return "pessoas_crianca_sisc"
+
     # Pergunta explícita por pessoas/atendidos/NIS
     if _PESSOAS.search(message):
         return "pessoas"
 
     # Famílias com crianças no SISC (não confundir com contagem de NIS criança)
+    if re.search(r"quantas?\s+fam|quantos?\s+fam", message, re.I) and _CRIANCA.search(blob):
+        return "familias_crianca_sisc"
+
     if (_FAMILIAS.search(message) or _FAMILIAS.search(blob)) and _CRIANCA.search(blob):
         return "familias_crianca_sisc"
 
@@ -93,13 +109,16 @@ def build_filters(message: str, transcript: list[dict[str, str]] | None) -> tupl
 
     kind = detect_metric_kind(message, transcript)
 
-    if kind == "familias_crianca_sisc":
+    if kind in ("familias_crianca_sisc", "pessoas_crianca_sisc"):
         parts.append("s.classificacao_faixa_idade IN ('crianca_0_11', 'adolescente_12_17')")
-        labels.append("com criança/adolescente matriculado(a) no SISC")
+        if kind == "pessoas_crianca_sisc":
+            labels.append("crianças/adolescentes (NIS distintos)")
+        else:
+            labels.append("com criança/adolescente matriculado(a) no SISC")
 
-    if kind == "pessoas" and _THOSE_FAMILIES.search(message) and _CRIANCA.search(blob):
+    if kind in ("pessoas", "pessoas_crianca_sisc") and _THOSE_FAMILIES.search(message):
         extra_scope = _subfamily_scope_sql(pbf_in_blob)
-        labels.append("integrantes das famílias PBF com criança no SISC (follow-up)")
+        labels.append("integrantes das famílias do contexto anterior (follow-up)")
 
     return " AND ".join(parts), labels, extra_scope
 
@@ -119,6 +138,7 @@ def run_sisc_cadu_query(
     where_sql, filter_labels, extra_scope = build_filters(message, transcript)
     kind = detect_metric_kind(message, transcript)
     ctx_txt = ", ".join(filter_labels)
+    pbf_in_blob = bool(_PBF.search(conversation_blob(message, transcript)))
 
     if kind == "por_cras":
         sql = f"""
@@ -165,8 +185,9 @@ def run_sisc_cadu_query(
         row = conn.execute(text(sql)).mappings().first()
         n = int((row or {}).get("total") or 0)
         if kind == "familias_crianca_sisc":
+            pbf_txt = " na folha PBF" if pbf_in_blob else ""
             lead = (
-                f"Há **{_fmt_int(n)}** famílias na folha PBF com pelo menos uma "
+                f"Há **{_fmt_int(n)}** famílias{pbf_txt} com pelo menos uma "
                 f"criança/adolescente matriculado(a) no **Serviço de Convivência (SISC)** ({ctx_txt})."
             )
             metric = "pbf_familias_crianca_sisc"
@@ -175,6 +196,19 @@ def run_sisc_cadu_query(
                 f"Há **{_fmt_int(n)}** famílias com integrante no **SISC** ({ctx_txt})."
             )
             metric = "familias_sisc"
+    elif kind == "pessoas_crianca_sisc":
+        sql = f"""
+            SELECT COUNT(DISTINCT s.nis_norm)::bigint AS total
+            FROM vig.mvw_sisc_qualificado s
+            WHERE {where_sql}{extra_scope}
+        """
+        row = conn.execute(text(sql)).mappings().first()
+        n = int((row or {}).get("total") or 0)
+        lead = (
+            f"Há **{_fmt_int(n)}** crianças/adolescentes (**NIS distintos**) no "
+            f"**Serviço de Convivência (SISC)** ({ctx_txt})."
+        )
+        metric = "pessoas_crianca_sisc"
     else:
         sql = f"""
             SELECT COUNT(DISTINCT s.nis_norm)::bigint AS total

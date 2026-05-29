@@ -22,13 +22,6 @@ type ChatResponse = {
   error?: string;
 };
 
-const SUGESTOES = [
-  "Quantas famílias estão na folha do PBF?",
-  "Famílias PBF com crianças no Serviço de Convivência",
-  "Divida os atendidos do SISC por CRAS",
-  "Total de famílias no CRAS Bonfim (território CADU)",
-];
-
 function renderInlineMarkdown(text: string): ReactNode[] {
   const nodes: ReactNode[] = [];
   const parts = text.split(/(\*\*[^*]+\*\*)/g);
@@ -43,33 +36,6 @@ function renderInlineMarkdown(text: string): ReactNode[] {
     });
   });
   return nodes;
-}
-
-function Welcome({ onPick, disabled }: { onPick: (text: string) => void; disabled: boolean }) {
-  return (
-    <div className="assist-welcome">
-      <div className="assist-welcome-icon" aria-hidden>
-        <Sparkles size={28} strokeWidth={1.5} />
-      </div>
-      <h2 className="assist-welcome-title">Como posso ajudar?</h2>
-      <p className="assist-welcome-sub">
-        Pergunte sobre CADU, PBF, CRAS ou SISC — em linguagem natural, com contexto na conversa.
-      </p>
-      <div className="assist-chips">
-        {SUGESTOES.map((s) => (
-          <button
-            key={s}
-            type="button"
-            className="assist-chip"
-            disabled={disabled}
-            onClick={() => onPick(s)}
-          >
-            {s}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 function TypingIndicator() {
@@ -176,10 +142,6 @@ export default function AssistPage({ token }: Props) {
         </header>
 
         <div className="assist-thread" role="log" aria-label="Mensagens">
-          {messages.length === 0 && !loading && (
-            <Welcome onPick={(s) => void sendMessage(s)} disabled={loading} />
-          )}
-
           {messages.map((msg, i) => (
             <div
               key={`${i}-${msg.role}`}
