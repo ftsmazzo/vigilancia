@@ -22,16 +22,26 @@ def _ensure_configured() -> None:
         )
 
 
+def resolve_model(role: str | None = None) -> str:
+    if role == "orch" and settings.assist_orch_model:
+        return settings.assist_orch_model
+    if role == "sql" and settings.assist_sql_model:
+        return settings.assist_sql_model
+    return settings.assist_llm_model
+
+
 def chat_completion(
     messages: list[dict[str, str]],
     *,
     json_mode: bool = False,
     temperature: float = 0.1,
+    model: str | None = None,
+    role: str | None = None,
 ) -> str:
     _ensure_configured()
     url = f"{settings.assist_llm_base_url.rstrip('/')}/chat/completions"
     body: dict = {
-        "model": settings.assist_llm_model,
+        "model": model or resolve_model(role),
         "messages": messages,
         "temperature": temperature,
     }

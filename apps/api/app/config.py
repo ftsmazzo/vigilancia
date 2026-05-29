@@ -38,10 +38,18 @@ class Settings(BaseSettings):
     # Origens CORS permitidas, separadas por vírgula. Use "*" só em desenvolvimento.
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
-    # Assistente de vigilância (text-to-SQL + resposta)
+    # Assistente VigIA (xAI Grok ou API OpenAI-compatível)
     assist_llm_api_key: str | None = None
-    assist_llm_base_url: str = "https://api.openai.com/v1"
-    assist_llm_model: str = "gpt-4o-mini"
+    assist_llm_base_url: str = "https://api.x.ai/v1"
+    assist_llm_model: str = "grok-4-1-fast-reasoning"
+    # Modelos opcionais por papel (padrão = assist_llm_model)
+    assist_orch_model: str | None = None
+    assist_sql_model: str | None = None
+
+    # RAG — políticas SUAS (POST JSON: {"query": "...", "topK": N})
+    kb_api_url: str | None = None
+    kb_api_key: str | None = None
+    kb_top_k: int = 3
 
     # Dicionário CADU (dicionariotudo.csv) para o assistente
     cadu_dictionary_path: str | None = None

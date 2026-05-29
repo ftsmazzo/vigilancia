@@ -58,9 +58,14 @@ Configure **Build Path** como `/` (raiz) e aponte o Dockerfile de cada servico:
 | `JWT_ALGORITHM` | Nao | Padrao: `HS256` |
 | `JWT_EXPIRE_MINUTES` | Nao | Padrao: `60` |
 | `REDIS_URL` | Nao por enquanto | Ex.: `redis://host-interno:6379/0` (reservado para filas de ingestao). |
-| `ASSIST_LLM_API_KEY` | Assistente IA | Chave OpenAI (ou compatível). Sem ela, `/assistente` retorna 503. |
-| `ASSIST_LLM_BASE_URL` | Nao | Padrao: `https://api.openai.com/v1` (Ollama, Azure OpenAI, etc.). |
-| `ASSIST_LLM_MODEL` | Nao | Padrao: `gpt-4o-mini`. |
+| `ASSIST_LLM_API_KEY` | Assistente IA | Chave xAI/Grok ou OpenAI-compatível. Sem ela, `/assistente` retorna 503. |
+| `ASSIST_LLM_BASE_URL` | Nao | Padrao: `https://api.x.ai/v1` (OpenAI, Ollama, etc.). |
+| `ASSIST_LLM_MODEL` | Nao | Padrao: `grok-4-1-fast-reasoning`. |
+| `ASSIST_ORCH_MODEL` | Nao | Modelo do Orquestrador VigIA (padrao = ASSIST_LLM_MODEL). |
+| `ASSIST_SQL_MODEL` | Nao | Modelo do AgenteSQL (padrao = ASSIST_LLM_MODEL). |
+| `KB_API_URL` | RAG SUAS | URL POST da base de conhecimento (ex.: `https://.../api/kb/5/query`). |
+| `KB_API_KEY` | RAG SUAS | Bearer token da API de KB. |
+| `KB_TOP_K` | Nao | Trechos RAG por consulta; padrao: 3. |
 | `BOOTSTRAP_SUPERADMIN_EMAIL` | Primeiro deploy | Email do primeiro SuperAdmin. |
 | `BOOTSTRAP_SUPERADMIN_PASSWORD` | Primeiro deploy | Senha inicial (troque apos o primeiro login se desejar). |
 | `BOOTSTRAP_SUPERADMIN_NAME` | Nao | Nome exibido; padrao: `Super Admin`. |
