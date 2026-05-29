@@ -213,7 +213,11 @@ def _personalize_canonical(answer: str, user: User) -> str:
     if not first or answer.startswith(first):
         return answer
     if answer.startswith("Há "):
-        return f"{first}, h{answer[2:]}"
+        return f"{first}, {answer[0].lower()}{answer[1:]}"
+    if answer.startswith("O CRAS"):
+        return f"{first}, {answer[0].lower()}{answer[1:]}"
+    if answer.startswith("**Serviço"):
+        return f"{first}, {answer}"
     return f"{first}, {answer}"
 
 

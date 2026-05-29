@@ -22,13 +22,22 @@ _PBF = re.compile(r"pbf|bolsa\s+fam|folha|benef[ií]cio", re.I)
 _CRIANCA = re.compile(r"criança|crianca|menor|adolesc", re.I)
 _PESSOAS = re.compile(r"pessoa|pessoas|atendidos|nis|integrantes|indiv[ií]duo", re.I)
 _FAMILIAS = re.compile(r"fam[ií]lia|familias", re.I)
+_CRAS = re.compile(r"\bcras\b", re.I)
 _CRAS_BREAKDOWN = re.compile(
-    r"por\s+cras|cada\s+cras|divide|divid|detalh|distribu|desdobr|granula",
+    r"por\s+cras|cada\s+cras|divide|divid|detalh|distribu|desdobr|granula|"
+    r"separad\s+por\s+cras",
     re.I,
 )
-_THOSE_FAMILIES = re.compile(
-    r"essas\s+fam|dessas\s+fam|representam|entre\s+elas|desse\s+grupo|"
-    r"nesse\s+grupo|dessas\s+crianç|dessas\s+crianc",
+_CRAS_RANKING = re.compile(
+    r"qual\s+(?:dos?\s+)?cras|qual\s+o\s+cras|"
+    r"cras\s+(?:que\s+)?(?:tem|t[eê]m|atende)\s+(?:mais|o\s+maior)|"
+    r"(?:mais|maior)\s+(?:pessoas|atendidos|gente).*cras|"
+    r"cras\s+.*(?:mais|maior|l[ií]der|top)",
+    re.I,
+)
+_CONTEXT_REF = re.compile(
+    r"dessas|essas|destas|desse\s+grupo|dessas\s+pesso|essas\s+pesso|"
+    r"dentro\s+dessas|dentro\s+destas",
     re.I,
 )
 
@@ -48,26 +57,46 @@ def is_sisc_context(message: str, transcript: list[dict[str, str]] | None) -> bo
     return bool(_SISC.search(message) or _SISC.search(blob))
 
 
-def detect_metric_kind(message: str, transcript: list[dict[str, str]] | None) -> MetricKind:
+def wants_cras_breakdown(message: str, transcript: list[dict[str, str]] | None) -> bool:
     blob = conversation_blob(message, transcript)
-
     if _CRAS_BREAKDOWN.search(message) or _CRAS_BREAKDOWN.search(blob):
+        return True
+    if _CRAS_RANKING.search(message):
+        return True
+    # "qual CRAS …" com convivência/SISC no contexto
+    if _CRAS.search(message) and _SISC.search(blob) and re.search(
+        r"qual|mais|maior|atende|ranking", message, re.I
+    ):
+        return True
+    return False
+
+
+def wants_cras_top_only(message: str) -> bool:
+    return bool(
+        _CRAS_RANKING.search(message)
+        or re.search(r"qual\s+.*cras|cras\s+.*mais|mais\s+.*cras", message, re.I)
+    )
+
+
+def detect_metric_kind(message: str, transcript: list[dict[str, str]] | None) -> MetricKind:
+    if wants_cras_breakdown(message, transcript):
         return "por_cras"
 
-    # Contagem de crianças/adolescentes (NIS), inclusive follow-up "dessas famílias quantas crianças…"
+    # Contagem de crianças/adolescentes (NIS)
     if _CRIANCA_COUNT.search(message) or (
         _CRIANCA.search(message) and re.search(r"quantas|quantos", message, re.I)
     ):
         return "pessoas_crianca_sisc"
 
-    # Pergunta explícita por pessoas/atendidos/NIS
     if _PESSOAS.search(message):
         return "pessoas"
 
-    # Famílias com crianças no SISC (não confundir com contagem de NIS criança)
-    if re.search(r"quantas?\s+fam|quantos?\s+fam", message, re.I) and _CRIANCA.search(blob):
+    if re.search(r"quantas?\s+fam|quantos?\s+fam", message, re.I) and _CRIANCA.search(
+        conversation_blob(message, transcript)
+    ):
         return "familias_crianca_sisc"
 
+    blob = conversation_blob(message, transcript)
     if (_FAMILIAS.search(message) or _FAMILIAS.search(blob)) and _CRIANCA.search(blob):
         return "familias_crianca_sisc"
 
@@ -77,8 +106,8 @@ def detect_metric_kind(message: str, transcript: list[dict[str, str]] | None) ->
     return "pessoas"
 
 
-def _subfamily_scope_sql(pbf_in_blob: bool) -> str:
-    """Restringe às famílias PBF com criança/adolescente no SISC (contexto da pergunta anterior)."""
+def _pbf_child_subfamily_scope(pbf_in_blob: bool) -> str:
+    """Famílias PBF com criança/adolescente matriculado no SISC."""
     pbf = " AND COALESCE(s2.familia_na_folha_pbf, FALSE)" if pbf_in_blob else ""
     return f"""
       AND s.codigo_familiar IN (
@@ -91,8 +120,15 @@ def _subfamily_scope_sql(pbf_in_blob: bool) -> str:
     """
 
 
+def _needs_pbf_child_subfamily_scope(message: str, transcript: list[dict[str, str]] | None) -> bool:
+    """Escopo restrito só quando a conversa trata explicitamente de PBF + crianças no SISC."""
+    if not _CONTEXT_REF.search(message):
+        return False
+    blob = conversation_blob(message, transcript)
+    return bool(_PBF.search(blob) and _CRIANCA.search(blob) and _SISC.search(blob))
+
+
 def build_filters(message: str, transcript: list[dict[str, str]] | None) -> tuple[str, list[str], str]:
-    """Retorna cláusula WHERE (sem WHERE), rótulos e SQL extra de escopo familiar."""
     blob = conversation_blob(message, transcript)
     parts = [_BASE_WHERE.strip()]
     labels: list[str] = ["vinculados ao CADU (SISC × NIS)"]
@@ -116,15 +152,63 @@ def build_filters(message: str, transcript: list[dict[str, str]] | None) -> tupl
         else:
             labels.append("com criança/adolescente matriculado(a) no SISC")
 
-    if kind in ("pessoas", "pessoas_crianca_sisc") and _THOSE_FAMILIES.search(message):
-        extra_scope = _subfamily_scope_sql(pbf_in_blob)
-        labels.append("integrantes das famílias do contexto anterior (follow-up)")
+    if _needs_pbf_child_subfamily_scope(message, transcript):
+        extra_scope = _pbf_child_subfamily_scope(pbf_in_blob)
+        labels.append("famílias PBF com criança no SISC (contexto da conversa)")
 
     return " AND ".join(parts), labels, extra_scope
 
 
 def _fmt_int(n: int) -> str:
     return f"{n:,}".replace(",", ".")
+
+
+def _format_por_cras_answer(
+    rows: list[dict],
+    message: str,
+    ctx_txt: str,
+    top_only: bool,
+) -> str:
+    if not rows:
+        return (
+            "Não há atendidos no SISC com os filtros aplicados "
+            f"({ctx_txt})."
+        )
+
+    total = sum(int(r["atendidos"] or 0) for r in rows)
+    foot = (
+        "\n\n**Fonte:** `vig.mvw_sisc_qualificado` (matrícula SISC). "
+        "CRAS listado é o da **matrícula SISC**, não o territorial do CADU (`vig.mvw_familia`)."
+    )
+
+    if top_only:
+        top = rows[0]
+        n_top = int(top["atendidos"] or 0)
+        lead = (
+            f"O CRAS com **maior** número de pessoas no **Serviço de Convivência (SISC)** é "
+            f"**{top['cras_nome']}** (código **{top['cras_codigo']}**), com "
+            f"**{_fmt_int(n_top)}** atendidos (NIS distintos) ({ctx_txt})."
+        )
+        if len(rows) > 1:
+            others = [
+                f"- **{r['cras_nome']}** ({r['cras_codigo']}): {_fmt_int(int(r['atendidos'] or 0))}"
+                for r in rows[1:8]
+            ]
+            lead += "\n\n**Demais unidades (SISC):**\n" + "\n".join(others)
+        return lead + foot
+
+    linhas = [
+        f"- **{r['cras_nome']}** ({r['cras_codigo']}): {_fmt_int(int(r['atendidos'] or 0))} atendidos"
+        for r in rows[:20]
+    ]
+    extra = f"\n\n… e mais {len(rows) - 20} unidades." if len(rows) > 20 else ""
+    return (
+        f"**Serviço de Convivência (SISC)** — **{_fmt_int(total)}** atendidos (NIS) "
+        f"em **{len(rows)}** unidades ({ctx_txt}).\n\n"
+        + "\n".join(linhas)
+        + extra
+        + foot
+    )
 
 
 def run_sisc_cadu_query(
@@ -153,17 +237,11 @@ def run_sisc_cadu_query(
             LIMIT 30
         """
         rows = [dict(r) for r in conn.execute(text(sql)).mappings().all()]
-        total = sum(int(r["atendidos"] or 0) for r in rows)
-        linhas = [
-            f"- **{r['cras_nome']}** ({r['cras_codigo']}): {_fmt_int(int(r['atendidos'] or 0))} atendidos"
-            for r in rows[:20]
-        ]
-        answer = (
-            f"**Serviço de Convivência (SISC)** — **{_fmt_int(total)}** atendidos (NIS) "
-            f"em **{len(rows)}** unidades ({ctx_txt}).\n\n"
-            + "\n".join(linhas)
-            + "\n\n**Fonte:** `vig.mvw_sisc_qualificado` (matrícula SISC). "
-            "CRAS listado é o da **matrícula SISC**, não o territorial do CADU (`vig.mvw_familia`)."
+        answer = _format_por_cras_answer(
+            rows,
+            message,
+            ctx_txt,
+            top_only=wants_cras_top_only(message),
         )
         return {
             "answer": answer,
