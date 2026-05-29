@@ -103,49 +103,7 @@ type SiscKpis = {
   por_frequenta_escola?: BarItem[];
 };
 
-function BarChart({
-  title,
-  subtitle,
-  items,
-  maxBars = 10,
-}: {
-  title: string;
-  subtitle?: string;
-  items: BarItem[];
-  maxBars?: number;
-}) {
-  const slice = items.slice(0, maxBars);
-  const max = Math.max(...slice.map((i) => i.total), 1);
-  return (
-    <div className="chart-panel fx-card">
-      <h3 className="chart-panel-title">{title}</h3>
-      {subtitle && <p className="chart-panel-sub">{subtitle}</p>}
-      {slice.length === 0 ? (
-        <p className="ingestao-desc">Sem dados.</p>
-      ) : (
-        <ul className="chart-bars" aria-label={title}>
-          {slice.map((item) => (
-            <li key={item.rotulo} className="chart-bar-row">
-              <span className="chart-bar-label" title={item.rotulo}>
-                {rotuloAmigavel(item.rotulo)}
-              </span>
-              <div className="chart-bar-track">
-                <div
-                  className="chart-bar-fill"
-                  style={{ width: `${Math.max(4, (item.total / max) * 100)}%` }}
-                />
-              </div>
-              <span className="chart-bar-value">
-                {item.total.toLocaleString("pt-BR")}{" "}
-                <small>({item.pct.toLocaleString("pt-BR")}%)</small>
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
+import BarChartPanel from "../components/charts/BarChartPanel";
 
 export default function ConvivenciaPage({ token }: Props) {
   const [loading, setLoading] = useState(false);
@@ -340,34 +298,34 @@ export default function ConvivenciaPage({ token }: Props) {
           </div>
 
           <div className="chart-grid">
-            <BarChart
+            <BarChartPanel
               title="Sexo"
               subtitle="Somente vinculados ao CADU"
               items={kpis.por_sexo ?? []}
               maxBars={6}
             />
-            <BarChart title="Raça / cor" subtitle="Códigos CadÚnico" items={kpis.por_raca ?? []} />
-            <BarChart title="Escolaridade" subtitle="Grau de instrução (CADU)" items={kpis.por_escolaridade ?? []} />
-            <BarChart title="Faixa etária (idade CADU)" items={kpis.por_faixa_idade_cadu ?? []} />
-            <BarChart title="Frequenta escola" items={kpis.por_frequenta_escola ?? []} maxBars={5} />
+            <BarChartPanel title="Raça / cor" subtitle="Códigos CadÚnico" items={kpis.por_raca ?? []} />
+            <BarChartPanel title="Escolaridade" subtitle="Grau de instrução (CADU)" items={kpis.por_escolaridade ?? []} />
+            <BarChartPanel title="Faixa etária (idade CADU)" items={kpis.por_faixa_idade_cadu ?? []} />
+            <BarChartPanel title="Frequenta escola" items={kpis.por_frequenta_escola ?? []} maxBars={5} />
           </div>
 
           <h2 className="kpi-section-title">Deficiência e vulnerabilidades</h2>
           <div className="chart-grid">
-            <BarChart title="Tipo de deficiência" subtitle="Vinculados ao CADU" items={kpis.por_deficiencia ?? []} />
-            <BarChart title="Perfil social (família)" items={kpis.por_classificacao_social ?? []} />
-            <BarChart title="Vínculo com CADU" items={kpis.por_vinculo ?? []} maxBars={5} />
+            <BarChartPanel title="Tipo de deficiência" subtitle="Vinculados ao CADU" items={kpis.por_deficiencia ?? []} />
+            <BarChartPanel title="Perfil social (família)" items={kpis.por_classificacao_social ?? []} />
+            <BarChartPanel title="Vínculo com CADU" items={kpis.por_vinculo ?? []} maxBars={5} />
           </div>
             </>
           )}
 
           <h2 className="kpi-section-title">Serviço de convivência (SISC)</h2>
           <div className="chart-grid">
-            <BarChart title="Faixa etária (relatório SISC)" items={kpis.por_faixa_etaria ?? []} />
-            <BarChart title="Atendimento prioritário" items={kpis.por_atendimento ?? []} maxBars={5} />
-            <BarChart title="Intergeracional" items={kpis.por_intergeracional ?? []} maxBars={5} />
-            <BarChart title="Grupos / turmas" items={kpis.por_grupo ?? []} />
-            <BarChart title="Por CRAS" items={kpis.por_cras ?? []} maxBars={8} />
+            <BarChartPanel title="Faixa etária (relatório SISC)" items={kpis.por_faixa_etaria ?? []} />
+            <BarChartPanel title="Atendimento prioritário" items={kpis.por_atendimento ?? []} maxBars={5} />
+            <BarChartPanel title="Intergeracional" items={kpis.por_intergeracional ?? []} maxBars={5} />
+            <BarChartPanel title="Grupos / turmas" items={kpis.por_grupo ?? []} />
+            <BarChartPanel title="Por CRAS" items={kpis.por_cras ?? []} maxBars={8} />
           </div>
         </>
       )}

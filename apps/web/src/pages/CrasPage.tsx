@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { rotuloAmigavel } from "../lib/caduLabels";
+import BarChartPanel from "../components/charts/BarChartPanel";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -94,46 +95,6 @@ type CrasPainel = {
   por_faixa_renda?: BarItem[];
   sisc?: SiscPainel;
 };
-
-function BarChart({
-  title,
-  subtitle,
-  items,
-  translate = true,
-}: {
-  title: string;
-  subtitle?: string;
-  items: BarItem[];
-  translate?: boolean;
-}) {
-  const slice = items.slice(0, 12);
-  const max = Math.max(...slice.map((i) => i.total), 1);
-  return (
-    <div className="chart-panel fx-card">
-      <h3 className="chart-panel-title">{title}</h3>
-      {subtitle && <p className="chart-panel-sub">{subtitle}</p>}
-      {slice.length === 0 ? (
-        <p className="ingestao-desc">Sem dados.</p>
-      ) : (
-        <ul className="chart-bars">
-          {slice.map((item) => (
-            <li key={item.rotulo} className="chart-bar-row">
-              <span className="chart-bar-label" title={item.rotulo}>
-                {translate ? rotuloAmigavel(item.rotulo) : item.rotulo}
-              </span>
-              <div className="chart-bar-track">
-                <div className="chart-bar-fill" style={{ width: `${Math.max(4, (item.total / max) * 100)}%` }} />
-              </div>
-              <span className="chart-bar-value">
-                {item.total.toLocaleString("pt-BR")} <small>({item.pct.toLocaleString("pt-BR")}%)</small>
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
 
 export default function CrasPage({ token }: Props) {
   const [catalog, setCatalog] = useState<CrasCatalogItem[]>([]);
@@ -282,7 +243,7 @@ export default function CrasPage({ token }: Props) {
             Faixa etária (CADU — todas as pessoas do recorte)
           </h3>
           <div className="chart-grid">
-            <BarChart title="Distribuição por idade" items={painel.por_faixa_idade ?? []} />
+            <BarChartPanel title="Distribuição por idade" items={painel.por_faixa_idade ?? []} />
           </div>
 
           {!isTodos && (
@@ -291,11 +252,11 @@ export default function CrasPage({ token }: Props) {
                 Perfil da unidade (CADU)
               </h3>
               <div className="chart-grid">
-                <BarChart title="Escolaridade" subtitle="p.grau_instrucao" items={painel.por_escolaridade ?? []} />
-                <BarChart title="Tipo de deficiência" items={painel.por_deficiencia ?? []} />
-                <BarChart title="Raça / cor" items={painel.por_raca ?? []} />
-                <BarChart title="Bairros (famílias)" items={painel.por_bairro ?? []} translate={false} />
-                <BarChart title="Faixa renda familiar" items={painel.por_faixa_renda ?? []} translate={false} />
+                <BarChartPanel title="Escolaridade" subtitle="p.grau_instrucao" items={painel.por_escolaridade ?? []} />
+                <BarChartPanel title="Tipo de deficiência" items={painel.por_deficiencia ?? []} />
+                <BarChartPanel title="Raça / cor" items={painel.por_raca ?? []} />
+                <BarChartPanel title="Bairros (famílias)" items={painel.por_bairro ?? []} />
+                <BarChartPanel title="Faixa renda familiar" items={painel.por_faixa_renda ?? []} />
               </div>
             </>
           )}
@@ -333,12 +294,11 @@ export default function CrasPage({ token }: Props) {
                 </article>
               </div>
               <div className="chart-grid">
-                <BarChart
+                <BarChartPanel
                   title="Faixa etária (relatório SISC)"
                   items={sisc.por_faixa_etaria ?? []}
-                  translate={false}
                 />
-                <BarChart title="Grupos / turmas SISC" items={sisc.por_grupo ?? []} translate={false} />
+                <BarChartPanel title="Grupos / turmas SISC" items={sisc.por_grupo ?? []} />
               </div>
             </>
           )}
