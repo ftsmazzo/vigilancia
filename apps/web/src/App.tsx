@@ -1,5 +1,19 @@
 import { useEffect, useState, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from "react";
 import { BrowserRouter, Navigate, NavLink, Route, Routes } from "react-router-dom";
+import { 
+  LayoutDashboard, 
+  Database, 
+  Activity, 
+  Users, 
+  MapPin, 
+  PieChart, 
+  Sparkles, 
+  Building, 
+  UserCog, 
+  LogOut,
+  Menu,
+  X
+} from "lucide-react";
 import IngestaoPage from "./pages/IngestaoPage";
 import PainelIndicadoresInicio from "./pages/PainelIndicadoresInicio";
 import UsuariosPage from "./pages/UsuariosPage";
@@ -48,9 +62,17 @@ function AppShell({
   onLogout: () => void;
   children: ReactNode;
 }) {
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
   return (
     <div className="shell">
-      <header className="shell-header fx-glass">
+      {/* Mobile Sidebar Overlay */}
+      {isSidebarOpen && (
+        <div className="sidebar-overlay" onClick={() => setIsSidebarOpen(false)} aria-hidden="true" />
+      )}
+
+      {/* Sidebar */}
+      <aside className={`shell-sidebar fx-glass ${isSidebarOpen ? "open" : ""}`}>
         <div className="shell-brand">
           <span className="shell-logo" aria-hidden>
             VS
@@ -61,52 +83,74 @@ function AppShell({
           </div>
         </div>
 
-        <nav className="main-nav shell-nav" aria-label="Principal">
+        <nav className="shell-nav" aria-label="Principal" onClick={() => setIsSidebarOpen(false)}>
           <NavLink to="/" end className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-            Início
+            <LayoutDashboard className="nav-icon" size={18} />
+            <span>Início</span>
           </NavLink>
           <NavLink to="/ingestao" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-            Ingestão
+            <Database className="nav-icon" size={18} />
+            <span>Ingestão</span>
           </NavLink>
           <NavLink to="/vigilancia" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-            Vigilância
+            <Activity className="nav-icon" size={18} />
+            <span>Vigilância</span>
           </NavLink>
           <NavLink to="/convivencia" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-            Convivência
+            <Users className="nav-icon" size={18} />
+            <span>Convivência</span>
           </NavLink>
           <NavLink to="/cras" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-            CRAS
+            <MapPin className="nav-icon" size={18} />
+            <span>CRAS</span>
           </NavLink>
-          <NavLink
-            to="/caracterizacao"
-            className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
-          >
-            Caracterização
+          <NavLink to="/caracterizacao" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+            <PieChart className="nav-icon" size={18} />
+            <span>Caracterização</span>
           </NavLink>
           <NavLink to="/assistente" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-            Assistente
+            <Sparkles className="nav-icon" size={18} />
+            <span>Assistente</span>
           </NavLink>
           <NavLink to="/municipio" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-            Município
+            <Building className="nav-icon" size={18} />
+            <span>Município</span>
           </NavLink>
           {me?.role === "superadmin" && (
             <NavLink to="/usuarios" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-              Usuários
+              <UserCog className="nav-icon" size={18} />
+              <span>Usuários</span>
             </NavLink>
           )}
         </nav>
+      </aside>
 
-        <div className="shell-user">
-          <span className="shell-session">
-            {loadingMe ? "Carregando sessão…" : `${me?.name ?? "—"} · ${me?.role ?? ""}`}
-          </span>
-          <button type="button" className="btn btn-ghost" onClick={onLogout}>
-            Sair
+      {/* Main Content Area */}
+      <div className="shell-content">
+        <header className="shell-topbar fx-glass">
+          <button 
+            type="button" 
+            className="btn-icon mobile-menu-btn" 
+            onClick={() => setIsSidebarOpen(true)}
+            aria-label="Abrir menu"
+          >
+            <Menu size={20} />
           </button>
-        </div>
-      </header>
 
-      <main className="shell-main">{children}</main>
+          <div className="shell-user">
+            <div className="shell-session">
+              <span className="user-name">{loadingMe ? "Carregando…" : me?.name ?? "—"}</span>
+              <span className="user-role">{me?.role ?? ""}</span>
+            </div>
+            <button type="button" className="btn btn-ghost btn-sm logout-btn" onClick={onLogout}>
+              <LogOut size={16} />
+              <span>Sair</span>
+            </button>
+          </div>
+        </header>
+
+        <main className="shell-main">{children}</main>
+      </div>
     </div>
   );
 }

@@ -7,45 +7,46 @@
 :root {
   color-scheme: dark;
 
-  /* Tipografia (Finex: font-oswald display, font-sans UI) */
+  /* Tipografia */
   --fx-font-sans: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --fx-font-display: "Oswald", var(--fx-font-sans);
+  --fx-font-display: "Outfit", var(--fx-font-sans);
   --fx-font-mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
 
-  /* Fundos (seção Colors do DS) */
-  --fx-bg-page: #000000;
-  --fx-bg-main: #050505;
-  --fx-bg-card: #0a0a0c;
-  --fx-bg-chart: #101018;
-  --fx-bg-input: #111111;
-  --fx-surface: rgba(10, 10, 12, 0.92);
-  --fx-surface-solid: #0a0a0c;
+  /* Fundos (Deep Slate/Navy) */
+  --fx-bg-page: #0f172a;       /* slate-900 */
+  --fx-bg-main: #0b1120;       /* slate-950 */
+  --fx-bg-card: #1e293b;       /* slate-800 */
+  --fx-bg-chart: #0f172a;
+  --fx-bg-input: #0f172a;
+  --fx-surface: rgba(30, 41, 59, 0.85);
+  --fx-surface-solid: #1e293b;
 
-  /* Bordas Finex: white/5 · /10 · /20 (hover) */
-  --fx-border: rgba(255, 255, 255, 0.1);
-  --fx-border-subtle: rgba(255, 255, 255, 0.05);
-  --fx-border-hover: rgba(255, 255, 255, 0.2);
+  /* Bordas */
+  --fx-border: rgba(255, 255, 255, 0.08);
+  --fx-border-subtle: rgba(255, 255, 255, 0.04);
+  --fx-border-hover: rgba(255, 255, 255, 0.15);
 
   /* Texto */
-  --fx-text: #ffffff;
-  --fx-text-secondary: #d1d5db;
-  --fx-muted: #9ca3af;
-  --fx-subtle: #6b7280;
-  --fx-caption: #4b5563;
+  --fx-text: #f8fafc;
+  --fx-text-secondary: #cbd5e1;
+  --fx-muted: #94a3b8;
+  --fx-subtle: #64748b;
+  --fx-caption: #475569;
 
-  /* Acentos (Accent Colors do DS) */
-  --fx-primary: #3b82f6;
-  --fx-primary-light: #60a5fa;
-  --fx-primary-dim: rgba(59, 130, 246, 0.12);
-  --fx-primary-glow: 0 0 20px rgba(59, 130, 246, 0.5), inset 0 0 10px rgba(59, 130, 246, 0.2);
-  --fx-primary-glow-hover: 0 0 35px rgba(59, 130, 246, 0.6), inset 0 0 20px rgba(59, 130, 246, 0.4);
-  --fx-indigo: #6366f1;
-  --fx-indigo-deep: #4f46e5;
-  --fx-accent-dim: rgba(59, 130, 246, 0.15);
+  /* Acentos (Emerald / Teal) */
+  --fx-primary: #10b981;
+  --fx-primary-light: #34d399;
+  --fx-primary-dim: rgba(16, 185, 129, 0.15);
+  --fx-primary-glow: 0 0 20px rgba(16, 185, 129, 0.3), inset 0 0 10px rgba(16, 185, 129, 0.1);
+  --fx-primary-glow-hover: 0 0 25px rgba(16, 185, 129, 0.4), inset 0 0 15px rgba(16, 185, 129, 0.2);
+  
+  --fx-indigo: #8b5cf6;
+  --fx-indigo-deep: #7c3aed;
+  --fx-accent-dim: rgba(139, 92, 246, 0.15);
 
-  --fx-danger: #f87171;
-  --fx-success: #34d399;
-  --fx-warn: #fbbf24;
+  --fx-danger: #ef4444;
+  --fx-success: #10b981;
+  --fx-warn: #f59e0b;
 
   --fx-radius: 0.75rem;
   --fx-radius-lg: 1rem;
@@ -53,8 +54,8 @@
   --fx-radius-sm: 0.5rem;
   --fx-radius-pill: 999px;
 
-  --fx-shadow-card: 0 25px 50px -12px rgba(0, 0, 0, 0.65);
-  --fx-shadow-glow: 0 0 40px -10px rgba(59, 130, 246, 0.45);
+  --fx-shadow-card: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -4px rgba(0, 0, 0, 0.2);
+  --fx-shadow-glow: 0 0 30px -5px rgba(16, 185, 129, 0.35);
 
   font-family: var(--fx-font-sans);
   color: var(--fx-text-secondary);
@@ -230,38 +231,42 @@ body::before {
   }
 }
 
-/* Shell logado */
+/* Shell logado - Novo Layout com Sidebar */
 .shell {
   min-height: 100vh;
   display: flex;
+}
+
+.sidebar-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  z-index: 45;
+  display: none;
+}
+
+.shell-sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  display: flex;
   flex-direction: column;
-}
-
-/* Barra superior estilo pill Finex: bg-black/90, backdrop-blur-md */
-.fx-glass {
-  background: rgba(0, 0, 0, 0.9);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--fx-border-subtle);
-}
-
-.shell-header {
+  border-right: 1px solid var(--fx-border);
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(16px);
   position: sticky;
   top: 0;
-  z-index: 40;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem 1.25rem;
-  padding: 0.85rem clamp(1rem, 3vw, 2rem);
+  height: 100vh;
+  z-index: 50;
+  transition: transform 0.3s ease;
 }
 
 .shell-brand {
   display: flex;
   align-items: center;
   gap: 0.85rem;
-  min-width: 0;
+  padding: 1.5rem 1.25rem;
+  border-bottom: 1px solid var(--fx-border-subtle);
 }
 
 .shell-logo {
@@ -274,8 +279,8 @@ body::before {
   font-weight: 800;
   font-size: 0.7rem;
   letter-spacing: 0.06em;
-  color: var(--fx-bg-page);
-  background: linear-gradient(135deg, var(--fx-primary) 0%, var(--fx-primary-light) 100%);
+  color: #fff;
+  background: linear-gradient(135deg, var(--fx-primary) 0%, var(--fx-indigo) 100%);
   border-radius: 12px;
   box-shadow: var(--fx-shadow-glow);
 }
@@ -289,14 +294,14 @@ body::before {
 
 .shell-title {
   font-family: var(--fx-font-display);
-  font-weight: 500;
+  font-weight: 600;
   font-size: 1.125rem;
   letter-spacing: -0.02em;
   color: var(--fx-text);
 }
 
 .shell-tagline {
-  font-size: 0.72rem;
+  font-size: 0.65rem;
   color: var(--fx-subtle);
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -304,32 +309,81 @@ body::before {
 
 .shell-nav {
   flex: 1;
-  justify-content: center;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 1.25rem 0.75rem;
+  overflow-y: auto;
+}
+
+.shell-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.shell-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.5rem;
+  border-bottom: 1px solid var(--fx-border-subtle);
+  background: rgba(11, 17, 32, 0.8);
+  backdrop-filter: blur(12px);
+  position: sticky;
+  top: 0;
+  z-index: 40;
+}
+
+.mobile-menu-btn {
+  display: none;
+  background: transparent;
+  border: none;
+  color: var(--fx-text);
+  padding: 0.5rem;
+  cursor: pointer;
 }
 
 .shell-user {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  gap: 1.25rem;
+  margin-left: auto;
 }
 
 .shell-session {
-  font-size: 0.82rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.user-name {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--fx-text);
+}
+
+.user-role {
+  font-size: 0.7rem;
   color: var(--fx-muted);
-  max-width: 14rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.logout-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
 }
 
 .shell-main {
   flex: 1;
   width: 100%;
-  max-width: 1280px;
+  max-width: 1400px;
   margin: 0 auto;
-  padding: clamp(1.25rem, 3vw, 2rem);
+  padding: clamp(1rem, 3vw, 2.5rem);
 }
 
 /* Cards / superfícies */
@@ -522,11 +576,14 @@ button:not([class*="btn"]):disabled {
 }
 
 .nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
   text-decoration: none;
   color: var(--fx-muted);
-  padding: 0.45rem 0.85rem;
-  border-radius: var(--fx-radius-pill);
-  font-size: 0.88rem;
+  padding: 0.65rem 1rem;
+  border-radius: var(--fx-radius-sm);
+  font-size: 0.95rem;
   font-weight: 500;
   border: 1px solid transparent;
   transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease;
@@ -538,13 +595,20 @@ button:not([class*="btn"]):disabled {
   border-color: var(--fx-border);
 }
 
-/* Ativo alinhado ao item de sidebar Finex: leitura clara + borda sutil */
 .nav-link.active {
-  color: var(--fx-text);
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--fx-primary-light);
+  background: var(--fx-primary-dim);
+  border: 1px solid rgba(16, 185, 129, 0.2);
   font-weight: 600;
-  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.2);
+}
+
+.nav-icon {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.nav-link.active .nav-icon {
+  opacity: 1;
 }
 
 .error {
@@ -1516,19 +1580,21 @@ button:not([class*="btn"]):disabled {
     max-width: 100%;
   }
 
-  .shell-header {
-    flex-direction: column;
-    align-items: stretch;
+  .shell-sidebar {
+    position: fixed;
+    transform: translateX(-100%);
   }
 
-  .shell-nav {
-    justify-content: flex-start;
+  .shell-sidebar.open {
+    transform: translateX(0);
   }
 
-  .shell-user {
-    justify-content: space-between;
-    border-top: 1px solid var(--fx-border);
-    padding-top: 0.75rem;
+  .sidebar-overlay {
+    display: block;
+  }
+
+  .mobile-menu-btn {
+    display: block;
   }
 
   .user-row {
