@@ -7,6 +7,8 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg://vigsocial:vigsocial_dev@localhost:5432/vigsocial"
     redis_url: str = "redis://localhost:6379/0"
+    # TTL da memória de conversa do VigIA no Redis (horas)
+    assist_session_ttl_hours: int = 168
     jwt_secret_key: str = "change_me"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60

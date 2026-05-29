@@ -8,6 +8,10 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from ..vigilance.familia_mview import _table_exists, bolsa_folha_kpis_from_raw
+from .cras_breakdown import (
+    format_cras_breakdown_answer,
+    sort_cras_rows,
+)
 
 _FOLHA_PBF = re.compile(
     r"(?:"
@@ -33,9 +37,60 @@ _SISC = re.compile(r"sisc|conviv|scfv|servi[cç]o\s+de\s+conviv", re.I)
 _ADOL_12_17 = re.compile(r"12\s*(?:a|-|á)\s*17|adolesc|12\s*17", re.I)
 _PBF_CTX = re.compile(r"pbf|bolsa\s+fam|folha", re.I)
 _CRAS_BREAKDOWN = re.compile(
-    r"por\s+cras|cada\s+cras|divide|divid|detalh|distribu|desdobr",
+    r"por\s+cras|cada\s+cras|divide|divid|detalh|distribu|desdobr|granula|"
+    r"separad\s+por\s+cras|territorial",
     re.I,
 )
+
+
+def _try_cadu_familias_por_cras(
+    conn: Connection,
+    message: str,
+    transcript: list[dict[str, str]] | None,
+) -> dict | None:
+    """Desdobramento CADU por CRAS territorial (f.num_cras), ordem 1–12 + sem referência."""
+    blob = _conversation_blob(message, transcript)
+    if not (_CRAS_BREAKDOWN.search(message) or _CRAS_BREAKDOWN.search(blob)):
+        return None
+    # Prioriza SISC quando a pergunta é claramente sobre convivência
+    if _SISC.search(blob) and _SISC.search(message) and not re.search(
+        r"cadu|cadastro\s+[úu]nico|fam[ií]lia", message, re.I
+    ):
+        return None
+
+    if not _table_exists(conn, "vig", "mvw_familia"):
+        return None
+
+    sql = """
+        SELECT
+            f.num_cras,
+            f.nom_cras,
+            COUNT(DISTINCT f.codigo_familiar)::bigint AS total_familias
+        FROM vig.mvw_familia f
+        GROUP BY f.num_cras, f.nom_cras
+        ORDER BY
+            CASE
+                WHEN f.num_cras IS NULL OR btrim(COALESCE(f.num_cras::text, '')) = '' THEN 9999
+                ELSE NULLIF(regexp_replace(btrim(f.num_cras::text), '[^0-9].*', ''), '')::int
+            END NULLS LAST,
+            f.nom_cras
+    """
+    rows = [dict(r) for r in conn.execute(text(sql)).mappings().all()]
+    if not rows:
+        return None
+
+    answer = format_cras_breakdown_answer(
+        rows,
+        metric_label="famílias do Cadastro Único",
+    )
+    return {
+        "answer": answer,
+        "sql": " ".join(sql.split()),
+        "row_count": len(rows),
+        "preview": sort_cras_rows(rows),
+        "mode": "canonical",
+        "metric": "cadu_familias_por_cras",
+    }
 
 
 def _conversation_blob(message: str, transcript: list[dict[str, str]] | None) -> str:
@@ -193,6 +248,10 @@ def try_canonical_metric(
     sisc = _try_sisc_cross(conn, message, transcript)
     if sisc:
         return sisc
+
+    cadu_cras = _try_cadu_familias_por_cras(conn, message, transcript)
+    if cadu_cras:
+        return cadu_cras
 
     total_familias_cadu = int(
         conn.execute(text("SELECT COUNT(*)::bigint FROM vig.mvw_familia")).scalar() or 0

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..models import User
 from ..municipio_context import load_context_prompt
+from .cras_breakdown import format_cras_breakdown_answer
 from .canonical_metrics import try_canonical_metric
 from .kb_client import query_knowledge_base
 from .llm import chat_completion
@@ -53,10 +54,29 @@ ORCHESTRATOR_FINALIZE_SYSTEM = """Você é VigIA. Transforme o resultado numéri
 - Mencione o município quando souber
 - Informe o número principal com clareza
 - Contextualize em uma frase o que o indicador significa
-- Tom cordial e profissional; 2–3 frases curtas
+- Tom cordial e profissional
 - NÃO mostre SQL, JSON nem mensagens de erro técnicas
 - Use APENAS números presentes nos resultados fornecidos
+- Se o resultado for desdobramento por CRAS: liste TODOS os CRAS na ordem numérica (1 a 12),
+  inclua CRAS 9 (Bonfim Paulista) e famílias sem referência territorial — NUNCA resuma só os 5 maiores
 """
+
+
+def _municipio_nome(municipio_block: str) -> str:
+    m = re.search(r"Município:\s*\*\*([^*]+)\*\*", municipio_block)
+    return m.group(1).strip() if m else ""
+
+
+def _cras_answer_with_context(
+    rows: list[dict[str, Any]],
+    user: User,
+    municipio_block: str,
+) -> str:
+    return format_cras_breakdown_answer(
+        rows,
+        user_first_name=_first_name(user.name),
+        municipio_nome=_municipio_nome(municipio_block),
+    )
 
 
 def _first_name(full_name: str | None) -> str:
@@ -219,8 +239,15 @@ def run_orchestrator_turn(
 
     canonical = try_canonical_metric(conn, message, transcript)
     if canonical:
+        answer = canonical["answer"]
+        if canonical.get("metric") == "cadu_familias_por_cras":
+            answer = _cras_answer_with_context(
+                canonical.get("preview") or [],
+                user,
+                municipio_block,
+            )
         return {
-            "answer": canonical["answer"],
+            "answer": answer,
             "sql": canonical.get("sql"),
             "row_count": canonical.get("row_count", 0),
             "preview": canonical.get("preview") or [],
@@ -228,7 +255,10 @@ def run_orchestrator_turn(
         }
 
     sql_result = run_sql_agent(conn, db, sql_question)
-    answer = _finalize_data_reply(message, transcript, sql_question, sql_result, user_block)
+    if sql_result.ok and sql_result.formatted_answer:
+        answer = _cras_answer_with_context(sql_result.rows, user, municipio_block)
+    else:
+        answer = _finalize_data_reply(message, transcript, sql_question, sql_result, user_block)
 
     return {
         "answer": answer,

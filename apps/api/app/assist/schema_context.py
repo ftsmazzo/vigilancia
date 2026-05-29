@@ -72,7 +72,8 @@ Conversas em sequência ("dessas crianças… depois por CRAS"): mantenha filtro
 - Use COUNT(p.cadu_row_id) ou COUNT(*) em pessoas para contar indivíduos.
 - CRAS no CADU (família): f.num_cras, f.nom_cras.
 - CRAS no SISC (atendimento convivência): s.cras_codigo, s.cras_nome — use para "dividir por CRAS" após pergunta sobre SISC.
-- Desdobramento: GROUP BY s.cras_codigo, s.cras_nome ORDER BY COUNT(DISTINCT s.nis_norm) DESC.
+- Desdobramento por CRAS (CADU): GROUP BY f.num_cras, f.nom_cras; ORDER BY num_cras numérico 1→12; NULL/sem referência por último.
+- CRAS 9 = Bonfim Paulista. Informe famílias sem num_cras como sem referência territorial.
 """
 
 

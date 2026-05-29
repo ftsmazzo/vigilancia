@@ -13,7 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
-from .dictionary import build_dictionary_prompt
+from .cras_breakdown import format_cras_breakdown_answer, format_cras_breakdown_summary, is_cras_breakdown
 from .llm import AssistLlmError, chat_completion
 from .schema_context import CATALOG_STATIC
 from .schema_introspection import build_live_schema_markdown
@@ -39,6 +39,8 @@ Regras obrigatórias:
 - SISC / convivência: vig.mvw_sisc_qualificado (s), NÃO p.ind_atend_cras.
 - SISC vinculado ao CADU: s.classificacao_vinculo = 'vinculado_cadu'.
 - CRAS territorial CADU: f.num_cras, f.nom_cras. CRAS do SISC: s.cras_codigo, s.cras_nome.
+- Desdobramento por CRAS (CADU): GROUP BY f.num_cras, f.nom_cras; ORDER BY num_cras numérico 1→12 (NULL por último).
+- CRAS 9 = Bonfim Paulista. Famílias com num_cras vazio/null = sem referência territorial (informe aparte).
 - Preferir agregações (COUNT, SUM) em vez de listar linhas.
 - Se não houver dados suficientes para montar a query, retorne sql vazio e justificativa clara.
 
@@ -57,6 +59,7 @@ class SqlAgentResult:
     row_count: int = 0
     preview: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
+    formatted_answer: str | None = None
 
 
 def _json_safe(value: Any) -> Any:
@@ -102,10 +105,12 @@ def _extract_sql_payload(llm_content: str) -> tuple[str, str]:
 def _summarize_rows(rows: list[dict[str, Any]]) -> str:
     if not rows:
         return "Nenhum resultado (0 linhas)."
+    if is_cras_breakdown(rows):
+        return format_cras_breakdown_summary(rows)
     if len(rows) == 1 and len(rows[0]) == 1:
         key, val = next(iter(rows[0].items()))
         return f"{key} = {val}"
-    preview = _rows_to_preview(rows, max_rows=5)
+    preview = _rows_to_preview(rows, max_rows=50)
     return json.dumps(preview, ensure_ascii=False, default=str)
 
 
@@ -163,6 +168,9 @@ def run_sql_agent(
             safe_sql = wrap_limit(sanitize_llm_sql(raw_sql), limit=500)
             rows = _execute_query(conn, safe_sql)
             preview = _rows_to_preview(rows)
+            formatted = None
+            if is_cras_breakdown(rows):
+                formatted = format_cras_breakdown_answer(rows)
             return SqlAgentResult(
                 ok=True,
                 sql=safe_sql,
@@ -170,6 +178,7 @@ def run_sql_agent(
                 summary=_summarize_rows(rows),
                 row_count=len(rows),
                 preview=preview,
+                formatted_answer=formatted,
             )
         except (SqlGuardError, Exception) as exc:
             last_error = str(exc)
