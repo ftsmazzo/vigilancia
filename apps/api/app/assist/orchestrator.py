@@ -208,6 +208,15 @@ def _finalize_data_reply(
     return chat_completion(messages, temperature=0.35, role="orch").strip()
 
 
+def _personalize_canonical(answer: str, user: User) -> str:
+    first = _first_name(user.name)
+    if not first or answer.startswith(first):
+        return answer
+    if answer.startswith("Há "):
+        return f"{first}, h{answer[2:]}"
+    return f"{first}, {answer}"
+
+
 def run_orchestrator_turn(
     conn: Connection,
     db: Session,
@@ -223,6 +232,26 @@ def run_orchestrator_turn(
     user_block = _user_context_block(user, municipio_block)
     rag_block = query_knowledge_base(message)
 
+    # Métricas canônicas (SISC×CADU, CRAS, PBF) têm prioridade — sempre com SQL explícito
+    canonical = try_canonical_metric(conn, message, transcript)
+    if canonical:
+        answer = canonical["answer"]
+        if canonical.get("metric") == "cadu_familias_por_cras":
+            answer = _cras_answer_with_context(
+                canonical.get("preview") or [],
+                user,
+                municipio_block,
+            )
+        elif canonical.get("source") == "vig.mvw_sisc_qualificado":
+            answer = _personalize_canonical(answer, user)
+        return {
+            "answer": answer,
+            "sql": canonical.get("sql"),
+            "row_count": canonical.get("row_count", 0),
+            "preview": canonical.get("preview") or [],
+            "mode": canonical.get("mode", "canonical"),
+        }
+
     plan = _plan_turn(message, transcript, rag_block, user_block)
 
     if plan["mode"] == "chat":
@@ -236,23 +265,6 @@ def run_orchestrator_turn(
         }
 
     sql_question = plan.get("sql_question") or message.strip()
-
-    canonical = try_canonical_metric(conn, message, transcript)
-    if canonical:
-        answer = canonical["answer"]
-        if canonical.get("metric") == "cadu_familias_por_cras":
-            answer = _cras_answer_with_context(
-                canonical.get("preview") or [],
-                user,
-                municipio_block,
-            )
-        return {
-            "answer": answer,
-            "sql": canonical.get("sql"),
-            "row_count": canonical.get("row_count", 0),
-            "preview": canonical.get("preview") or [],
-            "mode": canonical.get("mode", "canonical"),
-        }
 
     sql_result = run_sql_agent(conn, db, sql_question)
     if sql_result.ok and sql_result.formatted_answer:

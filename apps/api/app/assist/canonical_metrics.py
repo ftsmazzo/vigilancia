@@ -12,6 +12,7 @@ from .cras_breakdown import (
     format_cras_breakdown_answer,
     sort_cras_rows,
 )
+from .sisc_cadu import run_sisc_cadu_query
 
 _FOLHA_PBF = re.compile(
     r"(?:"
@@ -34,8 +35,6 @@ def _fmt_int(n: int) -> str:
 
 
 _SISC = re.compile(r"sisc|conviv|scfv|servi[cç]o\s+de\s+conviv", re.I)
-_ADOL_12_17 = re.compile(r"12\s*(?:a|-|á)\s*17|adolesc|12\s*17", re.I)
-_PBF_CTX = re.compile(r"pbf|bolsa\s+fam|folha", re.I)
 _CRAS_BREAKDOWN = re.compile(
     r"por\s+cras|cada\s+cras|divide|divid|detalh|distribu|desdobr|granula|"
     r"separad\s+por\s+cras|territorial",
@@ -104,8 +103,9 @@ def _try_sisc_cross(
     message: str,
     transcript: list[dict[str, str]] | None,
 ) -> dict | None:
-    blob = _conversation_blob(message, transcript)
-    if not _SISC.search(blob):
+    from .sisc_cadu import is_sisc_context
+
+    if not is_sisc_context(message, transcript):
         return None
     if not _table_exists(conn, "vig", "mvw_sisc_qualificado"):
         return {
@@ -121,115 +121,7 @@ def _try_sisc_cross(
             "metric": "sisc_indisponivel",
         }
 
-    wheres = ["s.classificacao_vinculo = 'vinculado_cadu'"]
-    if _ADOL_12_17.search(blob):
-        wheres.append("s.classificacao_faixa_idade = 'adolescente_12_17'")
-    if _PBF_CTX.search(blob):
-        wheres.append("COALESCE(s.familia_na_folha_pbf, FALSE)")
-
-    where_sql = " AND ".join(wheres)
-    count_children = bool(
-        re.search(r"criança|crianca|adolesc|pessoas|nis|atendidos", message, re.I)
-        or (_ADOL_12_17.search(blob) and re.search(r"quantas|quantos", message, re.I))
-    )
-    by_cras = _CRAS_BREAKDOWN.search(message) or _CRAS_BREAKDOWN.search(blob)
-
-    if by_cras:
-        sql = f"""
-            SELECT
-              COALESCE(NULLIF(btrim(s.cras_codigo::text), ''), '(sem código)') AS cras_codigo,
-              COALESCE(NULLIF(btrim(s.cras_nome::text), ''), '(sem CRAS)') AS cras_nome,
-              COUNT(DISTINCT s.nis_norm)::bigint AS atendidos
-            FROM vig.mvw_sisc_qualificado s
-            WHERE {where_sql}
-            GROUP BY 1, 2
-            ORDER BY 3 DESC
-            LIMIT 30
-        """
-        rows = conn.execute(text(sql)).mappings().all()
-        total = sum(int(r["atendidos"] or 0) for r in rows)
-        linhas = [
-            f"- **{r['cras_nome']}** ({r['cras_codigo']}): {_fmt_int(int(r['atendidos'] or 0))} atendidos"
-            for r in rows[:20]
-        ]
-        extra = f"\n\n… e mais {len(rows) - 20} unidades." if len(rows) > 20 else ""
-        filtros_txt = []
-        if _ADOL_12_17.search(blob):
-            filtros_txt.append("12–17 anos")
-        if _PBF_CTX.search(blob):
-            filtros_txt.append("folha PBF")
-        ctx = f" ({', '.join(filtros_txt)})" if filtros_txt else ""
-        answer = (
-            f"**Serviço de Convivência (SISC)** vinculado ao CADU{ctx} — "
-            f"**{_fmt_int(total)}** atendidos (NIS distintos) em **{len(rows)}** CRAS/unidades SISC:\n\n"
-            + "\n".join(linhas)
-            + extra
-            + "\n\nCRAS aqui é o da **matrícula SISC** (`s.cras_nome`), não necessariamente o territorial do CADU da família."
-        )
-        preview = [
-            {
-                "cras_codigo": r["cras_codigo"],
-                "cras_nome": r["cras_nome"],
-                "atendidos": int(r["atendidos"] or 0),
-            }
-            for r in rows
-        ]
-        return {
-            "answer": answer,
-            "sql": " ".join(sql.split()),
-            "row_count": len(rows),
-            "preview": preview,
-            "mode": "canonical",
-            "metric": "sisc_por_cras",
-        }
-
-    if count_children:
-        sql = f"""
-            SELECT COUNT(DISTINCT s.nis_norm)::bigint AS total
-            FROM vig.mvw_sisc_qualificado s
-            WHERE {where_sql}
-        """
-        row = conn.execute(text(sql)).mappings().first()
-        n = int((row or {}).get("total") or 0)
-        filtros = []
-        if _PBF_CTX.search(blob):
-            filtros.append("famílias na folha PBF (CADU)")
-        if _ADOL_12_17.search(blob):
-            filtros.append("faixa etária 12–17 anos")
-        ctx = " e ".join(filtros) if filtros else "filtros da conversa"
-        answer = (
-            f"Há **{_fmt_int(n)}** crianças/adolescentes (**NIS distintos**) no **Serviço de Convivência (SISC)** "
-            f"vinculados ao CADU, com {ctx}.\n\n"
-            "Fonte: `vig.mvw_sisc_qualificado` (matrícula SISC × NIS × CADU). "
-            "Isso não usa o campo CADU `ind_atend_cras` (atendimento CRAS declarado na entrevista)."
-        )
-        metric = "criancas_sisc"
-    else:
-        sql = f"""
-            SELECT COUNT(DISTINCT s.codigo_familiar)::bigint AS total
-            FROM vig.mvw_sisc_qualificado s
-            WHERE {where_sql}
-              AND s.codigo_familiar IS NOT NULL
-        """
-        row = conn.execute(text(sql)).mappings().first()
-        n = int((row or {}).get("total") or 0)
-        answer = (
-            f"Há **{_fmt_int(n)}** famílias com pelo menos um integrante no **SISC (Convivência)** "
-            f"vinculado ao CADU"
-            + (" e na folha PBF" if _PBF_CTX.search(blob) else "")
-            + (", com adolescentes 12–17" if _ADOL_12_17.search(blob) else "")
-            + "."
-        )
-        metric = "familias_sisc"
-
-    return {
-        "answer": answer,
-        "sql": " ".join(sql.split()),
-        "row_count": 1,
-        "preview": [{"total": n}],
-        "mode": "canonical",
-        "metric": metric,
-    }
+    return run_sisc_cadu_query(conn, message, transcript)
 
 
 def try_canonical_metric(
