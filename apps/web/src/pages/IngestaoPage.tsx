@@ -244,6 +244,12 @@ export default function IngestaoPage({ token }: Props) {
   const [geoCrasLoading, setGeoCrasLoading] = useState(false);
   const [geoCrasStatus, setGeoCrasStatus] = useState("");
   const [geoCrasPreview, setGeoCrasPreview] = useState<Record<string, unknown> | null>(null);
+  const [geoMissingLoading, setGeoMissingLoading] = useState(false);
+  const [geoMissingCeps, setGeoMissingCeps] = useState<Array<Record<string, unknown>>>([]);
+  const [geoViaCepLoading, setGeoViaCepLoading] = useState(false);
+  const [geoViaCepStatus, setGeoViaCepStatus] = useState("");
+  const [geoViaCepPreview, setGeoViaCepPreview] = useState<Record<string, unknown> | null>(null);
+  const [geoViaCepLimit, setGeoViaCepLimit] = useState(50);
 
   async function submitCadu(e: FormEvent) {
     e.preventDefault();
@@ -475,6 +481,63 @@ export default function IngestaoPage({ token }: Props) {
       setGeoCrasStatus(e instanceof Error ? e.message : "Erro inesperado.");
     } finally {
       setGeoCrasLoading(false);
+    }
+  }
+
+  async function loadGeoMissingCeps() {
+    setGeoMissingLoading(true);
+    setGeoViaCepStatus("");
+    try {
+      const response = await fetch(`${API_URL}/api/v1/geo/missing-ceps?limit=100`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = (await response.json().catch(() => ({}))) as { ceps?: Array<Record<string, unknown>>; detail?: unknown };
+      if (!response.ok) {
+        throw new Error(typeof data.detail === "string" ? data.detail : "Falha ao listar CEPs ausentes.");
+      }
+      setGeoMissingCeps(Array.isArray(data.ceps) ? data.ceps : []);
+    } catch (e) {
+      setGeoViaCepStatus(e instanceof Error ? e.message : "Erro inesperado.");
+      setGeoMissingCeps([]);
+    } finally {
+      setGeoMissingLoading(false);
+    }
+  }
+
+  async function supplementGeoViaCep(dryRun: boolean) {
+    setGeoViaCepLoading(true);
+    setGeoViaCepStatus("");
+    if (!dryRun) setGeoViaCepPreview(null);
+    try {
+      const response = await fetch(
+        `${API_URL}/api/v1/geo/supplement-viacep?dry_run=${dryRun ? "true" : "false"}&limit=${geoViaCepLimit}`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({}),
+        },
+      );
+      const data = (await response.json().catch(() => ({}))) as Record<string, unknown> & { detail?: unknown };
+      if (!response.ok) {
+        throw new Error(typeof data.detail === "string" ? data.detail : "Falha ao complementar geo via ViaCEP.");
+      }
+      setGeoViaCepPreview(data);
+      if (dryRun) {
+        setGeoViaCepStatus(
+          `Prévia: ${String(data.linhas_inseridas ?? 0)} linhas seriam inseridas ` +
+            `(${String(data.ceps_analisados ?? 0)} CEPs analisados).`,
+        );
+      } else {
+        setGeoViaCepStatus(`Geo atualizada: ${String(data.linhas_inseridas ?? 0)} linhas inseridas via ViaCEP.`);
+        await loadGeoMissingCeps();
+      }
+    } catch (e) {
+      setGeoViaCepStatus(e instanceof Error ? e.message : "Erro inesperado.");
+    } finally {
+      setGeoViaCepLoading(false);
     }
   }
 
@@ -1101,6 +1164,98 @@ export default function IngestaoPage({ token }: Props) {
                         <li>
                           Duplicatas resolvidas (CRAS 8–12 prevalece):{" "}
                           {(geoCrasPreview.conflitos_bairro as unknown[]).length}
+                        </li>
+                      )}
+                  </ul>
+                )}
+              </div>
+
+              <div
+                className="auth-form"
+                style={{ marginTop: "1.25rem", padding: "0.75rem 0", borderTop: "1px solid var(--color-border, #333)" }}
+              >
+                <h2 style={{ fontSize: "1.05rem", margin: "0 0 0.5rem" }}>Completar geo — ViaCEP</h2>
+                <p className="ingestao-desc" style={{ marginBottom: "0.75rem" }}>
+                  CEPs presentes no CADU mas ausentes em <code className="inline-code">raw.geo__tbl_geo</code>{" "}
+                  (<code className="inline-code">n_geo_por_cep = 0</code>). A API consulta{" "}
+                  <a href="https://viacep.com.br/" target="_blank" rel="noreferrer">
+                    ViaCEP
+                  </a>{" "}
+                  (logradouro e bairro oficiais) e insere na geo; se ViaCEP falhar, usa texto do CADU. Copia{" "}
+                  <code className="inline-code">cras</code> de linhas existentes com o mesmo bairro.
+                </p>
+                <label style={{ display: "block", marginBottom: "0.5rem" }}>
+                  Máximo de CEPs por execução
+                  <input
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={geoViaCepLimit}
+                    onChange={(ev) => setGeoViaCepLimit(Number(ev.target.value))}
+                    disabled={geoViaCepLoading}
+                    style={{ marginLeft: "0.35rem", width: "5rem" }}
+                  />
+                </label>
+                <div className="vig-actions" style={{ flexWrap: "wrap", gap: "0.5rem" }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => void loadGeoMissingCeps()}
+                    disabled={geoMissingLoading || geoViaCepLoading}
+                  >
+                    {geoMissingLoading ? "Listando…" : "Listar CEPs ausentes (CADU)"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => void supplementGeoViaCep(true)}
+                    disabled={geoViaCepLoading}
+                  >
+                    {geoViaCepLoading ? "Consultando ViaCEP…" : "Prévia ViaCEP"}
+                  </button>
+                  <button type="button" onClick={() => void supplementGeoViaCep(false)} disabled={geoViaCepLoading}>
+                    Inserir na tbl_geo
+                  </button>
+                </div>
+                {geoViaCepStatus && (
+                  <p
+                    className={
+                      geoViaCepStatus.includes("Prévia") ||
+                      geoViaCepStatus.includes("atualizada") ||
+                      geoViaCepStatus.includes("Listando")
+                        ? "status-ok"
+                        : "error"
+                    }
+                    style={{ marginTop: "0.75rem" }}
+                  >
+                    {geoViaCepStatus}
+                  </p>
+                )}
+                {geoMissingCeps.length > 0 && (
+                  <details style={{ marginTop: "0.75rem" }}>
+                    <summary>{geoMissingCeps.length} CEP(s) no CADU sem linha na geo (amostra)</summary>
+                    <ul className="vig-warnings" style={{ listStyle: "disc", marginTop: "0.5rem" }}>
+                      {geoMissingCeps.slice(0, 12).map((row) => (
+                        <li key={String(row.cep_n)}>
+                          {String(row.cep_n)} — {String(row.familias ?? 0)} fam. — {String(row.bairro_raw ?? "—")}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+                {geoViaCepPreview && (
+                  <ul className="vig-warnings" style={{ listStyle: "disc", marginTop: "0.5rem" }}>
+                    <li>Inseridas: {String(geoViaCepPreview.linhas_inseridas ?? "—")}</li>
+                    <li>Já na geo: {String(geoViaCepPreview.ceps_ja_na_geo ?? "—")}</li>
+                    <li>Sem dados: {String(geoViaCepPreview.ceps_sem_dados ?? "—")}</li>
+                    {Array.isArray(geoViaCepPreview.amostra_insercoes) &&
+                      (geoViaCepPreview.amostra_insercoes as unknown[]).length > 0 && (
+                        <li>
+                          Amostra:{" "}
+                          {(geoViaCepPreview.amostra_insercoes as Array<Record<string, unknown>>)
+                            .slice(0, 5)
+                            .map((r) => `${r.cep_norm} → ${r.bairro} (${r.fonte})`)
+                            .join("; ")}
                         </li>
                       )}
                   </ul>

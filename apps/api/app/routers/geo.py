@@ -14,6 +14,8 @@ from ..deps import get_current_user
 from ..models import User
 from ..vigilance.familia_mview import ensure_vig_functions
 from ..vigilance.geo_cras import apply_cras_bairros_to_geo, parse_bairros_cras_csv
+from ..vigilance.geo_viacep import list_missing_ceps_from_cadu, supplement_geo_from_viacep
+from ..municipio_context import get_or_create_context
 
 router = APIRouter(prefix="/geo", tags=["geo"])
 
@@ -86,6 +88,90 @@ async def geo_apply_cras_bairros(
         "conflitos_bairro": result.conflitos_bairro,
         "amostra_atualizacoes": result.amostra_atualizacoes,
         "amostra_renomes_bairro": result.amostra_renomes_bairro,
+    }
+
+
+class SupplementViaCepBody(BaseModel):
+    ceps: list[str] | None = Field(
+        None,
+        description="CEPs específicos (8 dígitos). Se omitido, processa CEPs do CADU ausentes na geo.",
+    )
+
+
+@router.get("/missing-ceps")
+def geo_missing_ceps(
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """CEPs válidos no CADU que ainda não existem em raw.geo__tbl_geo (cep_norm)."""
+    if not _raw_table_exists(db, CADU_TABLE):
+        raise HTTPException(status_code=400, detail="Tabela raw.cecad__cadu não encontrada.")
+    if not _raw_table_exists(db, GEO_TABLE):
+        raise HTTPException(status_code=400, detail="Tabela raw.geo__tbl_geo não encontrada.")
+
+    with db.bind.begin() as conn:
+        rows = list_missing_ceps_from_cadu(conn, limit=limit)
+    return {"total": len(rows), "ceps": rows}
+
+
+@router.post("/supplement-viacep")
+def geo_supplement_viacep(
+    body: SupplementViaCepBody | None = None,
+    dry_run: bool = Query(True, description="Se true, só simula (consulta ViaCEP sem gravar)."),
+    limit: int = Query(50, ge=1, le=200, description="Máximo de CEPs quando body.ceps vazio."),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """
+    Insere linhas em raw.geo__tbl_geo para CEPs do CADU ausentes na base local.
+
+    Consulta [ViaCEP](https://viacep.com.br/) (logradouro + bairro oficiais); se falhar, usa
+    logradouro/bairro mais frequentes no CADU. Copia `cras` de outras linhas da geo com o mesmo
+    bairro normalizado, quando existir.
+    """
+    if not _raw_table_exists(db, CADU_TABLE):
+        raise HTTPException(status_code=400, detail="Tabela raw.cecad__cadu não encontrada.")
+    if not _raw_table_exists(db, GEO_TABLE):
+        raise HTTPException(
+            status_code=400,
+            detail="Tabela raw.geo__tbl_geo não encontrada. Carregue tbl_geo.csv antes.",
+        )
+
+    ctx = get_or_create_context(db)
+    ibge = ctx.codigo_ibge or "3543402"
+    uf = ctx.uf or "SP"
+    ceps = body.ceps if body and body.ceps else None
+
+    try:
+        with db.bind.begin() as conn:
+            result = supplement_geo_from_viacep(
+                conn,
+                dry_run=dry_run,
+                limit=limit,
+                ibge=ibge,
+                uf=uf,
+                ceps=ceps,
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        "status": "preview" if dry_run else "success",
+        "dry_run": dry_run,
+        "ibge_esperado": ibge,
+        "uf_esperada": uf,
+        "ceps_analisados": result.ceps_analisados,
+        "linhas_inseridas": result.linhas_inseridas,
+        "ceps_ja_na_geo": result.ceps_ja_na_geo,
+        "ceps_sem_dados": result.ceps_sem_dados,
+        "ceps_fora_municipio": result.ceps_fora_municipio,
+        "amostra_insercoes": result.amostra_insercoes,
+        "erros": result.erros[:30],
+        "nota": (
+            "Após inserir, rode novamente o relatório CADU × geo. "
+            "Se faltar CRAS em bairros novos, reaplique bairros_cras.csv."
+        ),
     }
 
 
