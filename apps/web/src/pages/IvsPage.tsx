@@ -290,17 +290,20 @@ export default function IvsPage({ token }: Props) {
 
           {dimAtiva === null ? (
             <section className="ivs-overview">
-              <article className="ivs-gauge fx-card">
-                <small>Índice IVS (composto)</small>
-                <strong className="ivs-gauge-value">{fmtIndice(painel.ivs_medio)}</strong>
-                <p>Média das 6 dimensões no universo elegível</p>
-              </article>
-
               <article className="ivs-dim-table fx-card">
-                <h2>Dimensões de vulnerabilidade</h2>
-                <p className="ivs-dim-table-sub">
-                  Índice médio por dimensão (0–1) e % de famílias acima da média da dimensão no recorte.
-                </p>
+                <div className="ivs-dim-table-head">
+                  <div className="ivs-gauge-inline" aria-label={`IVS médio ${fmtIndice(painel.ivs_medio)}`}>
+                    <small>IVS geral</small>
+                    <strong className="ivs-gauge-value">{fmtIndice(painel.ivs_medio)}</strong>
+                    <span>Média das 6 dimensões</span>
+                  </div>
+                  <div className="ivs-dim-table-intro">
+                    <h2>Dimensões de vulnerabilidade</h2>
+                    <p className="ivs-dim-table-sub">
+                      Índice médio por dimensão (0–1) e % de famílias acima da média da dimensão no recorte.
+                    </p>
+                  </div>
+                </div>
                 <ul className="ivs-dim-list">
                   {painel.dimensoes.map((d) => (
                     <li key={d.sigla}>

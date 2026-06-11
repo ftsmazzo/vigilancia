@@ -10,9 +10,16 @@ from sqlalchemy.engine import Connection
 
 from ..vigilance.familia_mview import _table_exists
 
+_BAIRRO_FROM_ANSWER = re.compile(r"No bairro \*\*([^*]+)\*\*", re.I)
+_FOLLOWUP = re.compile(
+    r"dessas|destas|essas|delas|dessas\s+fam|destas\s+fam|nesse\s+bairro|"
+    r"neste\s+bairro|no\s+mesmo\s+bairro|dessas\s+fam[ií]lias|destas\s+fam[ií]lias",
+    re.I,
+)
+_PBF = re.compile(r"pbf|bolsa\s+fam|programa\s+bolsa|recebe[m]?\s+(?:o\s+)?(?:pbf|bolsa)", re.I)
 _FAMILIAS = re.compile(
     r"quantas?\s+fam[ií]lias?|total\s+de\s+fam[ií]lias?|n[uú]mero\s+de\s+fam[ií]lias?|"
-    r"temos\s+(?:de\s+)?fam[ií]lias?",
+    r"temos\s+(?:de\s+)?fam[ií]lias?|recebe[m]?|recebem",
     re.I,
 )
 _BAIRRO = re.compile(r"\bbairro\b", re.I)
@@ -49,6 +56,109 @@ def _extract_bairro_term(message: str) -> str | None:
     if len(term) < 2:
         return None
     return term
+
+
+def extract_bairro_context(
+    message: str,
+    transcript: list[dict[str, str]] | None,
+) -> tuple[str | None, str | None]:
+    """
+    Recupera bairro territorial da pergunta ou do histórico recente.
+    Retorna (termo_busca, nome_canonico) — nome_canonico quando há match único na geo.
+    """
+    term = _extract_bairro_term(message)
+    if not term:
+        for msg in reversed(transcript or []):
+            content = msg.get("content", "")
+            if msg.get("role") == "assistant":
+                m = _BAIRRO_FROM_ANSWER.search(content)
+                if m:
+                    term = m.group(1).strip()
+                    break
+            if msg.get("role") == "user":
+                t = _extract_bairro_term(content)
+                if t:
+                    term = t
+                    break
+
+    if not term:
+        return None, None
+    return term, None
+
+
+def _resolve_bairro_label(conn: Connection, term: str) -> tuple[str, list[dict[str, Any]]]:
+    matches = _bairro_matches(conn, term, limit=8)
+    if len(matches) == 1:
+        return str(matches[0]["bairro"]), matches
+    return term, matches
+
+
+def _count_pbf_bairro(conn: Connection, term: str) -> tuple[int, int, list[dict[str, Any]]]:
+    row = conn.execute(
+        text(
+            """
+            SELECT
+              COUNT(DISTINCT f.codigo_familiar)::bigint AS total,
+              COUNT(DISTINCT f.codigo_familiar) FILTER (
+                WHERE COALESCE(f.marc_pbf, FALSE)
+              )::bigint AS com_pbf
+            FROM vig.mvw_familia f
+            WHERE btrim(COALESCE(f.bairro::text, '')) <> ''
+              AND btrim(f.bairro::text) ILIKE :pat
+            """
+        ),
+        {"pat": f"%{term.strip()}%"},
+    ).mappings().first() or {}
+    total = int(row.get("total") or 0)
+    com_pbf = int(row.get("com_pbf") or 0)
+    matches = _bairro_matches(conn, term, limit=8) if total else []
+    return com_pbf, total, matches
+
+
+def try_geo_contextual_followup(
+    conn: Connection,
+    message: str,
+    transcript: list[dict[str, str]] | None = None,
+) -> dict | None:
+    """Follow-up com memória de bairro (ex.: «dessas famílias recebem PBF?»)."""
+    if not _table_exists(conn, "vig", "mvw_familia"):
+        return None
+
+    text_msg = message.strip()
+    is_followup = bool(_FOLLOWUP.search(text_msg))
+    if not is_followup and not (_PBF.search(text_msg) and transcript):
+        return None
+
+    term, _ = extract_bairro_context(text_msg, transcript)
+    if not term:
+        return None
+
+    if _PBF.search(text_msg) and (_FAMILIAS.search(text_msg) or is_followup):
+        com_pbf, total, matches = _count_pbf_bairro(conn, term)
+        label, _ = _resolve_bairro_label(conn, term)
+        pct = round(100.0 * com_pbf / total, 2) if total else 0.0
+        sql = (
+            "SELECT COUNT(DISTINCT f.codigo_familiar) FROM vig.mvw_familia f "
+            f"WHERE btrim(f.bairro::text) ILIKE '%{term.replace(chr(39), '')}%' "
+            "AND COALESCE(f.marc_pbf, FALSE)"
+        )
+        if total == 0:
+            return None
+        answer = (
+            f"No bairro **{label}**, **{_fmt_int(com_pbf)}** famílias recebem o Bolsa Família "
+            f"de um total de **{_fmt_int(total)}** famílias no território "
+            f"(**{pct:.2f} %**)."
+        )
+        return {
+            "answer": answer,
+            "sql": sql,
+            "row_count": 1,
+            "preview": [{"bairro": label, "familias_pbf": com_pbf, "familias_total": total}],
+            "mode": "canonical",
+            "metric": "geo_contextual_pbf_bairro",
+        }
+
+    return None
 
 
 def _bairro_matches(conn: Connection, term: str, *, limit: int = 5) -> list[dict[str, Any]]:
@@ -173,8 +283,7 @@ def try_geo_territorial_metric(
         n = int(n or 0)
         return {
             "answer": (
-                f"Há **{_fmt_int(n)}** bairros distintos na territorialização geo "
-                f"(campo `f.bairro`, via CEP × tbl_geo)."
+                f"Há **{_fmt_int(n)}** bairros distintos na territorialização do município."
             ),
             "sql": (
                 "SELECT COUNT(DISTINCT btrim(bairro::text)) FROM vig.mvw_familia "
@@ -199,8 +308,7 @@ def try_geo_territorial_metric(
         n = int(n or 0)
         return {
             "answer": (
-                f"Há **{_fmt_int(n)}** CRAS territoriais distintos "
-                f"(campo `f.num_cras`, via geo × CEP)."
+                f"Há **{_fmt_int(n)}** CRAS com famílias territorializadas no município."
             ),
             "sql": (
                 "SELECT COUNT(DISTINCT btrim(num_cras::text)) FROM vig.mvw_familia "
@@ -220,9 +328,7 @@ def try_geo_territorial_metric(
         rotulo = nom or f"CRAS {num}"
         return {
             "answer": (
-                f"No **{rotulo}** (CRAS territorial **{num}**), há "
-                f"**{_fmt_int(total)}** famílias no Cadastro Único "
-                f"(geo × CEP, `f.num_cras`)."
+                f"No **{rotulo}**, há **{_fmt_int(total)}** famílias no Cadastro Único."
             ),
             "sql": (
                 f"SELECT COUNT(DISTINCT codigo_familiar) FROM vig.mvw_familia "
@@ -253,14 +359,14 @@ def try_geo_territorial_metric(
                     f"**{s['bairro']}** ({_fmt_int(int(s['familias'] or 0))})" for s in sugestoes
                 )
                 answer = (
-                    f"Não encontrei famílias no bairro «{term}» na geo territorial (`f.bairro`). "
+                    f"Não encontrei famílias no bairro «{term}». "
                     f"Bairros parecidos: {lista}. "
-                    "Confira a grafia ou use o nome como aparece na geo."
+                    "Confira a grafia ou use o nome como aparece no mapa territorial."
                 )
             else:
                 answer = (
-                    f"Não encontrei famílias no bairro «{term}» em `f.bairro` (geo × CEP). "
-                    "Verifique se a geo foi ingerida e se a visão Família foi atualizada."
+                    f"Não encontrei famílias no bairro «{term}». "
+                    "Verifique a grafia ou escolha um bairro da lista territorial."
                 )
             return {
                 "answer": answer,
@@ -274,16 +380,14 @@ def try_geo_territorial_metric(
         if len(matches) == 1:
             b = matches[0]["bairro"]
             answer = (
-                f"No bairro **{b}**, há **{_fmt_int(total)}** famílias no Cadastro Único "
-                f"(territorialização geo via CEP, campo `f.bairro`)."
+                f"No bairro **{b}**, há **{_fmt_int(total)}** famílias no Cadastro Único."
             )
         else:
             detalhe = "; ".join(
                 f"**{m['bairro']}**: {_fmt_int(int(m['familias'] or 0))}" for m in matches[:5]
             )
             answer = (
-                f"Para «{term}», há **{_fmt_int(total)}** famílias no total "
-                f"(geo × CEP): {detalhe}."
+                f"Para «{term}», há **{_fmt_int(total)}** famílias no total: {detalhe}."
             )
 
         return {

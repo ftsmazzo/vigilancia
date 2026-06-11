@@ -12,7 +12,7 @@ from .cras_breakdown import (
     format_cras_breakdown_answer,
     sort_cras_rows,
 )
-from .geo_territorial import try_geo_territorial_metric
+from .geo_territorial import try_geo_contextual_followup, try_geo_territorial_metric
 from .sisc_cadu import run_sisc_cadu_query
 
 _FOLHA_PBF = re.compile(
@@ -38,7 +38,7 @@ def _fmt_int(n: int) -> str:
 _SISC = re.compile(r"sisc|conviv|scfv|servi[cç]o\s+de\s+conviv", re.I)
 _CRAS_BREAKDOWN = re.compile(
     r"por\s+cras|cada\s+cras|divide|divid|detalh|distribu|desdobr|granula|"
-    r"separad\s+por\s+cras|territorial",
+    r"separad\s+por\s+cras|distribu[ií][çc][ãa]o\s+por\s+cras",
     re.I,
 )
 
@@ -49,9 +49,11 @@ def _try_cadu_familias_por_cras(
     transcript: list[dict[str, str]] | None,
 ) -> dict | None:
     """Desdobramento CADU por CRAS territorial (f.num_cras), ordem 1–12 + sem referência."""
-    blob = _conversation_blob(message, transcript)
-    if not (_CRAS_BREAKDOWN.search(message) or _CRAS_BREAKDOWN.search(blob)):
+    # Só dispara quando a pergunta atual pede desdobramento — não reutiliza palavras do histórico
+    # (ex.: "territorialização" na resposta anterior sobre bairro).
+    if not _CRAS_BREAKDOWN.search(message):
         return None
+    blob = _conversation_blob(message, transcript)
     # Prioriza SISC quando a pergunta é claramente sobre convivência
     if _SISC.search(blob) and _SISC.search(message) and not re.search(
         r"cadu|cadastro\s+[úu]nico|fam[ií]lia", message, re.I
@@ -141,6 +143,10 @@ def try_canonical_metric(
     sisc = _try_sisc_cross(conn, message, transcript)
     if sisc:
         return sisc
+
+    contextual = try_geo_contextual_followup(conn, message, transcript)
+    if contextual:
+        return contextual
 
     geo = try_geo_territorial_metric(conn, message, transcript)
     if geo:

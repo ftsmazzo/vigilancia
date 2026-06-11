@@ -107,8 +107,7 @@ def format_cras_breakdown_summary(rows: list[dict[str, Any]]) -> str:
     body = "\n".join(lines)
     if sem_ref:
         body += (
-            f"\n- **Sem referência territorial de CRAS:** {_fmt_int(sem_ref)} famílias "
-            f"(campo num_cras/nom_cras vazio no CADU)"
+            f"\n- **Sem referência territorial de CRAS:** {_fmt_int(sem_ref)} famílias"
         )
     return body
 
@@ -140,8 +139,7 @@ def format_cras_breakdown_answer(
 
     foot = (
         "\n\nEsse indicador mostra a concentração de famílias em cada área de abrangência "
-        "dos CRAS no Cadastro Único. Famílias sem num_cras no CADU aparecem como "
-        "**sem referência territorial**."
+        "dos CRAS. Famílias sem vínculo territorial aparecem como **sem referência territorial**."
     )
 
     return f"{lead}\n\n{summary}{foot}"
