@@ -194,15 +194,18 @@ def observatorio_painel_from_views(conn: Connection) -> dict:
     renda_pos_rows = conn.execute(
         text(
             f"""
-            WITH fam AS (
+            WITH pessoas_por_fam AS (
+              SELECT codigo_familiar, COUNT(*)::int AS n_pessoas
+              FROM vig.mvw_pessoas
+              GROUP BY codigo_familiar
+            ),
+            fam AS (
               SELECT
                 f.renda_per_capita,
                 COALESCE(f.vlrtotal, 0) AS vlrtotal,
-                GREATEST(
-                  (SELECT COUNT(*)::int FROM vig.mvw_pessoas p WHERE p.codigo_familiar = f.codigo_familiar),
-                  1
-                ) AS n_pessoas
+                GREATEST(COALESCE(pc.n_pessoas, 1), 1) AS n_pessoas
               FROM vig.mvw_familia f
+              LEFT JOIN pessoas_por_fam pc ON pc.codigo_familiar = f.codigo_familiar
             ),
             calc AS (
               SELECT

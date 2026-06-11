@@ -61,6 +61,15 @@ function HBarList({
   );
 }
 
+function apiErrorMessage(detail: unknown, fallback: string): string {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail) && detail.length > 0) {
+    const first = detail[0] as { msg?: string };
+    if (typeof first?.msg === "string") return first.msg;
+  }
+  return fallback;
+}
+
 /** Segunda página — layout Observatório MDS (identificação, atualização e renda). */
 export default function PainelObservatorioMds({ token }: Props) {
   const [loading, setLoading] = useState(true);
@@ -76,7 +85,7 @@ export default function PainelObservatorioMds({ token }: Props) {
       });
       const data = (await response.json().catch(() => ({}))) as ObservatorioPainel & { detail?: unknown };
       if (!response.ok) {
-        throw new Error(typeof data.detail === "string" ? data.detail : "Falha ao carregar painel.");
+        throw new Error(apiErrorMessage(data.detail, "Falha ao carregar painel Observatório."));
       }
       setPainel(data);
     } catch (e) {
@@ -115,6 +124,14 @@ export default function PainelObservatorioMds({ token }: Props) {
       </header>
 
       {error && <p className="error">{error}</p>}
+
+      {loading && !painel && !error && (
+        <p className="home-obs-chart-empty">Carregando painel Observatório…</p>
+      )}
+
+      {!loading && !error && !painel && (
+        <p className="home-obs-chart-empty">Nenhum dado retornado pelo servidor.</p>
+      )}
 
       {!error && painel && (
         <>

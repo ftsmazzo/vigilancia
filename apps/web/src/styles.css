@@ -3210,40 +3210,26 @@ p.success {
 .home-obs-main {
   display: grid;
   grid-template-columns: 1.15fr 0.85fr;
-  grid-template-areas:
-    "map meses"
-    "ivs renda"
-    "ivs bairros";
   gap: 1rem;
   align-items: start;
-}
-
-.home-obs-map-slot {
-  grid-area: map;
-  min-width: 0;
-}
-
-.home-obs-ivcad {
-  grid-area: ivs;
-  padding: 1rem 1.15rem;
-}
-
-.home-obs-chart--meses {
-  grid-area: meses;
-}
-
-.home-obs-chart--renda {
-  grid-area: renda;
-}
-
-.home-obs-chart--bairros {
-  grid-area: bairros;
 }
 
 .home-obs-left {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  min-width: 0;
+}
+
+.home-obs-charts {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.home-obs-ivcad {
+  padding: 1rem 1.15rem;
 }
 
 .home-map-panel {
@@ -3396,12 +3382,6 @@ p.success {
   color: var(--fx-muted);
 }
 
-.home-obs-charts {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
 .home-obs-chart {
   padding: 1rem 1.1rem;
 }
@@ -3539,12 +3519,6 @@ p.success {
 
   .home-obs-main {
     grid-template-columns: 1fr;
-    grid-template-areas:
-      "map"
-      "meses"
-      "ivs"
-      "renda"
-      "bairros";
   }
 
   .home-map {
