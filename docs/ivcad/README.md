@@ -14,4 +14,5 @@ Guia de referência para cálculo, indicadores e uso em painéis/agente.
 | [../08-ivcad-dimensao-ch.md](../08-ivcad-dimensao-ch.md) | CH — 14 indicadores (VD027–VD040) |
 | [../01-home-e-modelo-dados.md](../01-home-e-modelo-dados.md) | Arquitetura geral, home, tronco CADU |
 
-**Versão metodológica alvo:** IVCAD **v1.0.5** · **Indicadores documentados:** **40 / 40** ✅
+**Versão metodológica alvo:** IVCAD **v1.0.5** · **Indicadores documentados:** **40 / 40** ✅  
+**Implementação:** `core.mvw_ivs_familia` · colunas `ivs` / `ivcad` · refresh em Vigilância → IVS

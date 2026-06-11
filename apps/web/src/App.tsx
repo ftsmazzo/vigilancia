@@ -12,7 +12,8 @@ import {
   UserCog, 
   LogOut,
   Menu,
-  X
+  X,
+  Gauge,
 } from "lucide-react";
 import IngestaoPage from "./pages/IngestaoPage";
 import PainelIndicadoresInicio from "./pages/PainelIndicadoresInicio";
@@ -23,6 +24,7 @@ import AssistPage from "./pages/AssistPage";
 import MunicipioPage from "./pages/MunicipioPage";
 import CaracterizacaoPage from "./pages/CaracterizacaoPage";
 import VigilanciaPage from "./pages/VigilanciaPage";
+import IvsPage from "./pages/IvsPage";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const TOKEN_KEY = "vigsocial_token";
@@ -95,6 +97,10 @@ function AppShell({
           <NavLink to="/vigilancia" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             <Activity className="nav-icon" size={18} />
             <span>Vigilância</span>
+          </NavLink>
+          <NavLink to="/ivs" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+            <Gauge className="nav-icon" size={18} />
+            <span>IVS</span>
           </NavLink>
           <NavLink to="/convivencia" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             <Users className="nav-icon" size={18} />
@@ -403,6 +409,18 @@ export default function App() {
               token ? (
                 <AppShell loadingMe={loadingMe} me={me} onLogout={handleLogout}>
                   <VigilanciaPage token={token} />
+                </AppShell>
+              ) : (
+                <Navigate to="/" replace />
+              )
+            }
+          />
+          <Route
+            path="/ivs"
+            element={
+              token ? (
+                <AppShell loadingMe={loadingMe} me={me} onLogout={handleLogout}>
+                  <IvsPage token={token} />
                 </AppShell>
               ) : (
                 <Navigate to="/" replace />

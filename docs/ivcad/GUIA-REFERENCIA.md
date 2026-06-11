@@ -599,9 +599,9 @@ Checklist de validação:
 |------|---------|--------|
 | A | Documentação IN084 + 6 dimensões (40 indicadores) | ✅ |
 | B | ~~Documentar CH~~ | ✅ |
-| C | `core.ivcad_familia` (view/materialized) | ⏳ |
-| D | API + painel IVCAD + filtros CRAS/bairro | ⏳ |
-| E | Métricas canônicas agente (`ivcad`, `idx_nc`, …) | ⏳ |
+| C | `core.mvw_ivs_familia` (IVS / IVCAD v1.0.5) | ✅ |
+| D | API + painel IVS + filtros CRAS/bairro | ✅ |
+| E | Métricas canônicas agente (`ivs`, `idx_nc`, …) | ✅ |
 | F | Validação conciliação vs Observatório municipal | ⏳ |
 | G | Migração v1.0.6 (universo PBF suspenso, TQA5) | ⏳ |
 

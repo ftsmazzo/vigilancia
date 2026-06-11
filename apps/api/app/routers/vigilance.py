@@ -1,7 +1,7 @@
 import time
 from collections import defaultdict
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -18,6 +18,42 @@ from ..vigilance.familia_mview import (
 from ..vigilance.pessoas_mview import refresh_pessoas_mview
 
 router = APIRouter(prefix="/vigilance", tags=["vigilance"])
+
+
+def _require_ivs_mview(conn) -> None:
+    if not conn.execute(text("SELECT to_regclass('core.mvw_ivs_familia')")).scalar():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="IVS não calculado. Execute POST /vigilance/materialized-views/ivs/refresh.",
+        )
+
+
+def _ivs_resumo_sql(*, num_cras: str | None, bairro: str | None) -> tuple[str, dict]:
+    clauses = ["1=1"]
+    params: dict = {}
+    if num_cras is not None:
+        clauses.append("f.num_cras = :num_cras")
+        params["num_cras"] = num_cras
+    if bairro is not None and bairro.strip():
+        clauses.append("f.bairro ILIKE :bairro")
+        params["bairro"] = f"%{bairro.strip()}%"
+    where = " AND ".join(clauses)
+    sql = f"""
+        SELECT
+          COUNT(*) FILTER (WHERE i.elegivel_ivs)::bigint AS familias_elegiveis,
+          COUNT(*)::bigint AS familias_total,
+          ROUND(AVG(i.ivs) FILTER (WHERE i.elegivel_ivs)::numeric, 4) AS ivs_medio,
+          ROUND(AVG(i.idx_nc) FILTER (WHERE i.elegivel_ivs)::numeric, 4) AS idx_nc,
+          ROUND(AVG(i.idx_dpi) FILTER (WHERE i.elegivel_ivs)::numeric, 4) AS idx_dpi,
+          ROUND(AVG(i.idx_dca) FILTER (WHERE i.elegivel_ivs)::numeric, 4) AS idx_dca,
+          ROUND(AVG(i.idx_tqa) FILTER (WHERE i.elegivel_ivs)::numeric, 4) AS idx_tqa,
+          ROUND(AVG(i.idx_dr) FILTER (WHERE i.elegivel_ivs)::numeric, 4) AS idx_dr,
+          ROUND(AVG(i.idx_ch) FILTER (WHERE i.elegivel_ivs)::numeric, 4) AS idx_ch
+        FROM core.mvw_ivs_familia i
+        INNER JOIN vig.mvw_familia f ON f.codigo_familiar = i.codigo_familiar
+        WHERE {where}
+    """
+    return sql, params
 
 # Painel: manutenções SIBEC — março/2026 (competência AAAAMM da ingestão).
 MANUT_KPI_COMPETENCIA = "202603"
@@ -618,6 +654,78 @@ def refresh_pessoas(
     }
 
 
+@router.post("/materialized-views/refresh-all")
+def refresh_all_materialized_views(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Recria tronco CADU (família, pessoas, domicílio) e em seguida core.mvw_ivs_familia."""
+    t0 = time.perf_counter()
+    steps: list[dict] = []
+    all_warnings: list[str] = []
+
+    try:
+        with db.bind.begin() as conn:
+            r = refresh_familia_mview(conn)
+        steps.append(
+            {
+                "view": "vig.mvw_familia",
+                "row_count": r.row_count,
+                "warnings": r.warnings,
+            }
+        )
+        all_warnings.extend(r.warnings)
+
+        with db.bind.begin() as conn:
+            r = refresh_pessoas_mview(conn)
+        steps.append(
+            {
+                "view": "vig.mvw_pessoas",
+                "row_count": r.row_count,
+                "warnings": r.warnings,
+            }
+        )
+        all_warnings.extend(r.warnings)
+
+        with db.bind.begin() as conn:
+            r = refresh_domicilio_mview(conn)
+        steps.append(
+            {
+                "view": "vig.mvw_familia_domicilio",
+                "row_count": r.row_count,
+                "warnings": r.warnings,
+            }
+        )
+        all_warnings.extend(r.warnings)
+
+        with db.bind.begin() as conn:
+            r = refresh_ivs_familia(conn)
+        steps.append(
+            {
+                "view": "core.mvw_ivs_familia",
+                "row_count": r.row_count,
+                "elegivel_count": r.elegivel_count,
+                "warnings": r.warnings,
+            }
+        )
+        all_warnings.extend(r.warnings)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Falha no refresh em cadeia: {exc}",
+        ) from exc
+
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+    return {
+        "status": "success",
+        "elapsed_ms": elapsed_ms,
+        "steps": steps,
+        "warnings": all_warnings,
+    }
+
+
 @router.post("/materialized-views/ivs/refresh")
 def refresh_ivs(
     db: Session = Depends(get_db),
@@ -652,30 +760,51 @@ def refresh_ivs(
 def get_ivs_resumo(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
+    num_cras: str | None = Query(None, description="Filtra por CRAS (vig.mvw_familia.num_cras)"),
+    bairro: str | None = Query(None, description="Filtra por bairro (ILIKE parcial)"),
 ):
     """Médias IVS e dimensões no universo elegível (requer refresh prévio)."""
     with db.bind.begin() as conn:
-        exists = conn.execute(text("SELECT to_regclass('core.mvw_ivs_familia')")).scalar()
-        if not exists:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="IVS não calculado. Execute POST /vigilance/materialized-views/ivs/refresh.",
-            )
-        row = conn.execute(
+        _require_ivs_mview(conn)
+        sql, params = _ivs_resumo_sql(num_cras=num_cras, bairro=bairro)
+        row = conn.execute(text(sql), params).mappings().first()
+    out = dict(row or {})
+    if num_cras is not None:
+        out["num_cras"] = num_cras
+    if bairro is not None and bairro.strip():
+        out["bairro"] = bairro.strip()
+    return out
+
+
+@router.get("/ivs/por-cras")
+def get_ivs_por_cras(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """IVS médio e dimensões por CRAS de referência (famílias elegíveis)."""
+    with db.bind.begin() as conn:
+        _require_ivs_mview(conn)
+        rows = conn.execute(
             text(
                 """
                 SELECT
-                  COUNT(*) FILTER (WHERE elegivel_ivs)::bigint AS familias_elegiveis,
-                  COUNT(*)::bigint AS familias_total,
-                  ROUND(AVG(ivs) FILTER (WHERE elegivel_ivs)::numeric, 4) AS ivs_medio,
-                  ROUND(AVG(idx_nc) FILTER (WHERE elegivel_ivs)::numeric, 4) AS idx_nc,
-                  ROUND(AVG(idx_dpi) FILTER (WHERE elegivel_ivs)::numeric, 4) AS idx_dpi,
-                  ROUND(AVG(idx_dca) FILTER (WHERE elegivel_ivs)::numeric, 4) AS idx_dca,
-                  ROUND(AVG(idx_tqa) FILTER (WHERE elegivel_ivs)::numeric, 4) AS idx_tqa,
-                  ROUND(AVG(idx_dr) FILTER (WHERE elegivel_ivs)::numeric, 4) AS idx_dr,
-                  ROUND(AVG(idx_ch) FILTER (WHERE elegivel_ivs)::numeric, 4) AS idx_ch
-                FROM core.mvw_ivs_familia
+                  COALESCE(f.num_cras, '') AS num_cras,
+                  COALESCE(NULLIF(btrim(f.nom_cras), ''), 'Sem referência territorial') AS nom_cras,
+                  COUNT(*) FILTER (WHERE i.elegivel_ivs)::bigint AS familias_elegiveis,
+                  ROUND(AVG(i.ivs) FILTER (WHERE i.elegivel_ivs)::numeric, 4) AS ivs_medio,
+                  ROUND(AVG(i.idx_nc) FILTER (WHERE i.elegivel_ivs)::numeric, 4) AS idx_nc,
+                  ROUND(AVG(i.idx_dpi) FILTER (WHERE i.elegivel_ivs)::numeric, 4) AS idx_dpi,
+                  ROUND(AVG(i.idx_dca) FILTER (WHERE i.elegivel_ivs)::numeric, 4) AS idx_dca,
+                  ROUND(AVG(i.idx_tqa) FILTER (WHERE i.elegivel_ivs)::numeric, 4) AS idx_tqa,
+                  ROUND(AVG(i.idx_dr) FILTER (WHERE i.elegivel_ivs)::numeric, 4) AS idx_dr,
+                  ROUND(AVG(i.idx_ch) FILTER (WHERE i.elegivel_ivs)::numeric, 4) AS idx_ch
+                FROM core.mvw_ivs_familia i
+                INNER JOIN vig.mvw_familia f ON f.codigo_familiar = i.codigo_familiar
+                GROUP BY f.num_cras, f.nom_cras
+                ORDER BY
+                  NULLIF(regexp_replace(COALESCE(f.num_cras, ''), '[^0-9]', '', 'g'), '')::integer NULLS LAST,
+                  f.nom_cras NULLS LAST
                 """
             )
-        ).mappings().first()
-    return dict(row or {})
+        ).mappings().all()
+    return {"items": [dict(r) for r in rows]}

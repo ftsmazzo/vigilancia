@@ -7,7 +7,7 @@ type Props = {
   token: string;
 };
 
-type VigilanciaTab = "familia" | "domicilio" | "pessoas" | "sisc";
+type VigilanciaTab = "familia" | "domicilio" | "pessoas" | "sisc" | "ivs";
 
 type SiscQualificacaoResponse = {
   status: string;
@@ -56,6 +56,28 @@ type PessoasRefreshResponse = {
   warnings: string[];
 };
 
+type IvsRefreshResponse = {
+  status: string;
+  view_schema: string;
+  view_name: string;
+  row_count: number;
+  elegivel_count: number;
+  elapsed_ms: number;
+  warnings: string[];
+};
+
+type RefreshAllResponse = {
+  status: string;
+  elapsed_ms: number;
+  steps: Array<{
+    view: string;
+    row_count: number;
+    elegivel_count?: number;
+    warnings: string[];
+  }>;
+  warnings: string[];
+};
+
 export default function VigilanciaPage({ token }: Props) {
   const [tab, setTab] = useState<VigilanciaTab>("familia");
   const [busy, setBusy] = useState(false);
@@ -64,6 +86,8 @@ export default function VigilanciaPage({ token }: Props) {
   const [familiaResult, setFamiliaResult] = useState<FamiliaRefreshResponse | null>(null);
   const [domicilioResult, setDomicilioResult] = useState<DomicilioRefreshResponse | null>(null);
   const [pessoasResult, setPessoasResult] = useState<PessoasRefreshResponse | null>(null);
+  const [ivsResult, setIvsResult] = useState<IvsRefreshResponse | null>(null);
+  const [refreshAllResult, setRefreshAllResult] = useState<RefreshAllResponse | null>(null);
   const [siscResult, setSiscResult] = useState<SiscQualificacaoResponse | null>(null);
   const [siscKpis, setSiscKpis] = useState<SiscKpisResumo | null>(null);
   const [siscStatus, setSiscStatus] = useState("");
@@ -235,6 +259,82 @@ export default function VigilanciaPage({ token }: Props) {
     }
   }
 
+  async function refreshIvs() {
+    setError("");
+    setIvsResult(null);
+    setBusy(true);
+    startProgressAnimation();
+    try {
+      const response = await fetch(`${API_URL}/api/v1/vigilance/materialized-views/ivs/refresh`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = (await response.json().catch(() => ({}))) as IvsRefreshResponse & { detail?: unknown };
+      if (!response.ok) {
+        const msg =
+          typeof data.detail === "string"
+            ? data.detail
+            : Array.isArray(data.detail)
+              ? JSON.stringify(data.detail)
+              : "Falha ao calcular IVS.";
+        throw new Error(msg);
+      }
+      stopProgressAnimation(100);
+      setIvsResult(data);
+    } catch (e) {
+      stopProgressAnimation(0);
+      setError(e instanceof Error ? e.message : "Erro inesperado.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function refreshAllViews() {
+    setError("");
+    setRefreshAllResult(null);
+    setFamiliaResult(null);
+    setPessoasResult(null);
+    setDomicilioResult(null);
+    setIvsResult(null);
+    setBusy(true);
+    startProgressAnimation();
+    try {
+      const response = await fetch(`${API_URL}/api/v1/vigilance/materialized-views/refresh-all`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = (await response.json().catch(() => ({}))) as RefreshAllResponse & { detail?: unknown };
+      if (!response.ok) {
+        const msg =
+          typeof data.detail === "string"
+            ? data.detail
+            : Array.isArray(data.detail)
+              ? JSON.stringify(data.detail)
+              : "Falha no refresh em cadeia.";
+        throw new Error(msg);
+      }
+      stopProgressAnimation(100);
+      setRefreshAllResult(data);
+      const ivsStep = data.steps.find((s) => s.view === "core.mvw_ivs_familia");
+      if (ivsStep) {
+        setIvsResult({
+          status: "success",
+          view_schema: "core",
+          view_name: "mvw_ivs_familia",
+          row_count: ivsStep.row_count,
+          elegivel_count: ivsStep.elegivel_count ?? 0,
+          elapsed_ms: data.elapsed_ms,
+          warnings: ivsStep.warnings,
+        });
+      }
+    } catch (e) {
+      stopProgressAnimation(0);
+      setError(e instanceof Error ? e.message : "Erro inesperado.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="ingestao-page">
       <aside className="ingestao-sidebar" aria-label="Visões analíticas">
@@ -275,6 +375,17 @@ export default function VigilanciaPage({ token }: Props) {
           >
             <span className="ingestao-nav-label">Pessoas</span>
             <span className="ingestao-nav-hint">Membros, NIS, escolaridade (CADU)</span>
+          </button>
+          <button
+            type="button"
+            className={`ingestao-nav-item ${tab === "ivs" ? "active" : ""}`}
+            onClick={() => {
+              setError("");
+              setTab("ivs");
+            }}
+          >
+            <span className="ingestao-nav-label">IVS</span>
+            <span className="ingestao-nav-hint">Índice de Vulnerabilidade Social</span>
           </button>
           <button
             type="button"
@@ -466,6 +577,103 @@ export default function VigilanciaPage({ token }: Props) {
                   {pessoasResult.warnings.length > 0 && (
                     <ul className="vig-warnings">
                       {pessoasResult.warnings.map((w) => (
+                        <li key={w}>{w}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </section>
+          )}
+
+          {tab === "ivs" && (
+            <section className="ingestao-panel">
+              <h1>IVS — Índice de Vulnerabilidade Social</h1>
+              <p className="ingestao-desc">
+                Metodologia IVCAD v1.0.5 (MDS IN084): 40 indicadores → 6 dimensões → índice composto por família.
+                Requer as visões <strong>Família</strong>, <strong>Pessoas</strong> e <strong>Domicílio</strong>{" "}
+                atualizadas. Tabela: <code className="inline-code">core.mvw_ivs_familia</code> (colunas{" "}
+                <code className="inline-code">ivs</code> e alias <code className="inline-code">ivcad</code>).
+              </p>
+
+              <ol className="vig-steps" style={{ margin: "0 0 1rem", paddingLeft: "1.25rem", color: "var(--fx-muted)" }}>
+                <li>
+                  Abas Família, Pessoas e Domicílio → gerar visões (ou use refresh em cadeia abaixo)
+                </li>
+                <li>Calcular IVS → materializa core.mvw_ivs_familia</li>
+                <li>
+                  <Link to="/ivs">Abrir painel IVS</Link> (médias, dimensões, recorte por CRAS/bairro)
+                </li>
+              </ol>
+
+              <div className="vig-actions" style={{ flexWrap: "wrap", gap: "0.5rem" }}>
+                <button type="button" className="btn btn-primary" onClick={() => void refreshIvs()} disabled={busy}>
+                  {busy ? "Calculando IVS…" : "Calcular / atualizar IVS"}
+                </button>
+                <button type="button" onClick={() => void refreshAllViews()} disabled={busy}>
+                  {busy ? "Processando…" : "Refresh em cadeia (tronco + IVS)"}
+                </button>
+                <Link to="/ivs" className="btn btn-secondary" style={{ textDecoration: "none" }}>
+                  Ver painel IVS
+                </Link>
+              </div>
+
+              <div className="progress-wrap" aria-live="polite">
+                <div className="progress-track">
+                  <div className="progress-fill" style={{ width: `${progress}%` }} />
+                </div>
+                <small>
+                  {busy
+                    ? "Recriando materialized views no PostgreSQL…"
+                    : progress === 100
+                      ? "Concluído."
+                      : "Aguardando comando."}
+                </small>
+              </div>
+
+              {error && <p className="error">{error}</p>}
+
+              {ivsResult && (
+                <div className="vig-result">
+                  <p className="status-ok" style={{ marginTop: "0.75rem" }}>
+                    Visão <code className="inline-code">core.{ivsResult.view_name}</code>:{" "}
+                    <strong>{ivsResult.row_count.toLocaleString("pt-BR")}</strong> famílias,{" "}
+                    <strong>{ivsResult.elegivel_count.toLocaleString("pt-BR")}</strong> elegíveis ao IVS em{" "}
+                    {(ivsResult.elapsed_ms / 1000).toLocaleString("pt-BR", {
+                      minimumFractionDigits: 1,
+                      maximumFractionDigits: 1,
+                    })}
+                    s.
+                  </p>
+                  {ivsResult.warnings.length > 0 && (
+                    <ul className="vig-warnings">
+                      {ivsResult.warnings.map((w) => (
+                        <li key={w}>{w}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+
+              {refreshAllResult && (
+                <div className="vig-result" style={{ marginTop: "1rem" }}>
+                  <p className="ingestao-desc">
+                    Refresh em cadeia concluído em{" "}
+                    {(refreshAllResult.elapsed_ms / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} s:
+                  </p>
+                  <ul className="vig-warnings" style={{ listStyle: "disc" }}>
+                    {refreshAllResult.steps.map((s) => (
+                      <li key={s.view}>
+                        <code className="inline-code">{s.view}</code>: {s.row_count.toLocaleString("pt-BR")} linhas
+                        {s.elegivel_count != null
+                          ? ` (${s.elegivel_count.toLocaleString("pt-BR")} elegíveis IVS)`
+                          : ""}
+                      </li>
+                    ))}
+                  </ul>
+                  {refreshAllResult.warnings.length > 0 && (
+                    <ul className="vig-warnings">
+                      {refreshAllResult.warnings.map((w) => (
                         <li key={w}>{w}</li>
                       ))}
                     </ul>
