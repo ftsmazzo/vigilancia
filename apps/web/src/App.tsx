@@ -12,8 +12,8 @@ import {
   UserCog, 
   LogOut,
   Menu,
-  X,
   Gauge,
+  BarChart3,
 } from "lucide-react";
 import IngestaoPage from "./pages/IngestaoPage";
 import PainelIndicadoresInicio from "./pages/PainelIndicadoresInicio";
@@ -87,52 +87,59 @@ function AppShell({
         </div>
 
         <nav className="shell-nav" aria-label="Principal" onClick={() => setIsSidebarOpen(false)}>
-          <NavLink to="/" end className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-            <LayoutDashboard className="nav-icon" size={18} />
-            <span>Início</span>
-          </NavLink>
-          <NavLink to="/observatorio" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-            <PieChart className="nav-icon" size={18} />
-            <span>Observatório</span>
-          </NavLink>
-          <NavLink to="/ingestao" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-            <Database className="nav-icon" size={18} />
-            <span>Ingestão</span>
-          </NavLink>
-          <NavLink to="/vigilancia" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-            <Activity className="nav-icon" size={18} />
-            <span>Vigilância</span>
-          </NavLink>
-          <NavLink to="/ivs" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-            <Gauge className="nav-icon" size={18} />
-            <span>IVS</span>
-          </NavLink>
-          <NavLink to="/convivencia" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-            <Users className="nav-icon" size={18} />
-            <span>Convivência</span>
-          </NavLink>
-          <NavLink to="/cras" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-            <MapPin className="nav-icon" size={18} />
-            <span>CRAS</span>
-          </NavLink>
-          <NavLink to="/caracterizacao" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-            <PieChart className="nav-icon" size={18} />
-            <span>Caracterização</span>
-          </NavLink>
-          <NavLink to="/assistente" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-            <Sparkles className="nav-icon" size={18} />
-            <span>Assistente</span>
-          </NavLink>
-          <NavLink to="/municipio" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-            <Building className="nav-icon" size={18} />
-            <span>Município</span>
-          </NavLink>
-          {me?.role === "superadmin" && (
-            <NavLink to="/usuarios" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-              <UserCog className="nav-icon" size={18} />
-              <span>Usuários</span>
+          <div className="shell-nav-group">
+            <span className="shell-nav-group-label">Painéis</span>
+            <NavLink to="/" end className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+              <LayoutDashboard className="nav-icon" size={18} />
+              <span>Início</span>
             </NavLink>
-          )}
+            <NavLink to="/observatorio" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+              <PieChart className="nav-icon" size={18} />
+              <span>Observatório</span>
+            </NavLink>
+            <NavLink to="/caracterizacao" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+              <BarChart3 className="nav-icon" size={18} />
+              <span>Caracterização</span>
+            </NavLink>
+            <NavLink to="/ivs" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+              <Gauge className="nav-icon" size={18} />
+              <span>IVS</span>
+            </NavLink>
+            <NavLink to="/convivencia" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+              <Users className="nav-icon" size={18} />
+              <span>Convivência</span>
+            </NavLink>
+            <NavLink to="/cras" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+              <MapPin className="nav-icon" size={18} />
+              <span>CRAS</span>
+            </NavLink>
+            <NavLink to="/assistente" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+              <Sparkles className="nav-icon" size={18} />
+              <span>Assistente</span>
+            </NavLink>
+          </div>
+
+          <div className="shell-nav-group shell-nav-group--admin">
+            <span className="shell-nav-group-label">Administração</span>
+            <NavLink to="/ingestao" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+              <Database className="nav-icon" size={18} />
+              <span>Ingestão</span>
+            </NavLink>
+            <NavLink to="/vigilancia" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+              <Activity className="nav-icon" size={18} />
+              <span>Vigilância</span>
+            </NavLink>
+            <NavLink to="/municipio" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+              <Building className="nav-icon" size={18} />
+              <span>Município</span>
+            </NavLink>
+            {me?.role === "superadmin" && (
+              <NavLink to="/usuarios" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+                <UserCog className="nav-icon" size={18} />
+                <span>Usuários</span>
+              </NavLink>
+            )}
+          </div>
         </nav>
       </aside>
 

@@ -174,22 +174,39 @@ def _ranking_bairros_geo(
     }
 
 
-def _titulo_escopo(cras_sel: str, cras_nome: str | None) -> str:
+def _titulo_escopo(cras_sel: str, cras_nome: str | None, bairro: str | None = None) -> str:
     if cras_sel in ("", "__todos__"):
-        return "Município — Cadastro Único (todas as famílias)"
-    if cras_sel == "__sem_cras__":
-        return "Famílias sem CRAS territorial na geo (CEP sem match)"
-    return cras_nome or f"CRAS {cras_sel}"
+        base = "Município — Cadastro Único (todas as famílias)"
+    elif cras_sel == "__sem_cras__":
+        base = "Famílias sem CRAS territorial na geo (CEP sem match)"
+    else:
+        base = cras_nome or f"CRAS {cras_sel}"
+    if bairro and bairro.strip():
+        return f"{base} · {bairro.strip()}"
+    return base
+
+
+def _territorio_filter_clause(
+    cras_cod: str | None,
+    bairro: str | None = None,
+) -> tuple[str, dict]:
+    cras_sel = (cras_cod or "").strip() or "__todos__"
+    where_extra, params = _cras_filter_clause(cras_sel)
+    if bairro and bairro.strip():
+        where_extra += " AND btrim(f.bairro::text) = :bairro "
+        params["bairro"] = bairro.strip()
+    return where_extra, params
 
 
 def caracterizacao_painel_from_views(
     conn: Connection,
     cras_cod: str | None = None,
+    bairro: str | None = None,
 ) -> dict:
     """Demografia de pessoas no CADU (fonte verdade), com filtro territorial opcional."""
     _require_views(conn)
     cras_sel = (cras_cod or "").strip() or "__todos__"
-    where_extra, params = _cras_filter_clause(cras_sel)
+    where_extra, params = _territorio_filter_clause(cras_sel, bairro)
     cn = _cras_nome_sql("fam")
 
     base = conn.execute(
@@ -228,7 +245,8 @@ def caracterizacao_painel_from_views(
         "disponivel": True,
         "painel_versao": PAINEL_CARACTERIZACAO_VERSAO,
         "cras_selecionado": cras_sel,
-        "titulo": _titulo_escopo(cras_sel, base.get("cras_nome")),
+        "bairro_selecionado": bairro.strip() if bairro and bairro.strip() else None,
+        "titulo": _titulo_escopo(cras_sel, base.get("cras_nome"), bairro),
         "fonte": "Cadastro Único — vig.mvw_familia + vig.mvw_pessoas",
         "resumo": {
             "familias": familias,

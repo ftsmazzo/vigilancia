@@ -1,5 +1,5 @@
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from "recharts";
-import { rotuloAmigavel } from "../../lib/caduLabels";
+import { rotuloExibicao } from "../../lib/caduLabels";
 
 export type DonutSlice = {
   rotulo: string;
@@ -24,20 +24,27 @@ type Props = {
   items: DonutSlice[];
   centerLabel?: string;
   centerValue?: string;
+  uppercaseLabels?: boolean;
 };
 
-const CustomTooltip = ({ active, payload }: any) => {
+const CustomTooltip = ({
+  active,
+  payload,
+  uppercaseLabels,
+}: {
+  active?: boolean;
+  payload?: Array<{ payload: DonutSlice }>;
+  uppercaseLabels?: boolean;
+}) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
     return (
-      <div className="fx-card" style={{ padding: "0.75rem", minWidth: "150px" }}>
-        <p style={{ margin: "0 0 0.5rem", fontWeight: 600, color: "var(--fx-text)" }}>
-          {rotuloAmigavel(data.rotulo)}
-        </p>
-        <p style={{ margin: 0, fontSize: "0.85rem", color: "var(--fx-muted)" }}>
+      <div className="fx-card chart-tooltip">
+        <p className="chart-tooltip-title">{rotuloExibicao(data.rotulo, uppercaseLabels)}</p>
+        <p className="chart-tooltip-line">
           Total: <strong>{data.total.toLocaleString("pt-BR")}</strong>
         </p>
-        <p style={{ margin: "0.25rem 0 0", fontSize: "0.85rem", color: "var(--fx-muted)" }}>
+        <p className="chart-tooltip-line">
           Representa: <strong>{data.pct.toLocaleString("pt-BR")}%</strong>
         </p>
       </div>
@@ -46,7 +53,14 @@ const CustomTooltip = ({ active, payload }: any) => {
   return null;
 };
 
-export default function DonutChart({ title, subtitle, items, centerLabel, centerValue }: Props) {
+export default function DonutChart({
+  title,
+  subtitle,
+  items,
+  centerLabel,
+  centerValue,
+  uppercaseLabels = false,
+}: Props) {
   const total = items.reduce((s, i) => s + i.total, 0);
   const slices = items.filter((i) => i.total > 0);
 
@@ -75,16 +89,17 @@ export default function DonutChart({ title, subtitle, items, centerLabel, center
                   <Cell key={`cell-${index}`} fill={PALETTE[index % PALETTE.length]} />
                 ))}
               </Pie>
-              <Tooltip content={<CustomTooltip />} />
+              <Tooltip content={<CustomTooltip uppercaseLabels={uppercaseLabels} />} />
               <Legend 
                 layout="vertical" 
                 verticalAlign="middle" 
                 align="right"
-                formatter={(value, entry: any) => {
+                formatter={(value, entry: { payload?: DonutSlice }) => {
                   const data = entry.payload;
+                  if (!data) return value;
                   return (
-                    <span style={{ color: "var(--fx-text-secondary)", fontSize: "0.85rem" }}>
-                      {rotuloAmigavel(data.rotulo)} ({data.pct}%)
+                    <span className="donut-legend-label">
+                      {rotuloExibicao(data.rotulo, uppercaseLabels)} ({data.pct}%)
                     </span>
                   );
                 }}

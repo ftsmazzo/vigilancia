@@ -44,3 +44,9 @@ export const ROTULO_CADU: Record<string, string> = {
 export function rotuloAmigavel(chave: string): string {
   return ROTULO_CADU[chave] ?? chave.replace(/_/g, " ");
 }
+
+/** Rótulo para exibição em painéis (opcionalmente em maiúsculas). */
+export function rotuloExibicao(chave: string, uppercase = false): string {
+  const label = rotuloAmigavel(chave);
+  return uppercase ? label.toLocaleUpperCase("pt-BR") : label;
+}

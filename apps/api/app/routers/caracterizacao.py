@@ -19,13 +19,14 @@ def get_caracterizacao_painel(
         None,
         description="Código CRAS (num_cras), __todos__ ou __sem_cras__",
     ),
+    bairro: str | None = Query(None, description="Bairro territorial (match exato)"),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
     """Perfil de sexo, raça, escolaridade, deficiência e idade no CADU."""
     try:
         with db.bind.connect() as conn:
-            return caracterizacao_painel_from_views(conn, cras_cod)
+            return caracterizacao_painel_from_views(conn, cras_cod, bairro)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:

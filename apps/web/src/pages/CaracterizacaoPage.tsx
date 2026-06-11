@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import BarChartPanel, { type BarItem } from "../components/charts/BarChartPanel";
 import DonutChart from "../components/charts/DonutChart";
@@ -17,12 +17,18 @@ type CrasOption = {
   familias: number;
 };
 
+type BairroOption = {
+  bairro: string;
+  familias: number;
+};
+
 type Painel = {
   disponivel: boolean;
   mensagem?: string;
   titulo?: string;
   fonte?: string;
   cras_selecionado?: string;
+  bairro_selecionado?: string | null;
   resumo?: {
     familias: number;
     pessoas: number;
@@ -59,10 +65,17 @@ type RankingBairroItem = {
   familias_bairro_cadu: number;
 };
 
+function fmtBairro(nome: string): string {
+  return nome.toLocaleUpperCase("pt-BR");
+}
+
 export default function CaracterizacaoPage({ token }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [crasCod, setCrasCod] = useState("__todos__");
+  const [bairroFiltro, setBairroFiltro] = useState("");
+  const [bairrosOptions, setBairrosOptions] = useState<BairroOption[]>([]);
+  const [loadingBairros, setLoadingBairros] = useState(false);
   const [catalog, setCatalog] = useState<CrasOption[]>([]);
   const [painel, setPainel] = useState<Painel | null>(null);
 
@@ -79,10 +92,32 @@ export default function CaracterizacaoPage({ token }: Props) {
   }, [token]);
 
   useEffect(() => {
+    setBairroFiltro("");
+    if (!crasCod || crasCod === "__todos__" || crasCod === "__sem_cras__") {
+      setBairrosOptions([]);
+      return;
+    }
+    setLoadingBairros(true);
+    fetch(`${API_URL}/api/v1/cras/bairros?num_cras=${encodeURIComponent(crasCod)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error();
+        const data = (await res.json()) as { items: BairroOption[] };
+        setBairrosOptions(data.items ?? []);
+      })
+      .catch(() => setBairrosOptions([]))
+      .finally(() => setLoadingBairros(false));
+  }, [token, crasCod]);
+
+  useEffect(() => {
     setLoading(true);
     setError("");
-    const q = crasCod && crasCod !== "__todos__" ? `?cras_cod=${encodeURIComponent(crasCod)}` : "";
-    fetch(`${API_URL}/api/v1/caracterizacao/painel${q}`, {
+    const params = new URLSearchParams();
+    if (crasCod && crasCod !== "__todos__") params.set("cras_cod", crasCod);
+    if (bairroFiltro.trim()) params.set("bairro", bairroFiltro.trim());
+    const qs = params.toString();
+    fetch(`${API_URL}/api/v1/caracterizacao/painel${qs ? `?${qs}` : ""}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then(async (res) => {
@@ -95,7 +130,7 @@ export default function CaracterizacaoPage({ token }: Props) {
         setPainel(null);
       })
       .finally(() => setLoading(false));
-  }, [token, crasCod]);
+  }, [token, crasCod, bairroFiltro]);
 
   const r = painel?.resumo;
   const sexoSlices =
@@ -108,49 +143,106 @@ export default function CaracterizacaoPage({ token }: Props) {
           ].filter((x) => x.total > 0)
         : [];
 
+  const tituloRecorte = useMemo(() => {
+    if (crasCod === "__todos__" && !bairroFiltro.trim()) return "Município inteiro";
+    if (crasCod === "__sem_cras__") return "Sem CRAS territorial";
+    const c = catalog.find((x) => x.cras_cod === crasCod);
+    const crasLabel = c?.rotulo_ordenado || c?.cras_nome || crasCod;
+    if (bairroFiltro.trim()) return `${crasLabel} · ${fmtBairro(bairroFiltro.trim())}`;
+    return crasLabel;
+  }, [crasCod, bairroFiltro, catalog]);
+
+  const bairroSelectDisabled =
+    crasCod === "__todos__" || crasCod === "__sem_cras__" || loadingBairros;
+
   return (
     <section className="kpi-page caracterizacao-page">
       <header className="caract-hero fx-card">
         <div className="caract-hero-text">
           <h1>Caracterização sociodemográfica</h1>
           <p className="caract-lead">
-            Perfil do público no <strong>Cadastro Único</strong> — fonte verdade do município. Raça, sexo,
-            escolaridade, deficiência e faixa etária com a mesma classificação dos painéis CRAS e Convivência.
+            Perfil do público no <strong>Cadastro Único</strong> — raça, sexo, escolaridade, deficiência,
+            faixa etária e renda per capita com recorte territorial por CRAS e bairro (geo × CEP).
           </p>
-          <p className="caract-meta">
-            {painel?.fonte}
-            {painel?.titulo && <> · <span className="fx-accent-word">{painel.titulo}</span></>}
-          </p>
+          <p className="caract-meta">{painel?.fonte}</p>
           <p className="caract-link">
-            <Link to="/municipio">Cadastro textual do município</Link>
+            <Link to="/cras">Painel quantitativo por CRAS</Link>
             {" · "}
-            <Link to="/cras">Painel por CRAS</Link>
+            <Link to="/ivs">Índice de vulnerabilidade (IVS)</Link>
           </p>
         </div>
-
-        <label className="cras-select-wrap caract-filter">
-          <span>Recorte territorial (CRAS no CADU)</span>
-          <select
-            className="cras-select"
-            value={crasCod}
-            onChange={(e) => setCrasCod(e.target.value)}
-            disabled={loading}
-          >
-            <option value="__todos__">Município inteiro</option>
-            <option value="__sem_cras__">Sem CRAS informado</option>
-            {catalog.map((c) => (
-              <option key={c.cras_cod} value={c.cras_cod}>
-                {(c.rotulo_ordenado ?? c.cras_nome) +
-                  (c.cras_codigo_exibicao && c.cras_codigo_exibicao !== "—"
-                    ? ` [${c.cras_codigo_exibicao}]`
-                    : "")}
-                {" · "}
-                {c.familias.toLocaleString("pt-BR")} fam.
-              </option>
-            ))}
-          </select>
-        </label>
       </header>
+
+      <section className="caract-filtros fx-card">
+        <div className="caract-filtros-grid">
+          <label>
+            <span>CRAS territorial</span>
+            <select
+              className="cras-select"
+              value={crasCod}
+              onChange={(e) => {
+                setCrasCod(e.target.value);
+                setBairroFiltro("");
+              }}
+              disabled={loading}
+            >
+              <option value="__todos__">Município inteiro</option>
+              <option value="__sem_cras__">Sem CRAS na geo</option>
+              {catalog.map((c) => (
+                <option key={c.cras_cod} value={c.cras_cod}>
+                  {(c.rotulo_ordenado ?? c.cras_nome) +
+                    (c.cras_codigo_exibicao && c.cras_codigo_exibicao !== "—"
+                      ? ` [${c.cras_codigo_exibicao}]`
+                      : "")}
+                  {" · "}
+                  {c.familias.toLocaleString("pt-BR")} fam.
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Bairro</span>
+            <select
+              className="cras-select"
+              value={bairroFiltro}
+              onChange={(e) => setBairroFiltro(e.target.value)}
+              disabled={bairroSelectDisabled || loading}
+            >
+              <option value="">
+                {crasCod === "__todos__"
+                  ? "Selecione um CRAS"
+                  : loadingBairros
+                    ? "Carregando bairros…"
+                    : bairrosOptions.length === 0
+                      ? "Nenhum bairro territorial"
+                      : "Todos os bairros do CRAS"}
+              </option>
+              {bairrosOptions.map((b) => (
+                <option key={b.bairro} value={b.bairro}>
+                  {fmtBairro(b.bairro)} · {b.familias.toLocaleString("pt-BR")} fam.
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            className="btn btn-secondary caract-filtros-clear"
+            onClick={() => {
+              setCrasCod("__todos__");
+              setBairroFiltro("");
+              setBairrosOptions([]);
+            }}
+          >
+            Limpar filtros
+          </button>
+        </div>
+        <p className="caract-recorte-label">
+          Exibindo: <strong>{tituloRecorte}</strong>
+          {painel?.titulo && painel.titulo !== tituloRecorte && (
+            <> · <span className="fx-accent-word">{painel.titulo}</span></>
+          )}
+        </p>
+      </section>
 
       {error && <p className="error caracterizacao-erro">{error}</p>}
 
@@ -188,19 +280,65 @@ export default function CaracterizacaoPage({ token }: Props) {
           <div className="caract-donut-row chart-grid">
             <DonutChart
               title="Sexo"
-              subtitle="Distribuição entre masculino e feminino (CADU)"
+              subtitle="Distribuição entre masculino e feminino"
               items={sexoSlices}
               centerLabel="pessoas"
               centerValue={r.pessoas.toLocaleString("pt-BR")}
+              uppercaseLabels
             />
             <DonutChart
               title="Deficiência"
               subtitle="Com ou sem deficiência declarada"
               items={painel.por_deficiencia_binario ?? []}
+              uppercaseLabels
             />
           </div>
 
-          {painel.ranking_bairros && (
+          <h2 className="kpi-section-title caract-section-title">Renda familiar per capita</h2>
+          <div className="chart-grid caract-charts caract-charts--renda">
+            <BarChartPanel
+              title="Faixas de renda per capita"
+              subtitle="Contagem de famílias por faixa (vig.mvw_familia.renda_per_capita)"
+              items={painel.por_renda_per_capita ?? []}
+              maxBars={8}
+              accent="spectrum"
+              uppercaseLabels
+            />
+          </div>
+
+          <h2 className="kpi-section-title caract-section-title">Composição detalhada</h2>
+          <div className="chart-grid caract-charts">
+            <BarChartPanel
+              title="Raça / cor"
+              subtitle="Autodeclaração no Cadastro Único"
+              items={painel.por_raca ?? []}
+              accent="cool"
+              uppercaseLabels
+            />
+            <BarChartPanel
+              title="Escolaridade"
+              subtitle="Grau de instrução"
+              items={painel.por_escolaridade ?? []}
+              accent="warm"
+              uppercaseLabels
+            />
+            <BarChartPanel
+              title="Tipo de deficiência"
+              subtitle="Classificação por tipo"
+              items={painel.por_deficiencia ?? []}
+              accent="spectrum"
+              uppercaseLabels
+            />
+            <BarChartPanel
+              title="Faixa etária"
+              subtitle="Idade em anos completos"
+              items={painel.por_faixa_idade ?? []}
+              accent="cool"
+              uppercaseLabels
+            />
+          </div>
+
+          {painel.ranking_bairros && !bairroFiltro.trim() && (
             <>
               <h2 className="kpi-section-title caract-section-title">Ranking por bairro (GEO)</h2>
               {!painel.ranking_bairros.disponivel ? (
@@ -210,13 +348,8 @@ export default function CaracterizacaoPage({ token }: Props) {
               ) : (
                 <div className="caract-ranking-wrap fx-card">
                   <p className="caract-ranking-desc">
-                    Top 10 bairros com mais famílias no Cadastro Único. O bairro vem da base{" "}
-                    <strong>geo</strong> quando o CEP da família existe em{" "}
-                    <code className="inline-code">tbl_geo</code>; caso contrário, usa-se o bairro
-                    informado no CADU.
-                  </p>
-                  <p className="fx-card-sub caract-ranking-meta">
-                    {painel.ranking_bairros.fonte_bairro} · {painel.ranking_bairros.fonte_pbf}
+                    Top 10 bairros com mais famílias no recorte. Bairro territorial via geo × CEP;
+                    fallback para bairro informado no CADU.
                   </p>
                   <div className="cras-table-wrap">
                     <table className="cras-table caract-ranking-table">
@@ -228,13 +361,12 @@ export default function CaracterizacaoPage({ token }: Props) {
                           <th>Participação</th>
                           <th className="num">Com PBF</th>
                           <th className="num">% PBF</th>
-                          <th>Origem bairro</th>
+                          <th>Origem</th>
                         </tr>
                       </thead>
                       <tbody>
                         {painel.ranking_bairros.items.map((row) => {
-                          const maxFam =
-                            painel.ranking_bairros!.items[0]?.familias || 1;
+                          const maxFam = painel.ranking_bairros!.items[0]?.familias || 1;
                           const geoPct =
                             row.familias > 0
                               ? Math.round((100 * row.familias_bairro_geo) / row.familias)
@@ -242,7 +374,7 @@ export default function CaracterizacaoPage({ token }: Props) {
                           return (
                             <tr key={row.bairro}>
                               <td className="num">{row.posicao}</td>
-                              <td className="caract-ranking-bairro">{row.bairro}</td>
+                              <td className="caract-ranking-bairro">{fmtBairro(row.bairro)}</td>
                               <td className="num">{row.familias.toLocaleString("pt-BR")}</td>
                               <td>
                                 <div className="caract-mini-bar">
@@ -275,7 +407,7 @@ export default function CaracterizacaoPage({ token }: Props) {
                                       : "caract-tag caract-tag--mix"
                                   }
                                 >
-                                  {geoPct >= 80 ? "GEO" : `${geoPct}% geo`}
+                                  {geoPct >= 80 ? "GEO" : `${geoPct}% GEO`}
                                 </span>
                               </td>
                             </tr>
@@ -288,44 +420,6 @@ export default function CaracterizacaoPage({ token }: Props) {
               )}
             </>
           )}
-
-          <h2 className="kpi-section-title caract-section-title">Renda familiar per capita</h2>
-          <div className="chart-grid caract-charts caract-charts--renda">
-            <BarChartPanel
-              title="Faixas de renda per capita"
-              subtitle="Por família (vig.mvw_familia.renda_per_capita) — contagem em número de famílias"
-              items={painel.por_renda_per_capita ?? []}
-              maxBars={8}
-              accent="warm"
-            />
-          </div>
-
-          <h2 className="kpi-section-title caract-section-title">Composição detalhada</h2>
-          <div className="chart-grid caract-charts">
-            <BarChartPanel
-              title="Raça / cor"
-              subtitle="Autodeclaração no Cadastro Único"
-              items={painel.por_raca ?? []}
-              accent="cool"
-            />
-            <BarChartPanel
-              title="Escolaridade"
-              subtitle="Grau de instrução"
-              items={painel.por_escolaridade ?? []}
-              accent="warm"
-            />
-            <BarChartPanel
-              title="Tipo de deficiência"
-              subtitle="Classificação por tipo (pode haver múltiplos indicadores)"
-              items={painel.por_deficiencia ?? []}
-            />
-            <BarChartPanel
-              title="Faixa etária"
-              subtitle="Idade em anos completos"
-              items={painel.por_faixa_idade ?? []}
-              accent="cool"
-            />
-          </div>
         </>
       )}
     </section>
