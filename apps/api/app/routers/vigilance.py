@@ -11,6 +11,7 @@ from ..models import User
 from ..ivs.ivs_familia import refresh_ivs_familia
 from ..ivs.painel import fetch_ivs_painel, fetch_ivs_por_cras, ivs_filter_clause
 from ..vigilance.cadu_params import LIMIAR_POBREZA_EXTREMA, MESES_TAC_MAX, SM_METADE
+from ..vigilance.domicilio_mview import refresh_domicilio_mview
 from ..vigilance.familia_mview import (
     bolsa_folha_kpis_from_raw,
     ensure_vig_functions,
