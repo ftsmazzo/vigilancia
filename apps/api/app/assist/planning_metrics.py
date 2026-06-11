@@ -13,7 +13,6 @@ from .bairro_resolver import _pick_variant, _prefix_name
 from .conversation_intent import (
     is_planning_followup,
     is_planning_turn,
-    planning_thread_active,
     user_messages_blob,
     wants_planning_ranking,
 )
@@ -34,12 +33,6 @@ _BAIRRO_IN_CRAS = re.compile(
     r"qual\s+bairro|em\s+que\s+bairro|bairro\s+(?:mais|indicad)",
     re.I,
 )
-_RECOMMENDED_CRAS = re.compile(
-    r"(?:mais indicado|eu sugeriria|indicaria|sugeriria)[^\n]{0,120}?"
-    r"(?:\*\*)?CRAS\s*(\d{1,2})",
-    re.I,
-)
-_CRAS_HEAD = re.compile(r"\*\*CRAS\s*(\d{1,2})\*\*", re.I)
 
 
 def _fmt_int(n: int) -> str:
@@ -68,15 +61,19 @@ def _extract_recommended_cras(transcript: list[dict[str, str]] | None) -> str | 
         if msg.get("role") != "assistant":
             continue
         content = msg.get("content", "")
-        if not planning_thread_active(transcript):
-            continue
-        head = content.split("Outros CRAS")[0].split("Demais unidades")[0]
-        m = _RECOMMENDED_CRAS.search(head)
-        if m:
-            return m.group(1).strip()
-        m = _CRAS_HEAD.search(head)
-        if m:
-            return m.group(1).strip()
+        head = content.split("Outros CRAS")[0].split("Demais unidades")[0].split("Demais CRAS")[0]
+
+        patterns = (
+            r"CRAS\s*(\d{1,2})\s*[—\-–].*?(?:mais indicado|indicado pelo|indicaria|sugeriria|maior demanda)",
+            r"(?:indicaria|sugeriria|indicado|scfv)[^\n]{0,100}?CRAS\s*(\d{1,2})",
+            r"CRAS\s*(\d{1,2})[^\n]{0,120}?(?:mais indicado|indicaria|maior demanda|reúne a maior)",
+            r"\*\*CRAS\s*(\d{1,2})\*\*",
+            r"\bCRAS\s*(\d{1,2})\b",
+        )
+        for pat in patterns:
+            m = re.search(pat, head, re.I)
+            if m:
+                return m.group(1).strip()
     return None
 
 
@@ -167,7 +164,18 @@ def try_planning_demand_metric(
     if is_planning_followup(message, transcript) or _BAIRRO_IN_CRAS.search(message):
         num_cras = _extract_recommended_cras(transcript)
         if not num_cras:
-            return None
+            answer = (
+                "Para indicar o bairro, preciso saber **qual CRAS** — "
+                "foi o que apareceu como maior demanda na pergunta anterior."
+            )
+            return {
+                "answer": _prefix_name(user_first_name, answer),
+                "sql": None,
+                "row_count": 0,
+                "preview": [],
+                "mode": "disambiguation",
+                "metric": "planning_cras_missing",
+            }
 
         top = _top_bairro_in_cras(conn, num_cras, age_min, age_max)
         if not top:

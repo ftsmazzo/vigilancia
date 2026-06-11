@@ -60,9 +60,9 @@ def user_messages_only(transcript: list[dict[str, str]] | None, message: str = "
 
 
 def is_sisc_context(message: str, transcript: list[dict[str, str]] | None) -> bool:
-    from .conversation_intent import is_planning_turn, user_asks_sisc_existing
+    from .conversation_intent import is_planning_turn, planning_thread_active, user_asks_sisc_existing
 
-    if is_planning_turn(message, transcript):
+    if is_planning_turn(message, transcript) or planning_thread_active(transcript):
         return False
     if user_asks_sisc_existing(message, transcript):
         return True

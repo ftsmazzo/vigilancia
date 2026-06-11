@@ -108,3 +108,29 @@ def skips_bairro_preprocess(message: str, transcript: list[dict[str, str]] | Non
 
 def wants_planning_ranking(message: str) -> bool:
     return bool(_LIST_OTHERS.search(message))
+
+
+def build_thread_brief(message: str, transcript: list[dict[str, str]] | None) -> str:
+    """Resumo estruturado para o AgenteSQL — evita perder o fio da conversa."""
+    lines: list[str] = []
+    if is_planning_turn(message, transcript):
+        lines.append("- Assunto: planejamento de **novo SCFV** (demanda potencial no CADU territorial).")
+        lines.append("- **NÃO** usar vig.mvw_sisc_qualificado salvo pedido explícito de matrícula existente.")
+    if is_planning_followup(message, transcript):
+        lines.append("- Follow-up: detalhar **bairro dentro do CRAS** indicado na resposta anterior.")
+    if planning_thread_active(transcript):
+        for msg in reversed(transcript or []):
+            if msg.get("role") != "assistant":
+                continue
+            content = msg.get("content", "")
+            m = re.search(r"\bCRAS\s*(\d{1,2})\b", content, re.I)
+            if m and re.search(r"indic|suger|demanda|scfv", content, re.I):
+                lines.append(f"- CRAS indicado no histórico: **CRAS {m.group(1)}**.")
+                break
+    blob = user_messages_blob(transcript, message)
+    age = re.search(r"(\d{1,2})\s*(?:a|-|á)\s*(\d{1,2})\s*(?:anos)?", blob, re.I)
+    if age:
+        lines.append(f"- Faixa etária em discussão: **{age.group(1)} a {age.group(2)} anos**.")
+    if not lines:
+        return ""
+    return "\n".join(lines)

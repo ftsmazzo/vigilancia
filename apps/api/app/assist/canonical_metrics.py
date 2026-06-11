@@ -135,6 +135,7 @@ def try_canonical_metric(
     transcript: list[dict[str, str]] | None = None,
     *,
     user_first_name: str = "",
+    block_sisc: bool = False,
 ) -> dict | None:
     """
     Resposta sem LLM/SQL quando a pergunta bate com KPI oficial do painel.
@@ -150,9 +151,10 @@ def try_canonical_metric(
     if planning:
         return planning
 
-    sisc = _try_sisc_cross(conn, message, transcript)
-    if sisc:
-        return sisc
+    if not block_sisc:
+        sisc = _try_sisc_cross(conn, message, transcript)
+        if sisc:
+            return sisc
 
     ivs = try_ivs_metric(conn, message, user_first_name=user_first_name)
     if ivs:

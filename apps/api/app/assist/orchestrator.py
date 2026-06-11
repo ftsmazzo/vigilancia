@@ -13,6 +13,7 @@ from ..models import User
 from ..municipio_context import load_context_prompt
 from .cras_breakdown import format_cras_breakdown_answer
 from .bairro_resolver import (
+    BairroPreprocess,
     apply_bairro_correction_to_answer,
     message_has_territorial_intent,
     preprocess_bairro_turn,
@@ -25,6 +26,8 @@ from .bairro_resolver import (
 from .canonical_metrics import try_canonical_metric
 from .kb_client import query_knowledge_base
 from .llm import chat_completion
+from .maestro_router import resolve_turn_route
+from .planning_metrics import try_planning_demand_metric
 from .sql_agent import SqlAgentResult, run_sql_agent
 
 ORCHESTRATOR_PLAN_SYSTEM = """Você é VigIA, orquestrador do assistente de vigilância socioassistencial municipal.
@@ -278,8 +281,36 @@ def run_orchestrator_turn(
     user_block = _user_context_block(user, municipio_block)
     rag_block = query_knowledge_base(message)
     first_name = _first_name(user.name)
+    route = resolve_turn_route(message, transcript)
 
-    bairro_pre = preprocess_bairro_turn(conn, first_name, message, transcript)
+    if route.primary == "planning":
+        planning = try_planning_demand_metric(
+            conn, message, transcript, user_first_name=first_name
+        )
+        if planning:
+            return {
+                **planning,
+                "answer": _trim_answer_boilerplate(planning["answer"]),
+            }
+        sql_result = run_sql_agent(
+            conn, db, message, thread_brief=route.thread_brief
+        )
+        if sql_result.ok:
+            answer = _finalize_data_reply(
+                message, transcript, message, sql_result, user_block
+            )
+            return {
+                "answer": _trim_answer_boilerplate(answer),
+                "sql": sql_result.sql,
+                "row_count": sql_result.row_count,
+                "preview": sql_result.preview,
+                "mode": "data",
+            }
+
+    if route.skip_bairro_preprocess:
+        bairro_pre = BairroPreprocess(message=message)
+    else:
+        bairro_pre = preprocess_bairro_turn(conn, first_name, message, transcript)
     if bairro_pre.early_response:
         return {
             **bairro_pre.early_response,
@@ -296,7 +327,13 @@ def run_orchestrator_turn(
         }
 
     # Métricas canônicas (SISC×CADU, CRAS, PBF) têm prioridade — sempre com SQL explícito
-    canonical = try_canonical_metric(conn, message, transcript, user_first_name=first_name)
+    canonical = try_canonical_metric(
+        conn,
+        message,
+        transcript,
+        user_first_name=first_name,
+        block_sisc=route.block_sisc,
+    )
     if canonical:
         answer = canonical["answer"]
         if canonical.get("metric") == "cadu_familias_por_cras":
@@ -355,7 +392,9 @@ def run_orchestrator_turn(
             f"Filtre com lower(btrim(f.bairro::text)) = lower('{bairro_resolution.canonical.replace(chr(39), '')}').]"
         )
 
-    sql_result = run_sql_agent(conn, db, sql_question)
+    sql_result = run_sql_agent(
+        conn, db, sql_question, thread_brief=route.thread_brief
+    )
     if sql_result.ok and sql_result.formatted_answer:
         answer = _cras_answer_with_context(sql_result.rows, user, municipio_block)
     elif sql_result.ok and sql_result.row_count == 0:
