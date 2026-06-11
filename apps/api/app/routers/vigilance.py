@@ -9,6 +9,7 @@ from ..db import get_db
 from ..deps import get_current_user
 from ..models import User
 from ..ivs.ivs_familia import refresh_ivs_familia
+from ..ivs.painel import fetch_ivs_painel, fetch_ivs_por_cras, ivs_filter_clause
 from ..vigilance.domicilio_mview import refresh_domicilio_mview
 from ..vigilance.familia_mview import (
     bolsa_folha_kpis_from_raw,
@@ -29,15 +30,7 @@ def _require_ivs_mview(conn) -> None:
 
 
 def _ivs_resumo_sql(*, num_cras: str | None, bairro: str | None) -> tuple[str, dict]:
-    clauses = ["1=1"]
-    params: dict = {}
-    if num_cras is not None:
-        clauses.append("f.num_cras = :num_cras")
-        params["num_cras"] = num_cras
-    if bairro is not None and bairro.strip():
-        clauses.append("f.bairro ILIKE :bairro")
-        params["bairro"] = f"%{bairro.strip()}%"
-    where = " AND ".join(clauses)
+    where, params = ivs_filter_clause(num_cras=num_cras, bairro=bairro)
     sql = f"""
         SELECT
           COUNT(*) FILTER (WHERE i.elegivel_ivs)::bigint AS familias_elegiveis,
@@ -756,6 +749,25 @@ def refresh_ivs(
     }
 
 
+@router.get("/ivs/painel")
+def get_ivs_painel(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+    num_cras: str | None = Query(None, description="Código CRAS, __sem_cras__ ou vazio = município"),
+    bairro: str | None = Query(None, description="Filtra por bairro (ILIKE parcial)"),
+    dimensao: str | None = Query(None, description="Sigla NC, DPI, DCA, TQA, DR ou CH — detalhe de indicadores"),
+):
+    """Painel IVS no layout Observatório MDS (índice 0–1 + % por indicador)."""
+    with db.bind.begin() as conn:
+        _require_ivs_mview(conn)
+        return fetch_ivs_painel(
+            conn,
+            num_cras=num_cras if num_cras and num_cras.strip() else None,
+            bairro=bairro,
+            dimensao=dimensao,
+        )
+
+
 @router.get("/ivs/resumo")
 def get_ivs_resumo(
     db: Session = Depends(get_db),
@@ -781,30 +793,8 @@ def get_ivs_por_cras(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    """IVS médio e dimensões por CRAS de referência (famílias elegíveis)."""
+    """IVS médio e dimensões por CRAS de referência (famílias elegíveis, sem duplicatas)."""
     with db.bind.begin() as conn:
         _require_ivs_mview(conn)
-        rows = conn.execute(
-            text(
-                """
-                SELECT
-                  COALESCE(f.num_cras, '') AS num_cras,
-                  COALESCE(NULLIF(btrim(f.nom_cras), ''), 'Sem referência territorial') AS nom_cras,
-                  COUNT(*) FILTER (WHERE i.elegivel_ivs)::bigint AS familias_elegiveis,
-                  ROUND(AVG(i.ivs) FILTER (WHERE i.elegivel_ivs)::numeric, 4) AS ivs_medio,
-                  ROUND(AVG(i.idx_nc) FILTER (WHERE i.elegivel_ivs)::numeric, 4) AS idx_nc,
-                  ROUND(AVG(i.idx_dpi) FILTER (WHERE i.elegivel_ivs)::numeric, 4) AS idx_dpi,
-                  ROUND(AVG(i.idx_dca) FILTER (WHERE i.elegivel_ivs)::numeric, 4) AS idx_dca,
-                  ROUND(AVG(i.idx_tqa) FILTER (WHERE i.elegivel_ivs)::numeric, 4) AS idx_tqa,
-                  ROUND(AVG(i.idx_dr) FILTER (WHERE i.elegivel_ivs)::numeric, 4) AS idx_dr,
-                  ROUND(AVG(i.idx_ch) FILTER (WHERE i.elegivel_ivs)::numeric, 4) AS idx_ch
-                FROM core.mvw_ivs_familia i
-                INNER JOIN vig.mvw_familia f ON f.codigo_familiar = i.codigo_familiar
-                GROUP BY f.num_cras, f.nom_cras
-                ORDER BY
-                  NULLIF(regexp_replace(COALESCE(f.num_cras, ''), '[^0-9]', '', 'g'), '')::integer NULLS LAST,
-                  f.nom_cras NULLS LAST
-                """
-            )
-        ).mappings().all()
-    return {"items": [dict(r) for r in rows]}
+        items = fetch_ivs_por_cras(conn)
+    return {"items": items}

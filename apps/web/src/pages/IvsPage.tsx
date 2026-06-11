@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import BarChartPanel, { type BarItem } from "../components/charts/BarChartPanel";
-import RadarChartPanel from "../components/charts/RadarChartPanel";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -9,261 +7,309 @@ type Props = {
   token: string;
 };
 
-type IvsResumo = {
-  familias_elegiveis: number;
-  familias_total: number;
+type CrasOption = {
+  cras_cod: string;
+  cras_nome: string;
+  rotulo_ordenado?: string;
+};
+
+type IndicadorPainel = {
+  codigo: string;
+  titulo: string;
+  pct_familias: number | null;
+};
+
+type DimensaoPainel = {
+  sigla: string;
+  nome: string;
+  idx: number | null;
+  pct_acima_media: number | null;
+  indicadores: IndicadorPainel[];
+};
+
+type IvsPainel = {
+  recorte: { num_cras: string | null; bairro: string | null };
+  universo: {
+    familias_elegiveis: number;
+    familias_cadu: number;
+    pct_sobre_cadu: number | null;
+  };
   ivs_medio: number | null;
-  idx_nc: number | null;
-  idx_dpi: number | null;
-  idx_dca: number | null;
-  idx_tqa: number | null;
-  idx_dr: number | null;
-  idx_ch: number | null;
-  num_cras?: string;
-  bairro?: string;
+  dimensoes: DimensaoPainel[];
+  dimensao_detalhe?: DimensaoPainel;
+  versao_metodologica: string;
 };
 
-type IvsCrasItem = {
-  num_cras: string;
-  nom_cras: string;
-  familias_elegiveis: number;
-  ivs_medio: number | null;
-  idx_nc: number | null;
-  idx_dpi: number | null;
-  idx_dca: number | null;
-  idx_tqa: number | null;
-  idx_dr: number | null;
-  idx_ch: number | null;
-};
+type DimSigla = "NC" | "DPI" | "DCA" | "TQA" | "DR" | "CH" | null;
 
-const DIM_LABELS: Record<string, string> = {
-  idx_nc: "NC — Necessidade de Cuidados",
-  idx_dpi: "DPI — Primeira Infância",
-  idx_dca: "DCA — Crianças e Adolescentes",
-  idx_tqa: "TQA — Trabalho e Qualificação",
-  idx_dr: "DR — Disponibilidade de Recursos",
-  idx_ch: "CH — Condições Habitacionais",
-};
+const DIM_ORDEM: Array<Exclude<DimSigla, null>> = ["NC", "DPI", "DCA", "TQA", "DR", "CH"];
 
-function pct01(v: number | null | undefined): number {
-  if (v == null || Number.isNaN(v)) return 0;
-  return Math.round(v * 10000) / 100;
+/** Índice 0–1 como no Observatório (ex.: 0,283). */
+function fmtIndice(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(v)) return "—";
+  return v.toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 }
 
-function crasRotulo(item: IvsCrasItem): string {
-  const num = (item.num_cras || "").trim();
-  const nome = (item.nom_cras || "").trim();
-  if (num && nome) return `${num} — ${nome}`;
-  return nome || num || "Sem referência";
+function fmtPct(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(v)) return "—";
+  return `${v.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
+}
+
+function barWidthIndice(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(v)) return "0%";
+  return `${Math.min(100, Math.max(0, v * 100))}%`;
+}
+
+function barWidthPct(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(v)) return "0%";
+  return `${Math.min(100, Math.max(0, v))}%`;
 }
 
 export default function IvsPage({ token }: Props) {
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [resumo, setResumo] = useState<IvsResumo | null>(null);
-  const [porCras, setPorCras] = useState<IvsCrasItem[]>([]);
-  const [crasFiltro, setCrasFiltro] = useState("");
+  const [painel, setPainel] = useState<IvsPainel | null>(null);
+  const [catalog, setCatalog] = useState<CrasOption[]>([]);
+  const [crasCod, setCrasCod] = useState("__todos__");
   const [bairroFiltro, setBairroFiltro] = useState("");
-
-  const loadPorCras = useCallback(async () => {
-    const response = await fetch(`${API_URL}/api/v1/vigilance/ivs/por-cras`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const data = (await response.json().catch(() => ({}))) as {
-      items?: IvsCrasItem[];
-      detail?: unknown;
-    };
-    if (!response.ok) return;
-    setPorCras(data.items ?? []);
-  }, [token]);
-
-  const loadResumo = useCallback(
-    async (cras?: string, bairro?: string) => {
-      setLoading(true);
-      setError("");
-      try {
-        const params = new URLSearchParams();
-        if (cras) params.set("num_cras", cras);
-        if (bairro?.trim()) params.set("bairro", bairro.trim());
-        const qs = params.toString();
-        const response = await fetch(
-          `${API_URL}/api/v1/vigilance/ivs/resumo${qs ? `?${qs}` : ""}`,
-          { headers: { Authorization: `Bearer ${token}` } },
-        );
-        const data = (await response.json().catch(() => ({}))) as IvsResumo & { detail?: unknown };
-        if (!response.ok) {
-          const msg =
-            typeof data.detail === "string"
-              ? data.detail
-              : "Falha ao carregar resumo IVS.";
-          throw new Error(msg);
-        }
-        setResumo(data);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Erro inesperado.");
-        setResumo(null);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [token],
-  );
+  const [dimAtiva, setDimAtiva] = useState<DimSigla>(null);
 
   useEffect(() => {
-    void loadResumo();
-    void loadPorCras();
-  }, [loadResumo, loadPorCras]);
+    fetch(`${API_URL}/api/v1/cras/catalog`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(async (res) => {
+        if (!res.ok) return;
+        const data = (await res.json()) as { items: CrasOption[] };
+        setCatalog(data.items ?? []);
+      })
+      .catch(() => setCatalog([]));
+  }, [token]);
 
-  const radarData = useMemo(() => {
-    if (!resumo) return [];
-    return [
-      { name: "NC", ivs: pct01(resumo.idx_nc) },
-      { name: "DPI", ivs: pct01(resumo.idx_dpi) },
-      { name: "DCA", ivs: pct01(resumo.idx_dca) },
-      { name: "TQA", ivs: pct01(resumo.idx_tqa) },
-      { name: "DR", ivs: pct01(resumo.idx_dr) },
-      { name: "CH", ivs: pct01(resumo.idx_ch) },
-    ];
-  }, [resumo]);
+  const loadPainel = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const params = new URLSearchParams();
+      if (crasCod && crasCod !== "__todos__") params.set("num_cras", crasCod);
+      if (bairroFiltro.trim()) params.set("bairro", bairroFiltro.trim());
+      if (dimAtiva) params.set("dimensao", dimAtiva);
+      const qs = params.toString();
+      const response = await fetch(`${API_URL}/api/v1/vigilance/ivs/painel${qs ? `?${qs}` : ""}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = (await response.json().catch(() => ({}))) as IvsPainel & { detail?: unknown };
+      if (!response.ok) {
+        const msg =
+          typeof data.detail === "string"
+            ? data.detail
+            : "IVS ainda não calculado. Gere as visões em Vigilância → IVS.";
+        throw new Error(msg);
+      }
+      setPainel(data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro inesperado.");
+      setPainel(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [token, crasCod, bairroFiltro, dimAtiva]);
 
-  const barrasCras: BarItem[] = useMemo(
-    () =>
-      porCras
-        .filter((c) => (c.familias_elegiveis ?? 0) > 0)
-        .map((c) => ({
-          rotulo: crasRotulo(c),
-          total: c.familias_elegiveis,
-          pct: pct01(c.ivs_medio),
-        }))
-        .sort((a, b) => b.pct - a.pct),
-    [porCras],
-  );
+  useEffect(() => {
+    void loadPainel();
+  }, [loadPainel]);
 
-  const pctElegivel =
-    resumo && resumo.familias_total
-      ? Math.round((resumo.familias_elegiveis / resumo.familias_total) * 10000) / 100
-      : 0;
+  const dimDetalhe = useMemo(() => {
+    if (!painel) return null;
+    if (dimAtiva && painel.dimensao_detalhe?.sigla === dimAtiva) return painel.dimensao_detalhe;
+    if (dimAtiva) return painel.dimensoes.find((d) => d.sigla === dimAtiva) ?? null;
+    return null;
+  }, [painel, dimAtiva]);
+
+  const tituloRecorte = useMemo(() => {
+    if (crasCod === "__todos__" && !bairroFiltro.trim()) return "Município";
+    if (crasCod === "__sem_cras__") return "Sem referência territorial";
+    const c = catalog.find((x) => x.cras_cod === crasCod);
+    if (c?.rotulo_ordenado) return c.rotulo_ordenado;
+    if (bairroFiltro.trim()) return `Bairro: ${bairroFiltro.trim()}`;
+    return crasCod;
+  }, [crasCod, bairroFiltro, catalog]);
 
   return (
-    <div className="kpi-page">
-      <div className="kpi-head fx-card">
-        <h1>IVS — Índice de Vulnerabilidade Social</h1>
-        <p>
-          Metodologia IVCAD v1.0.5 (MDS IN084). Grain família; escala 0–1 (maior = mais vulnerável).
-          Fonte: <code className="inline-code">core.mvw_ivs_familia</code>.
-        </p>
-        <div className="vig-actions" style={{ flexWrap: "wrap", gap: "0.5rem", marginTop: "0.75rem" }}>
+    <div className="ivs-page">
+      <header className="ivs-hero fx-card">
+        <div>
+          <h1>IVS — Índice de Vulnerabilidade Social</h1>
+          <p className="ivs-hero-sub">
+            Metodologia IVCAD v1.0.5 (MDS IN084). Escala <strong>0 a 1</strong> — quanto maior, maior a
+            vulnerabilidade. Layout alinhado ao Observatório MDS.
+          </p>
+        </div>
+        <div className="ivs-hero-actions">
           <Link to="/vigilancia" className="btn btn-primary" style={{ textDecoration: "none" }}>
-            Calcular / atualizar IVS
+            Atualizar cálculo
           </Link>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => void loadResumo(crasFiltro || undefined, bairroFiltro)}
-            disabled={loading}
-          >
-            {loading ? "Carregando…" : "Atualizar painel"}
+          <button type="button" className="btn btn-secondary" onClick={() => void loadPainel()} disabled={loading}>
+            {loading ? "Carregando…" : "Recarregar"}
           </button>
         </div>
-      </div>
+      </header>
 
-      <div className="fx-card" style={{ padding: "1rem", marginBottom: "1rem" }}>
-        <h2 className="kpi-section-title" style={{ marginTop: 0 }}>
-          Recorte territorial
-        </h2>
-        <div className="vig-actions" style={{ flexWrap: "wrap", gap: "0.75rem", alignItems: "flex-end" }}>
-          <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", minWidth: "220px" }}>
-            <span style={{ fontSize: "0.85rem", color: "var(--fx-muted)" }}>CRAS de referência</span>
-            <select
-              value={crasFiltro}
-              onChange={(e) => setCrasFiltro(e.target.value)}
-              style={{ padding: "0.45rem 0.6rem", borderRadius: "8px" }}
-            >
-              <option value="">Município (todas)</option>
-              {porCras.map((c) => (
-                <option key={`${c.num_cras}-${c.nom_cras}`} value={c.num_cras || ""}>
-                  {crasRotulo(c)}
+      <section className="ivs-filtros fx-card">
+        <div className="ivs-filtros-grid">
+          <label>
+            <span>Recorte territorial</span>
+            <select value={crasCod} onChange={(e) => setCrasCod(e.target.value)}>
+              <option value="__todos__">Município (todas as famílias)</option>
+              {catalog.map((c) => (
+                <option key={c.cras_cod} value={c.cras_cod}>
+                  {c.rotulo_ordenado || c.cras_nome || c.cras_cod}
                 </option>
               ))}
             </select>
           </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem", minWidth: "200px" }}>
-            <span style={{ fontSize: "0.85rem", color: "var(--fx-muted)" }}>Bairro (parcial)</span>
+          <label>
+            <span>Bairro (opcional)</span>
             <input
               type="text"
               value={bairroFiltro}
               onChange={(e) => setBairroFiltro(e.target.value)}
               placeholder="Ex.: Centro"
-              style={{ padding: "0.45rem 0.6rem", borderRadius: "8px" }}
             />
           </label>
           <button
             type="button"
             className="btn btn-secondary"
-            onClick={() => void loadResumo(crasFiltro || undefined, bairroFiltro)}
-            disabled={loading}
+            onClick={() => {
+              setCrasCod("__todos__");
+              setBairroFiltro("");
+              setDimAtiva(null);
+            }}
           >
-            Aplicar filtro
+            Limpar filtros
           </button>
-          {(crasFiltro || bairroFiltro.trim()) && (
-            <button
-              type="button"
-              className="link-button"
-              onClick={() => {
-                setCrasFiltro("");
-                setBairroFiltro("");
-                void loadResumo();
-              }}
-            >
-              Limpar filtros
-            </button>
-          )}
         </div>
-      </div>
+        <p className="ivs-recorte-label">
+          Exibindo: <strong>{tituloRecorte}</strong>
+        </p>
+      </section>
 
       {error && <p className="error">{error}</p>}
 
-      {!error && resumo && (
+      {!error && painel && (
         <>
-          <div className="kpi-grid" aria-label="Resumo IVS">
-            <article className="kpi-card kpi-card--accent">
-              <small>IVS médio</small>
-              <strong>{pct01(resumo.ivs_medio).toLocaleString("pt-BR")}%</strong>
-              <span>Universo elegível (IN084 v1.0.5)</span>
-            </article>
-            <article className="kpi-card">
-              <small>Famílias elegíveis</small>
-              <strong>{resumo.familias_elegiveis.toLocaleString("pt-BR")}</strong>
-              <span>
-                {pctElegivel.toLocaleString("pt-BR")}% sobre {resumo.familias_total.toLocaleString("pt-BR")} no CADU
-              </span>
-            </article>
-            {(Object.keys(DIM_LABELS) as Array<keyof typeof DIM_LABELS>).map((key) => (
-              <article key={key} className="kpi-card">
-                <small>{DIM_LABELS[key].split(" — ")[0]}</small>
-                <strong>{pct01(resumo[key] as number | null).toLocaleString("pt-BR")}%</strong>
-                <span>{DIM_LABELS[key].split(" — ")[1] ?? key}</span>
-              </article>
-            ))}
-          </div>
+          <section className="ivs-universo fx-card" aria-label="Universo elegível">
+            <div className="ivs-universo-item">
+              <small>Famílias analisadas (universo IVS)</small>
+              <strong>{painel.universo.familias_elegiveis.toLocaleString("pt-BR")}</strong>
+            </div>
+            <div className="ivs-universo-item">
+              <small>Famílias no CADU (recorte)</small>
+              <strong>{painel.universo.familias_cadu.toLocaleString("pt-BR")}</strong>
+            </div>
+            <div className="ivs-universo-item">
+              <small>Participação no CADU</small>
+              <strong>{fmtPct(painel.universo.pct_sobre_cadu)}</strong>
+              <span>famílias elegíveis ÷ total no recorte</span>
+            </div>
+          </section>
 
-          <div className="chart-grid" style={{ display: "grid", gap: "1rem", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" }}>
-            <RadarChartPanel
-              title="Dimensões do IVS"
-              subtitle="Médias no recorte (0–100%, maior = mais vulnerável)"
-              data={radarData}
-              dataKey="ivs"
-              fill="rgba(245, 158, 11, 0.35)"
-              stroke="#f59e0b"
-            />
-            <BarChartPanel
-              title="IVS médio por CRAS"
-              subtitle="Famílias elegíveis; barra = índice médio (%)"
-              items={barrasCras}
-              maxBars={14}
-              accent="warm"
-            />
-          </div>
+          <nav className="ivs-dim-nav" aria-label="Dimensões do IVS">
+            <button
+              type="button"
+              className={`ivs-dim-pill ${dimAtiva === null ? "active" : ""}`}
+              onClick={() => setDimAtiva(null)}
+            >
+              Visão geral
+            </button>
+            {DIM_ORDEM.map((sigla) => (
+              <button
+                key={sigla}
+                type="button"
+                className={`ivs-dim-pill ${dimAtiva === sigla ? "active" : ""}`}
+                onClick={() => setDimAtiva(sigla)}
+              >
+                {sigla}
+              </button>
+            ))}
+          </nav>
+
+          {dimAtiva === null ? (
+            <section className="ivs-overview">
+              <article className="ivs-gauge fx-card">
+                <small>Índice IVS (composto)</small>
+                <strong className="ivs-gauge-value">{fmtIndice(painel.ivs_medio)}</strong>
+                <p>Média das 6 dimensões no universo elegível</p>
+              </article>
+
+              <article className="ivs-dim-table fx-card">
+                <h2>Dimensões de vulnerabilidade</h2>
+                <p className="ivs-dim-table-sub">
+                  Índice médio por dimensão (0–1) e % de famílias acima da média da dimensão no recorte.
+                </p>
+                <ul className="ivs-dim-list">
+                  {painel.dimensoes.map((d) => (
+                    <li key={d.sigla}>
+                      <button type="button" className="ivs-dim-row" onClick={() => setDimAtiva(d.sigla as DimSigla)}>
+                        <span className="ivs-dim-row-label">
+                          <strong>{d.sigla}</strong>
+                          <span>{d.nome}</span>
+                        </span>
+                        <span className="ivs-dim-row-bar-wrap">
+                          <span className="ivs-dim-row-bar" style={{ width: barWidthIndice(d.idx) }} />
+                        </span>
+                        <span className="ivs-dim-row-idx">{fmtIndice(d.idx)}</span>
+                        <span className="ivs-dim-row-pct">{fmtPct(d.pct_acima_media)} acima da média</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            </section>
+          ) : (
+            dimDetalhe && (
+              <section className="ivs-dim-detalhe">
+                <article className="ivs-dim-head fx-card">
+                  <div>
+                    <small>Dimensão {dimDetalhe.sigla}</small>
+                    <h2>{dimDetalhe.nome}</h2>
+                  </div>
+                  <div className="ivs-dim-head-stats">
+                    <div>
+                      <small>Índice IVS-{dimDetalhe.sigla}</small>
+                      <strong>{fmtIndice(dimDetalhe.idx)}</strong>
+                    </div>
+                    <div>
+                      <small>Famílias acima da média</small>
+                      <strong>{fmtPct(dimDetalhe.pct_acima_media)}</strong>
+                    </div>
+                  </div>
+                  <div className="ivs-dim-head-bar">
+                    <div className="ivs-dim-head-bar-fill" style={{ width: barWidthIndice(dimDetalhe.idx) }} />
+                  </div>
+                </article>
+
+                <article className="ivs-indicadores fx-card">
+                  <h3>Indicadores — % de famílias vulneráveis</h3>
+                  <p className="ivs-indicadores-sub">
+                    Proporção de famílias no universo elegível com cada condição de vulnerabilidade (= 1).
+                  </p>
+                  <ul className="ivs-ind-list">
+                    {dimDetalhe.indicadores.map((ind) => (
+                      <li key={ind.codigo} className="ivs-ind-row">
+                        <span className="ivs-ind-code">{ind.codigo}</span>
+                        <span className="ivs-ind-titulo">{ind.titulo}</span>
+                        <span className="ivs-ind-bar-wrap">
+                          <span className="ivs-ind-bar" style={{ width: barWidthPct(ind.pct_familias) }} />
+                        </span>
+                        <span className="ivs-ind-pct">{fmtPct(ind.pct_familias)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </article>
+              </section>
+            )
+          )}
         </>
       )}
     </div>
