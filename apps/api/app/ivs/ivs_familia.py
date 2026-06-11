@@ -8,17 +8,22 @@ from dataclasses import dataclass
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
+from ..vigilance.cadu_params import (
+    LIMIAR_POBREZA_EXTREMA,
+    SALARIO_MINIMO,
+    SM_METADE,
+    sql_universo_ivs_elegivel,
+)
 from ..vigilance.familia_mview import _columns, _pick_column, _qi, _table_exists
 from .functions import ensure_ivs_functions
 
 IVS_VERSION = "1.0.5"
 
-# Parâmetros metodológicos (ajustar por competência via refresh futuro).
 IVS_PARAMS = {
-    "salario_minimo": 1412,
-    "sm_metade": 706,
-    "limiar_pobreza": 218,
-    "teto_bpc": 1412,
+    "salario_minimo": SALARIO_MINIMO,
+    "sm_metade": SM_METADE,
+    "limiar_pobreza": LIMIAR_POBREZA_EXTREMA,
+    "teto_bpc": SALARIO_MINIMO,
 }
 
 
@@ -58,7 +63,6 @@ def _build_bpc_nis_cte(conn: Connection) -> str:
 
 def build_ivs_familia_sql(*, bpc_nis_cte: str) -> str:
     sm = IVS_PARAMS["salario_minimo"]
-    sm_m = IVS_PARAMS["sm_metade"]
     pobreza = IVS_PARAMS["limiar_pobreza"]
     teto_bpc = IVS_PARAMS["teto_bpc"]
 
@@ -71,6 +75,7 @@ def build_ivs_familia_sql(*, bpc_nis_cte: str) -> str:
         f.codigo_familiar,
         f.renda_per_capita,
         COALESCE(f.marc_pbf, FALSE) AS marc_pbf,
+        f.marc_pbf_cadu,
         COALESCE(f.vlrtotal, 0)::numeric AS pbf_total,
         f.meses_desatualizado
       FROM vig.mvw_familia f
@@ -243,13 +248,7 @@ def build_ivs_familia_sql(*, bpc_nis_cte: str) -> str:
     flags AS (
       SELECT
         f.codigo_familiar,
-        (
-          COALESCE(f.marc_pbf, FALSE)
-          OR (
-            COALESCE(f.meses_desatualizado, 999) <= 24
-            AND COALESCE(f.renda_per_capita, 1e12) <= {sm_m}
-          )
-        ) AS elegivel_ivs,
+        {sql_universo_ivs_elegivel(alias="f")} AS elegivel_ivs,
         nc.nc1, nc.nc2, nc.nc3, nc.nc4, nc.nc5, nc.nc6, nc.nc7,
         pa.dpi1, pa.dpi2, pa.dpi3,
         pa.dca1, pa.dca2, pa.dca3, pa.dca4, pa.dca5,

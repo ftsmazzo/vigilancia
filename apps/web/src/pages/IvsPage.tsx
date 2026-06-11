@@ -210,7 +210,9 @@ export default function IvsPage({ token }: Props) {
             <div className="ivs-universo-item">
               <small>Participação no CADU</small>
               <strong>{fmtPct(painel.universo.pct_sobre_cadu)}</strong>
-              <span>famílias elegíveis ÷ total no recorte</span>
+              <span>
+                PBF (folha ou marcador CADU) ou TAC ≤ 24 meses com renda ≤ R$ 810,50
+              </span>
             </div>
           </section>
 

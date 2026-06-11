@@ -197,12 +197,12 @@ export default function PainelIndicadoresInicio({ token }: Props) {
               <span>{kpis.renda_ate_218_pct.toLocaleString("pt-BR")} % das famílias do Cadastro Único</span>
             </article>
             <article className="kpi-card">
-              <small>Renda per capita de 219 até 706</small>
+              <small>Renda per capita de R$ 219 até R$ 810,50</small>
               <strong>{kpis.renda_219_706_familias.toLocaleString("pt-BR")}</strong>
-              <span>{kpis.renda_219_706_pct.toLocaleString("pt-BR")} % das famílias do Cadastro Único</span>
+              <span>{kpis.renda_219_706_pct.toLocaleString("pt-BR")} % das famílias do Cadastro Único (TAC ≤ 24 meses)</span>
             </article>
             <article className="kpi-card">
-              <small>Renda per capita acima de 706</small>
+              <small>Renda per capita acima de R$ 810,50</small>
               <strong>{kpis.renda_acima_706_familias.toLocaleString("pt-BR")}</strong>
               <span>{kpis.renda_acima_706_pct.toLocaleString("pt-BR")} % das famílias do Cadastro Único</span>
             </article>

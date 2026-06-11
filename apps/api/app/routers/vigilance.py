@@ -10,7 +10,7 @@ from ..deps import get_current_user
 from ..models import User
 from ..ivs.ivs_familia import refresh_ivs_familia
 from ..ivs.painel import fetch_ivs_painel, fetch_ivs_por_cras, ivs_filter_clause
-from ..vigilance.domicilio_mview import refresh_domicilio_mview
+from ..vigilance.cadu_params import LIMIAR_POBREZA_EXTREMA, MESES_TAC_MAX, SM_METADE
 from ..vigilance.familia_mview import (
     bolsa_folha_kpis_from_raw,
     ensure_vig_functions,
@@ -436,34 +436,34 @@ def get_vigilance_kpis(
 
         fam_row = conn.execute(
             text(
-                """
+                f"""
                 SELECT
                   COUNT(*)::bigint AS n_fam,
                   COUNT(*) FILTER (
-                    WHERE meses_desatualizado IS NOT NULL AND meses_desatualizado <= 24
+                    WHERE meses_desatualizado IS NOT NULL AND meses_desatualizado <= {MESES_TAC_MAX}
                   )::bigint AS n_tac,
                   COUNT(*) FILTER (
                     WHERE
                       meses_desatualizado IS NOT NULL
-                      AND meses_desatualizado <= 24
+                      AND meses_desatualizado <= {MESES_TAC_MAX}
                       AND renda_per_capita IS NOT NULL
                       AND renda_per_capita >= 0
-                      AND renda_per_capita <= 218
+                      AND renda_per_capita <= {LIMIAR_POBREZA_EXTREMA}
                   )::bigint AS n_renda_ate_218,
                   COUNT(*) FILTER (
                     WHERE
                       meses_desatualizado IS NOT NULL
-                      AND meses_desatualizado <= 24
+                      AND meses_desatualizado <= {MESES_TAC_MAX}
                       AND renda_per_capita IS NOT NULL
-                      AND renda_per_capita >= 219
-                      AND renda_per_capita <= 706
+                      AND renda_per_capita > {LIMIAR_POBREZA_EXTREMA}
+                      AND renda_per_capita <= {SM_METADE}
                   )::bigint AS n_renda_219_706,
                   COUNT(*) FILTER (
                     WHERE
                       meses_desatualizado IS NOT NULL
-                      AND meses_desatualizado <= 24
+                      AND meses_desatualizado <= {MESES_TAC_MAX}
                       AND renda_per_capita IS NOT NULL
-                      AND renda_per_capita > 706
+                      AND renda_per_capita > {SM_METADE}
                   )::bigint AS n_renda_acima_706
                 FROM vig.mvw_familia
                 """

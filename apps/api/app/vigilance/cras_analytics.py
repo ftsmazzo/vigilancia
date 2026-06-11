@@ -15,6 +15,7 @@ from .cadu_classificacao import (
     classificacao_raca_sql,
     tem_deficiencia_expr,
 )
+from .cadu_params import SM_METADE
 from .familia_mview import _table_exists
 
 SISC_MVIEW = "mvw_sisc_qualificado"
@@ -380,7 +381,7 @@ def cras_painel_from_views(conn: Connection, cras_cod: str | None = None) -> dic
               COUNT(DISTINCT fam.codigo_familiar) FILTER (
                 WHERE fam.renda_per_capita IS NOT NULL
                   AND fam.renda_per_capita > 218
-                  AND fam.renda_per_capita <= 706
+                  AND fam.renda_per_capita <= {SM_METADE}
               )::bigint AS familias_renda_219_706,
               COUNT(DISTINCT fam.codigo_familiar) FILTER (
                 WHERE fam.meses_desatualizado IS NOT NULL AND fam.meses_desatualizado <= 24
