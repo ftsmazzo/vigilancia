@@ -9,6 +9,12 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from ..vigilance.familia_mview import _table_exists
+from .bairro_resolver import (
+    bairro_sql_filter,
+    extract_location_term,
+    format_bairro_disambiguation,
+    resolve_bairro,
+)
 
 _BAIRRO_FROM_ANSWER = re.compile(r"No bairro \*\*([^*]+)\*\*", re.I)
 _FOLLOWUP = re.compile(
@@ -86,17 +92,32 @@ def extract_bairro_context(
     return term, None
 
 
-def _resolve_bairro_label(conn: Connection, term: str) -> tuple[str, list[dict[str, Any]]]:
+def _resolve_bairro_label(conn: Connection, term: str) -> tuple[str, list[dict[str, Any]], Any]:
+    resolution = resolve_bairro(conn, term)
+    if resolution.status == "multiple":
+        return term, resolution.matches, resolution
+    if resolution.canonical:
+        return resolution.canonical, resolution.matches or [{"bairro": resolution.canonical}], resolution
     matches = _bairro_matches(conn, term, limit=8)
     if len(matches) == 1:
-        return str(matches[0]["bairro"]), matches
-    return term, matches
+        return str(matches[0]["bairro"]), matches, resolution
+    return term, matches, resolution
 
 
-def _count_pbf_bairro(conn: Connection, term: str) -> tuple[int, int, list[dict[str, Any]]]:
+def _count_pbf_bairro(
+    conn: Connection,
+    term: str,
+    resolution=None,
+) -> tuple[int, int, list[dict[str, Any]], Any]:
+    if resolution is None:
+        resolution = resolve_bairro(conn, term)
+    where_sql, params = bairro_sql_filter(
+        resolution if resolution.status != "multiple" else None,
+        term,
+    )
     row = conn.execute(
         text(
-            """
+            f"""
             SELECT
               COUNT(DISTINCT f.codigo_familiar)::bigint AS total,
               COUNT(DISTINCT f.codigo_familiar) FILTER (
@@ -104,15 +125,17 @@ def _count_pbf_bairro(conn: Connection, term: str) -> tuple[int, int, list[dict[
               )::bigint AS com_pbf
             FROM vig.mvw_familia f
             WHERE btrim(COALESCE(f.bairro::text, '')) <> ''
-              AND btrim(f.bairro::text) ILIKE :pat
+              AND {where_sql}
             """
         ),
-        {"pat": f"%{term.strip()}%"},
+        params,
     ).mappings().first() or {}
     total = int(row.get("total") or 0)
     com_pbf = int(row.get("com_pbf") or 0)
-    matches = _bairro_matches(conn, term, limit=8) if total else []
-    return com_pbf, total, matches
+    matches = resolution.matches if resolution.status == "multiple" else _bairro_matches(conn, term, limit=8)
+    if total == 0 and resolution.status not in ("multiple", "none"):
+        matches = resolution.matches or _bairro_matches(conn, term, limit=8)
+    return com_pbf, total, matches, resolution
 
 
 def try_geo_contextual_followup(
@@ -134,12 +157,22 @@ def try_geo_contextual_followup(
         return None
 
     if _PBF.search(text_msg) and (_FAMILIAS.search(text_msg) or is_followup):
-        com_pbf, total, matches = _count_pbf_bairro(conn, term)
-        label, _ = _resolve_bairro_label(conn, term)
+        com_pbf, total, matches, resolution = _count_pbf_bairro(conn, term)
+        if resolution.status == "multiple":
+            return {
+                "answer": format_bairro_disambiguation(resolution),
+                "sql": None,
+                "row_count": 0,
+                "preview": matches,
+                "mode": "disambiguation",
+                "metric": "bairro_disambiguation",
+            }
+        label, _, resolution = _resolve_bairro_label(conn, term)
         pct = round(100.0 * com_pbf / total, 2) if total else 0.0
+        where_sql, params = bairro_sql_filter(resolution, term)
         sql = (
             "SELECT COUNT(DISTINCT f.codigo_familiar) FROM vig.mvw_familia f "
-            f"WHERE btrim(f.bairro::text) ILIKE '%{term.replace(chr(39), '')}%' "
+            f"WHERE btrim(COALESCE(f.bairro::text, '')) <> '' AND {where_sql} "
             "AND COALESCE(f.marc_pbf, FALSE)"
         )
         if total == 0:
@@ -183,10 +216,33 @@ def _bairro_matches(conn: Connection, term: str, *, limit: int = 5) -> list[dict
     ]
 
 
-def _count_familias_bairro(conn: Connection, term: str) -> tuple[int, list[dict[str, Any]]]:
-    matches = _bairro_matches(conn, term, limit=8)
-    total = sum(int(m.get("familias") or 0) for m in matches)
-    return total, matches
+def _count_familias_bairro(
+    conn: Connection,
+    term: str,
+    resolution=None,
+) -> tuple[int, list[dict[str, Any]], Any]:
+    if resolution is None:
+        resolution = resolve_bairro(conn, term)
+    if resolution.status == "multiple":
+        return 0, resolution.matches, resolution
+
+    where_sql, params = bairro_sql_filter(resolution, term)
+    row = conn.execute(
+        text(
+            f"""
+            SELECT COUNT(DISTINCT f.codigo_familiar)::bigint AS familias
+            FROM vig.mvw_familia f
+            WHERE btrim(COALESCE(f.bairro::text, '')) <> ''
+              AND {where_sql}
+            """
+        ),
+        params,
+    ).mappings().first() or {}
+    total = int(row.get("familias") or 0)
+    matches = resolution.matches or _bairro_matches(conn, term, limit=8)
+    if resolution.canonical:
+        matches = [{"bairro": resolution.canonical, "familias": total}]
+    return total, matches, resolution
 
 
 def _count_familias_cras(conn: Connection, num_cras: str) -> tuple[int, str | None]:
@@ -342,27 +398,44 @@ def try_geo_territorial_metric(
 
     # Famílias por bairro
     if _BAIRRO.search(text_msg) and _FAMILIAS.search(text_msg):
-        term = _extract_bairro_term(text_msg)
+        term = _extract_bairro_term(text_msg) or extract_location_term(text_msg)
         if not term:
             return None
 
-        total, matches = _count_familias_bairro(conn, term)
+        total, matches, resolution = _count_familias_bairro(conn, term)
+        where_sql, params = bairro_sql_filter(resolution if resolution.status != "multiple" else None, term)
         sql = (
             "SELECT COUNT(DISTINCT f.codigo_familiar) FROM vig.mvw_familia f "
-            f"WHERE btrim(f.bairro::text) ILIKE '%{term.replace(chr(39), '')}%'"
+            f"WHERE btrim(COALESCE(f.bairro::text, '')) <> '' AND {where_sql}"
         )
 
+        if resolution.status == "multiple":
+            return {
+                "answer": format_bairro_disambiguation(resolution),
+                "sql": None,
+                "row_count": 0,
+                "preview": matches,
+                "mode": "disambiguation",
+                "metric": "bairro_disambiguation",
+            }
+
         if total == 0:
-            sugestoes = _bairro_matches(conn, term[: max(3, len(term) // 2)], limit=5)
-            if sugestoes:
-                lista = ", ".join(
-                    f"**{s['bairro']}** ({_fmt_int(int(s['familias'] or 0))})" for s in sugestoes
-                )
-                answer = (
-                    f"Não encontrei famílias no bairro «{term}». "
-                    f"Bairros parecidos: {lista}. "
-                    "Confira a grafia ou use o nome como aparece no mapa territorial."
-                )
+            if resolution.status == "none":
+                sugestoes = _bairro_matches(conn, term[: max(3, len(term) // 2)], limit=5)
+                if sugestoes:
+                    lista = ", ".join(
+                        f"**{s['bairro']}** ({_fmt_int(int(s['familias'] or 0))})" for s in sugestoes
+                    )
+                    answer = (
+                        f"Não encontrei famílias no bairro «{term}». "
+                        f"Bairros parecidos: {lista}. "
+                        "Confira a grafia ou use o nome como aparece no mapa territorial."
+                    )
+                else:
+                    answer = (
+                        f"Não encontrei famílias no bairro «{term}». "
+                        "Verifique a grafia ou escolha um bairro da lista territorial."
+                    )
             else:
                 answer = (
                     f"Não encontrei famílias no bairro «{term}». "
@@ -372,23 +445,13 @@ def try_geo_territorial_metric(
                 "answer": answer,
                 "sql": sql,
                 "row_count": 0,
-                "preview": sugestoes,
+                "preview": matches,
                 "mode": "canonical",
                 "metric": "geo_familias_bairro_vazio",
             }
 
-        if len(matches) == 1:
-            b = matches[0]["bairro"]
-            answer = (
-                f"No bairro **{b}**, há **{_fmt_int(total)}** famílias no Cadastro Único."
-            )
-        else:
-            detalhe = "; ".join(
-                f"**{m['bairro']}**: {_fmt_int(int(m['familias'] or 0))}" for m in matches[:5]
-            )
-            answer = (
-                f"Para «{term}», há **{_fmt_int(total)}** famílias no total: {detalhe}."
-            )
+        b = (resolution.canonical or matches[0]["bairro"]) if matches else term
+        answer = f"No bairro **{b}**, há **{_fmt_int(total)}** famílias no Cadastro Único."
 
         return {
             "answer": answer,

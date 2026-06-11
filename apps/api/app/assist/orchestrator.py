@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from ..models import User
 from ..municipio_context import load_context_prompt
 from .cras_breakdown import format_cras_breakdown_answer
+from .bairro_resolver import apply_bairro_correction_to_answer, preprocess_bairro_turn
 from .canonical_metrics import try_canonical_metric
 from .kb_client import query_knowledge_base
 from .llm import chat_completion
@@ -269,6 +270,16 @@ def run_orchestrator_turn(
     municipio_block = load_context_prompt(db)
     user_block = _user_context_block(user, municipio_block)
     rag_block = query_knowledge_base(message)
+    first_name = _first_name(user.name)
+
+    bairro_pre = preprocess_bairro_turn(conn, first_name, message, transcript)
+    if bairro_pre.early_response:
+        return {
+            **bairro_pre.early_response,
+            "answer": _trim_answer_boilerplate(bairro_pre.early_response["answer"]),
+        }
+    message = bairro_pre.message
+    bairro_resolution = bairro_pre.resolution
 
     # Métricas canônicas (SISC×CADU, CRAS, PBF) têm prioridade — sempre com SQL explícito
     canonical = try_canonical_metric(conn, message, transcript)
@@ -282,8 +293,12 @@ def run_orchestrator_turn(
             )
         elif canonical.get("metric", "").startswith("geo_"):
             answer = _personalize_canonical(answer, user)
+        elif canonical.get("mode") == "disambiguation":
+            answer = _personalize_canonical(answer, user)
         elif canonical.get("source") == "vig.mvw_sisc_qualificado":
             answer = _personalize_canonical(answer, user)
+        if canonical.get("mode") != "disambiguation":
+            answer = apply_bairro_correction_to_answer(answer, bairro_resolution, first_name)
         return {
             "answer": _trim_answer_boilerplate(answer),
             "sql": canonical.get("sql"),
@@ -305,12 +320,20 @@ def run_orchestrator_turn(
         }
 
     sql_question = plan.get("sql_question") or message.strip()
+    if bairro_resolution and bairro_resolution.canonical:
+        sql_question = (
+            f"{sql_question}\n\n"
+            f"[Bairro territorial confirmado: {bairro_resolution.canonical}. "
+            f"Filtre com lower(btrim(f.bairro::text)) = lower('{bairro_resolution.canonical.replace(chr(39), '')}').]"
+        )
 
     sql_result = run_sql_agent(conn, db, sql_question)
     if sql_result.ok and sql_result.formatted_answer:
         answer = _cras_answer_with_context(sql_result.rows, user, municipio_block)
     else:
         answer = _finalize_data_reply(message, transcript, sql_question, sql_result, user_block)
+
+    answer = apply_bairro_correction_to_answer(answer, bairro_resolution, first_name)
 
     return {
         "answer": _trim_answer_boilerplate(answer),

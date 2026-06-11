@@ -3361,18 +3361,19 @@ p.success {
 
 .mapas-filtros label span {
   font-size: 0.72rem;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--fx-muted);
+  letter-spacing: 0.05em;
+  color: var(--fx-subtle);
 }
 
-.mapas-filtros select {
+.mapas-filtros .cras-select {
   width: 100%;
-  padding: 0.5rem 0.65rem;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.25);
-  color: inherit;
+}
+
+.mapas-filtros select option {
+  background: var(--fx-surface, #12141a);
+  color: var(--fx-text);
 }
 
 .mapas-recorte-label {

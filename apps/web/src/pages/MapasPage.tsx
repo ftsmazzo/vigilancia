@@ -132,14 +132,28 @@ export default function MapasPage({ token }: Props) {
   const destacarRecorte =
     (crasCod !== "__todos__" && crasCod !== "") || bairroFiltro.trim().length > 0;
 
+  function handleCrasChange(value: string) {
+    setCrasCod(value);
+    if (value !== "__todos__") {
+      setBairroFiltro("");
+    }
+  }
+
+  function handleBairroChange(value: string) {
+    setBairroFiltro(value);
+    if (value.trim()) {
+      setCrasCod("__todos__");
+    }
+  }
+
   return (
     <div className="mapas-page">
       <header className="mapas-hero fx-card">
         <div>
           <h1>Mapas territoriais</h1>
           <p className="mapas-hero-sub">
-            Filtros de CRAS e bairro são independentes. O calor usa as coordenadas reais das famílias
-            georreferenciadas.
+            Filtros de CRAS e bairro são independentes — use um por vez. O calor usa as coordenadas reais
+            das famílias georreferenciadas.
           </p>
         </div>
         <div className="mapas-hero-actions">
@@ -152,8 +166,8 @@ export default function MapasPage({ token }: Props) {
       <section className="mapas-filtros fx-card">
         <div className="mapas-filtros-grid">
           <label>
-            <span>CRAS</span>
-            <select value={crasCod} onChange={(e) => setCrasCod(e.target.value)}>
+            <span>CRAS territorial</span>
+            <select className="cras-select" value={crasCod} onChange={(e) => handleCrasChange(e.target.value)}>
               <option value="__todos__">Todos os CRAS</option>
               <option value="__sem_cras__">Sem referência territorial</option>
               {catalog.map((c) => (
@@ -166,8 +180,9 @@ export default function MapasPage({ token }: Props) {
           <label>
             <span>Bairro</span>
             <select
+              className="cras-select"
               value={bairroFiltro}
-              onChange={(e) => setBairroFiltro(e.target.value)}
+              onChange={(e) => handleBairroChange(e.target.value)}
               disabled={loadingBairros}
             >
               <option value="">
