@@ -38,6 +38,14 @@ _IVS = re.compile(
 
 _INDICE = re.compile(r"\b(?:índice|indice|media|m[eé]dia|valor|quanto\s+[eé])\b", re.I)
 _CRAS_NUM = re.compile(r"\bcras\s*(\d{1,2})\b", re.I)
+_IVS_COMPARE = re.compile(
+    r"(?:cras|unidad).*?(?:maior|superior|acima)|"
+    r"(?:maior|superior|acima).*?(?:cras|índice|indice|nc)|"
+    r"tem\s+algum\s+cras|qual\s+cras|"
+    r"^qual\??$",
+    re.I,
+)
+_THRESHOLD = re.compile(r"(\d+[,.]\d{2,4})")
 
 _TERR_BAIRRO = re.compile(
     r"(?:"
@@ -301,6 +309,161 @@ def build_ivs_assist_hint() -> str:
 - Agregação dimensão: `AVG(i.idx_nc) FILTER (WHERE i.elegivel_ivs)` (idem idx_dpi, idx_dca, idx_tqa, idx_dr, idx_ch).
 - Agregação indicador (% famílias): `100 * AVG(i.nc1::numeric) FILTER (WHERE i.elegivel_ivs)`.
 - Bairro no IVS: match exato em `btrim(f.bairro::text) = :bairro` (nome canônico da geo)."""
+
+
+def _extract_ivs_threshold(
+    message: str,
+    transcript: list[dict[str, str]] | None,
+) -> float | None:
+    for text_msg in [message] + [
+        m.get("content", "")
+        for m in reversed(transcript or [])
+        if m.get("role") == "assistant"
+    ]:
+        for match in _THRESHOLD.finditer(text_msg):
+            raw = match.group(1).replace(",", ".")
+            try:
+                val = float(raw)
+            except ValueError:
+                continue
+            if 0 <= val <= 1:
+                return val
+    return None
+
+
+def _is_ivs_compare_question(message: str, transcript: list[dict[str, str]] | None) -> bool:
+    text_msg = message.strip()
+    if not text_msg:
+        return False
+    if not _is_ivs_question(text_msg) and not re.search(
+        r"\b(?:nc|ivs|necessidade\s+de\s+cuidados)\b", " ".join(
+            m.get("content", "") for m in (transcript or [])[-4:]
+        ),
+        re.I,
+    ):
+        return False
+    if _IVS_COMPARE.search(text_msg):
+        return True
+    blob = " ".join(m.get("content", "") for m in (transcript or [])[-3:])
+    return bool(
+        re.search(r"maior\s+(?:do\s+)?que|superior\s+a|acima\s+de", blob, re.I)
+        and re.search(r"\b(?:nc|0[,.]\d+)\b", blob, re.I)
+    )
+
+
+def try_ivs_cras_compare(
+    conn: Connection,
+    message: str,
+    transcript: list[dict[str, str]] | None = None,
+    *,
+    user_first_name: str = "",
+) -> dict[str, Any] | None:
+    """CRAS com índice IVS/dimensão estritamente acima de um limiar (escala 0–1)."""
+    if not _is_ivs_compare_question(message, transcript):
+        return None
+    if not _table_exists(conn, "core", "mvw_ivs_familia"):
+        return None
+
+    dim = _detect_dimensao(message) or _detect_dimensao(
+        " ".join(m.get("content", "") for m in (transcript or []) if m.get("role") == "user")
+    )
+    if not dim:
+        dim = DIM_POR_SIGLA["NC"]
+    idx_col = dim.idx_col
+
+    threshold = _extract_ivs_threshold(message, transcript)
+    if threshold is None:
+        return {
+            "answer": _prefix_name(
+                user_first_name,
+                "Preciso do **valor de referência** do índice (ex.: 0,45 do CRAS 6) "
+                "para comparar os demais CRAS.",
+            ),
+            "sql": None,
+            "row_count": 0,
+            "preview": [],
+            "mode": "disambiguation",
+            "metric": "ivs_cras_compare",
+        }
+
+    rows = conn.execute(
+        text(
+            f"""
+            SELECT
+              btrim(f.num_cras::text) AS num_cras,
+              MAX(btrim(f.nom_cras::text)) AS nom_cras,
+              ROUND(AVG(i.{idx_col}) FILTER (WHERE i.elegivel_ivs)::numeric, 4) AS idx_val,
+              COUNT(*) FILTER (WHERE i.elegivel_ivs)::bigint AS familias_elegiveis
+            FROM core.mvw_ivs_familia i
+            INNER JOIN vig.mvw_familia f ON f.codigo_familiar = i.codigo_familiar
+            WHERE btrim(COALESCE(f.num_cras::text, '')) <> ''
+            GROUP BY btrim(f.num_cras::text)
+            HAVING AVG(i.{idx_col}) FILTER (WHERE i.elegivel_ivs) > :threshold
+            ORDER BY idx_val DESC, num_cras ASC
+            """
+        ),
+        {"threshold": threshold},
+    ).mappings().all()
+
+    preview = [
+        {
+            "num_cras": str(r["num_cras"]),
+            "nom_cras": str(r.get("nom_cras") or ""),
+            "valor": float(r["idx_val"]) if r.get("idx_val") is not None else None,
+            "familias_elegiveis": int(r.get("familias_elegiveis") or 0),
+            "dimensao": dim.sigla,
+            "threshold": threshold,
+        }
+        for r in rows
+    ]
+
+    if not preview:
+        answer = _prefix_name(
+            user_first_name,
+            f"Nenhum CRAS apresenta **{dim.sigla}** estritamente acima de "
+            f"**{_fmt_idx(threshold)}** (escala 0 a 1).",
+        )
+        return {
+            "answer": answer,
+            "sql": None,
+            "row_count": 0,
+            "preview": [{"dimensao": dim.sigla, "threshold": threshold}],
+            "mode": "canonical",
+            "metric": "ivs_cras_compare",
+        }
+
+    if re.fullmatch(r"qual\??", message.strip(), re.I) and len(preview) == 1:
+        row = preview[0]
+        answer = _prefix_name(
+            user_first_name,
+            f"Com **{dim.sigla}** acima de **{_fmt_idx(threshold)}**, destaco o "
+            f"**CRAS {row['num_cras']}** (**{_fmt_idx(float(row['valor']))}**).",
+        )
+    else:
+        linhas = [
+            f"CRAS {r['num_cras']}: {_fmt_idx(float(r['valor']))}"
+            for r in preview[:8]
+            if r.get("valor") is not None
+        ]
+        answer = _prefix_name(
+            user_first_name,
+            f"CRAS com **{dim.sigla}** **maior que {_fmt_idx(threshold)}** (0 a 1): "
+            + "; ".join(linhas) + ".",
+        )
+
+    sql = (
+        f"SELECT num_cras, AVG(i.{idx_col}) FILTER (WHERE i.elegivel_ivs) "
+        f"FROM core.mvw_ivs_familia i JOIN vig.mvw_familia f ... "
+        f"HAVING AVG > {threshold}"
+    )
+    return {
+        "answer": answer,
+        "sql": sql,
+        "row_count": len(preview),
+        "preview": preview,
+        "mode": "canonical",
+        "metric": "ivs_cras_compare",
+    }
 
 
 def try_ivs_metric(

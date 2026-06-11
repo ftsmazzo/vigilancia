@@ -27,6 +27,8 @@ def resolve_model(role: str | None = None) -> str:
         return settings.assist_orch_model
     if role == "sql" and settings.assist_sql_model:
         return settings.assist_sql_model
+    if role == "analyst" and settings.assist_analyst_model:
+        return settings.assist_analyst_model
     return settings.assist_llm_model
 
 

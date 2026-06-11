@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     # Modelos opcionais por papel (padrão = assist_llm_model)
     assist_orch_model: str | None = None
     assist_sql_model: str | None = None
+    assist_analyst_model: str | None = None
 
     # RAG — políticas SUAS (POST JSON: {"query": "...", "topK": N})
     kb_api_url: str | None = None

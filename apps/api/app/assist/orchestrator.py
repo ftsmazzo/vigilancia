@@ -23,7 +23,14 @@ from .bairro_resolver import (
     should_resolve_bairro,
     try_pessoas_bairro_metric,
 )
+from .analyst_agent import interpret_evidence
 from .canonical_metrics import try_canonical_metric
+from .conversation_intent import (
+    build_thread_brief,
+    is_planning_coverage_followup,
+    planning_thread_active,
+)
+from .evidence import pack_from_canonical, pack_from_sql
 from .kb_client import query_knowledge_base
 from .llm import chat_completion
 from .maestro_router import resolve_turn_route
@@ -203,6 +210,32 @@ def _chat_reply(
     return _trim_answer_boilerplate(chat_completion(messages, temperature=0.5, role="orch").strip())
 
 
+def _answer_via_analyst(
+    message: str,
+    result: dict[str, Any],
+    *,
+    conn: Connection,
+    db: Session,
+    transcript: list[dict[str, str]],
+    user_first_name: str = "",
+    thread_brief: str = "",
+    municipio_block: str = "",
+    rag_block: str = "",
+) -> str:
+    if not result.get("use_analyst") and result.get("answer", "").strip():
+        return result["answer"]
+    brief = thread_brief or build_thread_brief(message, transcript)
+    pack = pack_from_canonical(message, result, thread_brief=brief)
+    return interpret_evidence(
+        pack,
+        user_first_name=user_first_name,
+        conn=conn,
+        db=db,
+        municipio_block=municipio_block,
+        rag_block=rag_block,
+    )
+
+
 def _finalize_data_reply(
     message: str,
     transcript: list[dict[str, str]],
@@ -285,19 +318,36 @@ def run_orchestrator_turn(
 
     if route.primary == "planning":
         planning = try_planning_demand_metric(
-            conn, message, transcript, user_first_name=first_name
+            conn, message, transcript, db=db, user_first_name=first_name
         )
         if planning:
+            answer = _answer_via_analyst(
+                message,
+                planning,
+                conn=conn,
+                db=db,
+                transcript=transcript,
+                user_first_name=first_name,
+                thread_brief=route.thread_brief,
+                municipio_block=municipio_block,
+                rag_block=rag_block,
+            )
             return {
                 **planning,
-                "answer": _trim_answer_boilerplate(planning["answer"]),
+                "answer": _trim_answer_boilerplate(answer),
             }
         sql_result = run_sql_agent(
             conn, db, message, thread_brief=route.thread_brief
         )
         if sql_result.ok:
-            answer = _finalize_data_reply(
-                message, transcript, message, sql_result, user_block
+            pack = pack_from_sql(message, sql_result, thread_brief=route.thread_brief)
+            answer = interpret_evidence(
+                pack,
+                user_first_name=first_name,
+                conn=conn,
+                db=db,
+                municipio_block=municipio_block,
+                rag_block=rag_block,
             )
             return {
                 "answer": _trim_answer_boilerplate(answer),
@@ -331,11 +381,22 @@ def run_orchestrator_turn(
         conn,
         message,
         transcript,
+        db=db,
         user_first_name=first_name,
         block_sisc=route.block_sisc,
     )
     if canonical:
-        answer = canonical["answer"]
+        answer = _answer_via_analyst(
+            message,
+            canonical,
+            conn=conn,
+            db=db,
+            transcript=transcript,
+            user_first_name=first_name,
+            thread_brief=route.thread_brief,
+            municipio_block=municipio_block,
+            rag_block=rag_block,
+        )
         if canonical.get("metric") == "cadu_familias_por_cras":
             answer = _cras_answer_with_context(
                 canonical.get("preview") or [],
@@ -369,6 +430,38 @@ def run_orchestrator_turn(
         }
 
     plan = _plan_turn(message, transcript, rag_block, user_block)
+
+    if plan["mode"] == "chat" and (
+        planning_thread_active(transcript)
+        or is_planning_coverage_followup(message, transcript)
+    ):
+        retry = try_canonical_metric(
+            conn,
+            message,
+            transcript,
+            db=db,
+            user_first_name=first_name,
+            block_sisc=False,
+        )
+        if retry:
+            answer = _answer_via_analyst(
+                message,
+                retry,
+                conn=conn,
+                db=db,
+                transcript=transcript,
+                user_first_name=first_name,
+                thread_brief=route.thread_brief,
+                municipio_block=municipio_block,
+                rag_block=rag_block,
+            )
+            return {
+                "answer": _trim_answer_boilerplate(answer),
+                "sql": retry.get("sql"),
+                "row_count": retry.get("row_count", 0),
+                "preview": retry.get("preview") or [],
+                "mode": retry.get("mode", "canonical"),
+            }
 
     if plan["mode"] == "chat":
         answer = _chat_reply(message, transcript, rag_block, user_block)
@@ -426,7 +519,18 @@ def run_orchestrator_turn(
                     "preview": resolution.matches,
                     "mode": "disambiguation",
                 }
-        answer = _finalize_data_reply(message, transcript, sql_question, sql_result, user_block)
+        if sql_result.ok:
+            pack = pack_from_sql(message, sql_result, thread_brief=route.thread_brief)
+            answer = interpret_evidence(
+                pack,
+                user_first_name=first_name,
+                conn=conn,
+                db=db,
+                municipio_block=municipio_block,
+                rag_block=rag_block,
+            )
+        else:
+            answer = _finalize_data_reply(message, transcript, sql_question, sql_result, user_block)
 
     answer = apply_bairro_correction_to_answer(
         answer, bairro_resolution, first_name, message=message

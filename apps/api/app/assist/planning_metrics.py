@@ -7,15 +7,18 @@ from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
+from sqlalchemy.orm import Session
 
 from ..vigilance.familia_mview import _table_exists
 from .bairro_resolver import _pick_variant, _prefix_name
 from .conversation_intent import (
+    is_planning_coverage_followup,
     is_planning_followup,
     is_planning_turn,
     user_messages_blob,
     wants_planning_ranking,
 )
+from .planning_diagnostico import collect_reflexion_result
 
 _AGE_RANGE = re.compile(
     r"(\d{1,2})\s*(?:a|-|á|at[eé])\s*(\d{1,2})\s*(?:anos)?",
@@ -31,6 +34,12 @@ _BAIRRO_IN_CRAS = re.compile(
     r"\bbairro\b.*(?:desse|nesse|deste|dese)\s+cras|"
     r"(?:desse|nesse|deste|dese)\s+cras.*\bbairro\b|"
     r"qual\s+bairro|em\s+que\s+bairro|bairro\s+(?:mais|indicad)",
+    re.I,
+)
+_COVERAGE = re.compile(
+    r"car[eê]ncia|j[aá]\s+(?:possui|tem|existe)|possui\s+(?:algum|alguma)\s+serv|"
+    r"servi[cç]o\s+(?:para|nesse|neste)|tem\s+car[eê]ncia|oferta|"
+    r"considerou\s+como\s+vulnerabilidade|o\s*que\s+considerou",
     re.I,
 )
 
@@ -145,14 +154,170 @@ def _top_bairro_in_cras(
     return dict(row) if row else None
 
 
+def _extract_recommended_bairro(transcript: list[dict[str, str]] | None) -> str | None:
+    if not transcript:
+        return None
+    for msg in reversed(transcript):
+        if msg.get("role") != "assistant":
+            continue
+        content = msg.get("content", "")
+        patterns = (
+            r"bairro\s+\*\*([^*]+)\*\*",
+            r"olharia o bairro\s+\*\*([^*]+)\*\*",
+            r"No \*\*CRAS \d+\*\*, o bairro \*\*([^*]+)\*\*",
+        )
+        for pat in patterns:
+            m = re.search(pat, content, re.I)
+            if m:
+                return m.group(1).strip()
+    return None
+
+
+def _count_cadu_bairro(
+    conn: Connection,
+    bairro: str,
+    age_min: int,
+    age_max: int,
+) -> int:
+    row = conn.execute(
+        text(
+            """
+            SELECT COUNT(p.cadu_row_id)::bigint AS total
+            FROM vig.mvw_pessoas p
+            INNER JOIN vig.mvw_familia f ON f.codigo_familiar = p.codigo_familiar
+            WHERE p.idade IS NOT NULL
+              AND p.idade >= :age_min
+              AND p.idade <= :age_max
+              AND btrim(f.bairro::text) = :bairro
+            """
+        ),
+        {"age_min": age_min, "age_max": age_max, "bairro": bairro.strip()},
+    ).mappings().first()
+    return int((row or {}).get("total") or 0)
+
+
+def _count_sisc_bairro(
+    conn: Connection,
+    bairro: str,
+    age_min: int,
+    age_max: int,
+) -> int | None:
+    if not _table_exists(conn, "vig", "mvw_sisc_qualificado"):
+        return None
+    row = conn.execute(
+        text(
+            """
+            SELECT COUNT(DISTINCT s.nis_norm)::bigint AS total
+            FROM vig.mvw_sisc_qualificado s
+            INNER JOIN vig.mvw_familia f ON f.codigo_familiar = s.codigo_familiar
+            WHERE s.classificacao_vinculo = 'vinculado_cadu'
+              AND s.codigo_familiar IS NOT NULL
+              AND s.cadu_idade IS NOT NULL
+              AND s.cadu_idade >= :age_min
+              AND s.cadu_idade <= :age_max
+              AND btrim(f.bairro::text) = :bairro
+            """
+        ),
+        {"age_min": age_min, "age_max": age_max, "bairro": bairro.strip()},
+    ).mappings().first()
+    return int((row or {}).get("total") or 0)
+
+
+def try_planning_coverage_metric(
+    conn: Connection,
+    message: str,
+    transcript: list[dict[str, str]] | None = None,
+    *,
+    db: Session | None = None,
+    user_first_name: str = "",
+) -> dict[str, Any] | None:
+    """Carência SCFV: demanda CADU territorial × matrícula SISC no bairro/faixa."""
+    if not is_planning_coverage_followup(message, transcript):
+        return None
+    if not _table_exists(conn, "vig", "mvw_familia") or not _table_exists(conn, "vig", "mvw_pessoas"):
+        return None
+
+    age_min, age_max = parse_age_range(message, transcript)
+    faixa = f"{age_min} a {age_max} anos"
+    bairro = _extract_recommended_bairro(transcript)
+    num_cras = _extract_recommended_cras(transcript)
+
+    if not bairro:
+        answer = (
+            "Para avaliar carência, preciso do **bairro** indicado na conversa "
+            "(demanda CADU × matrícula SISC no mesmo recorte)."
+        )
+        return {
+            "answer": _prefix_name(user_first_name, answer),
+            "sql": None,
+            "row_count": 0,
+            "preview": [],
+            "mode": "canonical",
+            "metric": "planning_carencia",
+            "use_analyst": True,
+        }
+
+    demanda = _count_cadu_bairro(conn, bairro, age_min, age_max)
+    sisc = _count_sisc_bairro(conn, bairro, age_min, age_max)
+
+    if db:
+        reflex = collect_reflexion_result(
+            conn,
+            db,
+            bairro=bairro,
+            age_min=age_min,
+            age_max=age_max,
+            num_cras=num_cras,
+            demanda=demanda,
+            sisc=sisc,
+        )
+        return {
+            "answer": "",
+            "sql": "-- Reflexão territorial multi-eixo (analyst_reflexion v2)",
+            "row_count": len(reflex["preview"]),
+            "preview": reflex["preview"],
+            "reflexion_guide": reflex["reflexion_guide"],
+            "reflexion_axes": reflex["reflexion_axes"],
+            "mode": "canonical",
+            "metric": "planning_carencia",
+            "use_analyst": True,
+        }
+
+    facts = [
+        {
+            "axis": "A",
+            "label": f"Demanda CADU ({faixa}) — {bairro}",
+            "value": str(demanda),
+            "source": "vig.mvw_pessoas × vig.mvw_familia",
+            "detail": "faixa etária no bairro",
+        }
+    ]
+    return {
+        "answer": "",
+        "sql": None,
+        "row_count": len(facts),
+        "preview": facts,
+        "mode": "canonical",
+        "metric": "planning_carencia",
+        "use_analyst": True,
+    }
+
+
 def try_planning_demand_metric(
     conn: Connection,
     message: str,
     transcript: list[dict[str, str]] | None = None,
     *,
+    db: Session | None = None,
     user_first_name: str = "",
 ) -> dict[str, Any] | None:
     """Demanda potencial no CADU para planejar novo SCFV (não matrícula SISC)."""
+    coverage = try_planning_coverage_metric(
+        conn, message, transcript, db=db, user_first_name=user_first_name
+    )
+    if coverage:
+        return coverage
+
     if not is_planning_turn(message, transcript):
         return None
     if not _table_exists(conn, "vig", "mvw_familia") or not _table_exists(conn, "vig", "mvw_pessoas"):
@@ -194,21 +359,43 @@ def try_planning_demand_metric(
 
         bairro = str(top["bairro"])
         total = int(top["total"] or 0)
-        templates = [
-            f"No **CRAS {num_cras}**, o bairro **{bairro}** concentra a maior demanda "
-            f"(**{_fmt_int(total)}** crianças de **{faixa}** no CADU).",
-            f"Dentro do **CRAS {num_cras}**, eu olharia o bairro **{bairro}** "
-            f"— **{_fmt_int(total)}** nessa faixa etária no cadastro.",
-        ]
-        answer = _prefix_name(user_first_name, _pick_variant(message, templates))
+        sisc = _count_sisc_bairro(conn, bairro, age_min, age_max)
         sql = (
             "SELECT btrim(f.bairro), COUNT(p.cadu_row_id) FROM vig.mvw_pessoas p "
             "JOIN vig.mvw_familia f ON f.codigo_familiar = p.codigo_familiar "
             f"WHERE p.idade BETWEEN {age_min} AND {age_max} "
             f"AND btrim(f.num_cras::text) = '{num_cras}' GROUP BY 1 ORDER BY 2 DESC LIMIT 1"
         )
+        if db:
+            reflex = collect_reflexion_result(
+                conn,
+                db,
+                bairro=bairro,
+                age_min=age_min,
+                age_max=age_max,
+                num_cras=num_cras,
+                demanda=total,
+                sisc=sisc,
+            )
+            return {
+                "answer": "",
+                "sql": sql,
+                "row_count": len(reflex["preview"]),
+                "preview": reflex["preview"],
+                "reflexion_guide": reflex["reflexion_guide"],
+                "reflexion_axes": reflex["reflexion_axes"],
+                "mode": "canonical",
+                "metric": "planning_bairro_em_cras",
+                "use_analyst": True,
+            }
+        templates = [
+            f"No **CRAS {num_cras}**, o bairro **{bairro}** concentra a maior demanda "
+            f"(**{_fmt_int(total)}** crianças de **{faixa}** no CADU).",
+            f"Dentro do **CRAS {num_cras}**, eu olharia o bairro **{bairro}** "
+            f"— **{_fmt_int(total)}** nessa faixa etária no cadastro.",
+        ]
         return {
-            "answer": answer,
+            "answer": _prefix_name(user_first_name, _pick_variant(message, templates)),
             "sql": sql,
             "row_count": 1,
             "preview": [{"num_cras": num_cras, "bairro": bairro, "total": total}],

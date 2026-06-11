@@ -13,7 +13,7 @@ from .cras_breakdown import (
     sort_cras_rows,
 )
 from .geo_territorial import try_geo_contextual_followup, try_geo_territorial_metric
-from .ivs_metrics import try_ivs_metric
+from .ivs_metrics import try_ivs_cras_compare, try_ivs_metric
 from .planning_metrics import try_planning_demand_metric
 from .sisc_cadu import run_sisc_cadu_query
 
@@ -134,6 +134,7 @@ def try_canonical_metric(
     message: str,
     transcript: list[dict[str, str]] | None = None,
     *,
+    db: Session | None = None,
     user_first_name: str = "",
     block_sisc: bool = False,
 ) -> dict | None:
@@ -146,7 +147,7 @@ def try_canonical_metric(
         return None
 
     planning = try_planning_demand_metric(
-        conn, message, transcript, user_first_name=user_first_name
+        conn, message, transcript, db=db, user_first_name=user_first_name
     )
     if planning:
         return planning
@@ -155,6 +156,12 @@ def try_canonical_metric(
         sisc = _try_sisc_cross(conn, message, transcript)
         if sisc:
             return sisc
+
+    ivs_compare = try_ivs_cras_compare(
+        conn, message, transcript, user_first_name=user_first_name
+    )
+    if ivs_compare:
+        return ivs_compare
 
     ivs = try_ivs_metric(conn, message, user_first_name=user_first_name)
     if ivs:

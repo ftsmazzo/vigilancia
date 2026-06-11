@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from .conversation_intent import (
     build_thread_brief,
+    is_planning_coverage_followup,
     is_planning_followup,
     is_planning_turn,
 )
@@ -24,7 +25,8 @@ def resolve_turn_route(
     transcript: list[dict[str, str]] | None,
 ) -> TurnRoute:
     brief = build_thread_brief(message, transcript)
-    planning = is_planning_turn(message, transcript)
+    coverage = is_planning_coverage_followup(message, transcript)
+    planning = is_planning_turn(message, transcript) or coverage
     followup = is_planning_followup(message, transcript)
 
     if planning or followup:

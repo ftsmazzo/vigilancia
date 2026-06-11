@@ -29,6 +29,17 @@ _LIST_OTHERS = re.compile(
     r"outros\s+cras|demais\s+cras|liste|listar|ranking|comparar|todos\s+os\s+cras",
     re.I,
 )
+_COVERAGE = re.compile(
+    r"car[eê]ncia|j[aá]\s+(?:possui|tem|existe)|possui\s+(?:algum|alguma)\s+serv|"
+    r"servi[cç]o\s+(?:para|nesse|neste|no\s+bairro)|tem\s+car[eê]ncia|"
+    r"oferta\s+(?:real|existente)|vulnerabilidade\s+social|"
+    r"considerou\s+como\s+vulnerabilidade|o\s*que\s+considerou",
+    re.I,
+)
+_SHORT_ACK = re.compile(
+    r"^(?:se\s+puder\s+)?(?:agrade[cç]o|obrigad|por\s+favor|sim\s*,?\s*por\s+favor)\.?$",
+    re.I,
+)
 
 
 def user_messages_blob(transcript: list[dict[str, str]] | None, message: str = "") -> str:
@@ -110,6 +121,44 @@ def wants_planning_ranking(message: str) -> bool:
     return bool(_LIST_OTHERS.search(message))
 
 
+def pending_coverage_in_thread(transcript: list[dict[str, str]] | None) -> bool:
+    """Usuário pediu carência/oferta e o assistente ainda não respondeu com dados."""
+    if not transcript:
+        return False
+    asked = False
+    for msg in transcript:
+        if msg.get("role") == "user" and _COVERAGE.search(msg.get("content", "")):
+            asked = True
+        if msg.get("role") == "assistant" and asked:
+            content = msg.get("content", "").lower()
+            if any(
+                x in content
+                for x in (
+                    "não tenho informação",
+                    "formule uma pergunta",
+                    "não consegui reunir",
+                )
+            ):
+                return True
+            if re.search(r"\d+.*(?:sisc|cadu|matricul|demanda|carência)", content, re.I):
+                return False
+    return asked
+
+
+def is_planning_coverage_followup(
+    message: str,
+    transcript: list[dict[str, str]] | None,
+) -> bool:
+    text_msg = message.strip()
+    if not transcript or not planning_thread_active(transcript):
+        return False
+    if _COVERAGE.search(text_msg):
+        return True
+    if _SHORT_ACK.search(text_msg) and pending_coverage_in_thread(transcript):
+        return True
+    return False
+
+
 def build_thread_brief(message: str, transcript: list[dict[str, str]] | None) -> str:
     """Resumo estruturado para o AgenteSQL — evita perder o fio da conversa."""
     lines: list[str] = []
@@ -118,6 +167,11 @@ def build_thread_brief(message: str, transcript: list[dict[str, str]] | None) ->
         lines.append("- **NÃO** usar vig.mvw_sisc_qualificado salvo pedido explícito de matrícula existente.")
     if is_planning_followup(message, transcript):
         lines.append("- Follow-up: detalhar **bairro dentro do CRAS** indicado na resposta anterior.")
+    if is_planning_coverage_followup(message, transcript):
+        lines.append(
+            "- Follow-up: **carência de SCFV** — cruzar demanda CADU (p×f territorial) "
+            "com matrícula SISC no bairro/faixa etária da conversa."
+        )
     if planning_thread_active(transcript):
         for msg in reversed(transcript or []):
             if msg.get("role") != "assistant":
