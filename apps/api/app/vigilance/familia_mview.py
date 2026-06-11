@@ -430,8 +430,12 @@ def build_familia_mview_sql(
         mode() WITHIN GROUP (
           ORDER BY NULLIF(btrim(g.cras::text), '')
         ) AS cras,
-        max(g.lat_num) AS lat_num,
-        max(g.long_num) AS long_num
+        max(
+          NULLIF(regexp_replace(btrim(g.lat_num::text), ',', '.', 'g'), '')::double precision
+        ) AS lat_num,
+        max(
+          NULLIF(regexp_replace(btrim(g.long_num::text), ',', '.', 'g'), '')::double precision
+        ) AS long_num
       FROM raw.{_qi(GEO_TABLE)} g
       WHERE g.cep_norm IS NOT NULL
         AND length(btrim(g.cep_norm::text)) = 8

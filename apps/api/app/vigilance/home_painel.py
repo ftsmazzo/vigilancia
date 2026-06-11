@@ -8,6 +8,19 @@ from sqlalchemy.engine import Connection
 from .cadu_params import LIMIAR_POBREZA_EXTREMA, SM_METADE, sql_marcador_pbf_cadu
 from .familia_mview import _table_exists
 
+# lat_num/long_num na geo e na MV podem vir como TEXT após ingestão CSV.
+_LAT_EXPR = "NULLIF(regexp_replace(btrim({col}::text), ',', '.', 'g'), '')::double precision"
+_LNG_EXPR = "NULLIF(regexp_replace(btrim({col}::text), ',', '.', 'g'), '')::double precision"
+
+
+def _lat_sql(col: str = "f.lat_num") -> str:
+    return _LAT_EXPR.format(col=col)
+
+
+def _lng_sql(col: str = "f.long_num") -> str:
+    return _LNG_EXPR.format(col=col)
+
+
 CRAS_CORES = (
     "#2563eb",
     "#ea580c",
@@ -188,16 +201,16 @@ def mapa_territorial_from_views(conn: Connection) -> dict:
 
     pontos = conn.execute(
         text(
-            """
+            f"""
             SELECT
               btrim(f.num_cras::text) AS num_cras,
-              ROUND(f.lat_num::numeric, 3) AS lat,
-              ROUND(f.long_num::numeric, 3) AS lng,
+              ROUND(({_lat_sql()})::numeric, 3) AS lat,
+              ROUND(({_lng_sql()})::numeric, 3) AS lng,
               COUNT(*)::bigint AS familias
             FROM vig.mvw_familia f
             WHERE COALESCE(f.tem_geo, FALSE)
-              AND f.lat_num IS NOT NULL
-              AND f.long_num IS NOT NULL
+              AND {_lat_sql()} IS NOT NULL
+              AND {_lng_sql()} IS NOT NULL
               AND f.num_cras IS NOT NULL
               AND btrim(f.num_cras::text) <> ''
             GROUP BY 1, 2, 3
@@ -209,21 +222,21 @@ def mapa_territorial_from_views(conn: Connection) -> dict:
 
     cras_rows = conn.execute(
         text(
-            """
+            f"""
             SELECT
               btrim(f.num_cras::text) AS num_cras,
               max(btrim(f.nom_cras::text)) AS nom_cras,
-              AVG(f.lat_num)::float AS lat,
-              AVG(f.long_num)::float AS lng,
+              AVG({_lat_sql()}) AS lat,
+              AVG({_lng_sql()}) AS lng,
               COUNT(*)::bigint AS familias
             FROM vig.mvw_familia f
             WHERE COALESCE(f.tem_geo, FALSE)
-              AND f.lat_num IS NOT NULL
-              AND f.long_num IS NOT NULL
+              AND {_lat_sql()} IS NOT NULL
+              AND {_lng_sql()} IS NOT NULL
               AND f.num_cras IS NOT NULL
               AND btrim(f.num_cras::text) <> ''
             GROUP BY 1
-            ORDER BY NULLIF(regexp_replace(btrim(num_cras), '[^0-9].*', ''), '')::int NULLS LAST
+            ORDER BY NULLIF(regexp_replace(btrim(f.num_cras::text), '[^0-9].*', ''), '')::int NULLS LAST
             """
         )
     ).mappings().all()
