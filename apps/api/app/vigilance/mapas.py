@@ -17,7 +17,8 @@ _SEM_MEDIO_COMPLETO = (
 )
 _CRIANCAS = "pes.idade IS NOT NULL AND pes.idade < 12"
 _IDOSOS = "pes.idade >= 60"
-_FAMILIAS_PBF = "COALESCE(f.marc_pbf, FALSE)"
+def _familias_pbf_expr(alias: str) -> str:
+    return f"COALESCE({alias}.marc_pbf, FALSE)"
 
 
 def _bounds_from_points(points: list[dict]) -> list[list[float]] | None:
@@ -43,7 +44,7 @@ def _totais_cadu_referencia(conn: Connection, where_extra: str, params: dict) ->
             SELECT
               COUNT(pes.cadu_row_id) FILTER (WHERE {_CRIANCAS})::bigint AS criancas,
               COUNT(pes.cadu_row_id) FILTER (WHERE {_IDOSOS})::bigint AS idosos,
-              COUNT(DISTINCT fam.codigo_familiar) FILTER (WHERE {_FAMILIAS_PBF})::bigint AS familias_pbf,
+              COUNT(DISTINCT fam.codigo_familiar) FILTER (WHERE {_familias_pbf_expr("fam")})::bigint AS familias_pbf,
               COUNT(pes.cadu_row_id) FILTER (
                 WHERE {_ADULTO_18_59} AND {_SEM_MEDIO_COMPLETO}
               )::bigint AS adultos_sem_medio,
@@ -114,7 +115,7 @@ def mapas_heatmap_from_views(
                 COUNT(pes.cadu_row_id)::bigint AS pessoas,
                 COUNT(pes.cadu_row_id) FILTER (WHERE {_CRIANCAS})::bigint AS criancas,
                 COUNT(pes.cadu_row_id) FILTER (WHERE {_IDOSOS})::bigint AS idosos,
-                COUNT(DISTINCT f.codigo_familiar) FILTER (WHERE {_FAMILIAS_PBF})::bigint AS familias_pbf,
+                COUNT(DISTINCT f.codigo_familiar) FILTER (WHERE {_familias_pbf_expr("f")})::bigint AS familias_pbf,
                 COUNT(pes.cadu_row_id) FILTER (
                   WHERE {_ADULTO_18_59} AND {_SEM_MEDIO_COMPLETO}
                 )::bigint AS adultos_sem_medio
