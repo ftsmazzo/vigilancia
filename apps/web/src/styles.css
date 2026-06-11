@@ -3210,8 +3210,34 @@ p.success {
 .home-obs-main {
   display: grid;
   grid-template-columns: 1.15fr 0.85fr;
+  grid-template-areas:
+    "map meses"
+    "ivs renda"
+    "ivs bairros";
   gap: 1rem;
   align-items: start;
+}
+
+.home-obs-map-slot {
+  grid-area: map;
+  min-width: 0;
+}
+
+.home-obs-ivcad {
+  grid-area: ivs;
+  padding: 1rem 1.15rem;
+}
+
+.home-obs-chart--meses {
+  grid-area: meses;
+}
+
+.home-obs-chart--renda {
+  grid-area: renda;
+}
+
+.home-obs-chart--bairros {
+  grid-area: bairros;
 }
 
 .home-obs-left {
@@ -3289,10 +3315,6 @@ p.success {
   height: 10px;
   border-radius: 50%;
   flex-shrink: 0;
-}
-
-.home-obs-ivcad {
-  padding: 1rem 1.15rem;
 }
 
 .home-obs-ivcad h2 {
@@ -3498,6 +3520,11 @@ p.success {
   background: #94a3b8;
 }
 
+.home-hbar-row--bairro .home-hbar-label {
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
 .home-hbar-val {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
@@ -3512,9 +3539,87 @@ p.success {
 
   .home-obs-main {
     grid-template-columns: 1fr;
+    grid-template-areas:
+      "map"
+      "meses"
+      "ivs"
+      "renda"
+      "bairros";
   }
 
   .home-map {
     height: 280px;
+  }
+}
+
+/* Observatório MDS — segunda página (identificação e renda) */
+.obs-mds-page {
+  max-width: 1200px;
+}
+
+.obs-mds-kpis {
+  grid-template-columns: repeat(5, 1fr);
+}
+
+.obs-mds-placeholder-tag {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fx-subtle);
+}
+
+.obs-mds-row {
+  display: grid;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.obs-mds-row--3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.obs-mds-footnote {
+  margin: 0.75rem 0 0;
+  font-size: 0.78rem;
+  color: var(--fx-subtle);
+  font-style: italic;
+}
+
+.obs-mds-hbar .home-hbar-label {
+  min-width: 9rem;
+  font-size: 0.78rem;
+}
+
+.obs-mds-meses--ate_12 { background: #1e3a8a; }
+.obs-mds-meses--12_18 { background: #166534; }
+.obs-mds-meses--18_24 { background: #ca8a04; }
+.obs-mds-meses--24_36 { background: #ea580c; }
+.obs-mds-meses--37_48 { background: #dc2626; }
+
+.obs-mds-renda-pc--pobreza { background: #dc2626; }
+.obs-mds-renda-pc--baixa_renda { background: #ca8a04; }
+.obs-mds-renda-pc--acima_meio_sm { background: #1e3a8a; }
+
+.obs-mds-renda-fam--ate_1_sm { background: #dc2626; }
+.obs-mds-renda-fam--1_2_sm { background: #ca8a04; }
+.obs-mds-renda-fam--2_3_sm { background: #166534; }
+.obs-mds-renda-fam--acima_3_sm { background: #1e3a8a; }
+
+@media (max-width: 1100px) {
+  .obs-mds-kpis {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .obs-mds-row--3 {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .obs-mds-kpis {
+    grid-template-columns: repeat(2, 1fr);
   }
 }

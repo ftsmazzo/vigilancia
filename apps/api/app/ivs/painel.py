@@ -27,8 +27,8 @@ def territorio_filter_clause(*, num_cras: str | None, bairro: str | None) -> tup
             clauses.append("btrim(f.num_cras::text) = :num_cras")
             params["num_cras"] = cod
     if bairro is not None and bairro.strip():
-        clauses.append("f.bairro ILIKE :bairro")
-        params["bairro"] = f"%{bairro.strip()}%"
+        clauses.append("btrim(f.bairro::text) = :bairro")
+        params["bairro"] = bairro.strip()
     return " AND ".join(clauses), params
 
 

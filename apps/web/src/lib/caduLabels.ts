@@ -34,6 +34,11 @@ export const ROTULO_CADU: Record<string, string> = {
   renda_1622_3242: "R$ 1.621,01 a R$ 3.242,00",
   renda_acima_3242: "Acima de R$ 3.242,00",
   renda_nao_informada: "Renda não informada",
+  sim: "Sim",
+  nao: "Não",
+  pobreza: "Pobreza",
+  baixa_renda: "Baixa renda",
+  acima_meio_sm: "Acima de 1/2 SM",
 };
 
 export function rotuloAmigavel(chave: string): string {

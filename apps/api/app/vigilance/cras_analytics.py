@@ -85,6 +85,40 @@ def _sort_cras_items(items: list[dict]) -> list[dict]:
     return rest + sem
 
 
+def bairros_por_cras_from_views(conn: Connection, cras_cod: str) -> list[dict]:
+    """Bairros distintos vinculados a um CRAS territorial (vig.mvw_familia)."""
+    _require_views(conn)
+    cod = (cras_cod or "").strip()
+    if not cod or cod in ("__todos__", "__sem_cras__"):
+        return []
+
+    rows = conn.execute(
+        text(
+            """
+            SELECT
+              btrim(f.bairro::text) AS bairro,
+              COUNT(DISTINCT f.codigo_familiar)::bigint AS familias
+            FROM vig.mvw_familia f
+            WHERE btrim(f.num_cras::text) = :cras_cod
+              AND f.bairro IS NOT NULL
+              AND btrim(f.bairro::text) <> ''
+            GROUP BY 1
+            ORDER BY familias DESC, bairro ASC
+            """
+        ),
+        {"cras_cod": cod},
+    ).mappings().all()
+
+    return [
+        {
+            "bairro": str(r["bairro"] or ""),
+            "familias": int(r["familias"] or 0),
+        }
+        for r in rows
+        if r.get("bairro")
+    ]
+
+
 def _cras_filter_clause(cras_cod: str | None) -> tuple[str, dict]:
     if cras_cod is None or cras_cod.strip() in ("", "__todos__"):
         return "", {}

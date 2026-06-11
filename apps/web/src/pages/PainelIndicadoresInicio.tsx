@@ -99,6 +99,9 @@ export default function PainelIndicadoresInicio({ token }: Props) {
           <Link to="/ivs" className="btn btn-primary" style={{ textDecoration: "none" }}>
             Painel IVS
           </Link>
+          <Link to="/observatorio" className="btn btn-secondary" style={{ textDecoration: "none" }}>
+            Observatório CADU
+          </Link>
         </div>
       </header>
 
@@ -126,107 +129,105 @@ export default function PainelIndicadoresInicio({ token }: Props) {
           </section>
 
           <section className="home-obs-main">
-            <div className="home-obs-left">
+            <div className="home-obs-map-slot">
               <HomeTerritorialMap mapa={painel.mapa} />
+            </div>
 
-              <article className="home-obs-ivcad fx-card">
-                <h2>IVCAD — Índice de Vulnerabilidade das Famílias do Cadastro Único</h2>
-                <p className="home-obs-ivcad-desc">
-                  Metodologia v1.0.5 (MDS): 40 indicadores em 6 dimensões. Escala 0 a 1 — quanto maior, maior a
-                  vulnerabilidade.
-                </p>
-                {painel.ivs_disponivel && ivsVal != null ? (
-                  <div className="home-obs-gauge-wrap">
-                    <div className="home-obs-gauge" role="img" aria-label={`IVS médio ${fmtIndice(ivsVal)}`}>
-                      <div className="home-obs-gauge-track" />
-                      <div
-                        className="home-obs-gauge-fill"
-                        style={{ width: `${ivsPctGauge}%` }}
-                      />
+            <article className="home-obs-chart fx-card home-obs-chart--meses">
+              <h2>Famílias por meses após atualização</h2>
+              <ul className="home-hbar-list">
+                {painel.por_meses_atualizacao.map((item) => (
+                  <li key={item.rotulo} className="home-hbar-row">
+                    <span className="home-hbar-label">{item.titulo}</span>
+                    <span className="home-hbar-track">
                       <span
-                        className="home-obs-gauge-marker home-obs-gauge-marker--nac"
-                        style={{ left: `${mediaNacPct}%` }}
-                        title="Média nacional"
+                        className="home-hbar-fill home-hbar-fill--meses"
+                        style={{ width: barPct(item.pct, maxMesesPct) }}
                       />
-                      <strong className="home-obs-gauge-value">{fmtIndice(ivsVal)}</strong>
-                    </div>
-                    <div className="home-obs-gauge-labels">
-                      <span>0</span>
-                      <span>Média nacional {fmtIndice(mediaNac)}</span>
-                      <span>1</span>
-                    </div>
+                    </span>
+                    <span className="home-hbar-val">{item.total.toLocaleString("pt-BR")}</span>
+                  </li>
+                ))}
+              </ul>
+            </article>
+
+            <article className="home-obs-ivcad fx-card">
+              <h2>IVCAD — Índice de Vulnerabilidade das Famílias do Cadastro Único</h2>
+              <p className="home-obs-ivcad-desc">
+                Metodologia v1.0.5 (MDS): 40 indicadores em 6 dimensões. Escala 0 a 1 — quanto maior, maior a
+                vulnerabilidade.
+              </p>
+              {painel.ivs_disponivel && ivsVal != null ? (
+                <div className="home-obs-gauge-wrap">
+                  <div className="home-obs-gauge" role="img" aria-label={`IVS médio ${fmtIndice(ivsVal)}`}>
+                    <div className="home-obs-gauge-track" />
+                    <div
+                      className="home-obs-gauge-fill"
+                      style={{ width: `${ivsPctGauge}%` }}
+                    />
+                    <span
+                      className="home-obs-gauge-marker home-obs-gauge-marker--nac"
+                      style={{ left: `${mediaNacPct}%` }}
+                      title="Média nacional"
+                    />
+                    <strong className="home-obs-gauge-value">{fmtIndice(ivsVal)}</strong>
                   </div>
-                ) : (
-                  <p className="home-obs-ivcad-pending">
-                    IVS ainda não calculado.{" "}
-                    <Link to="/vigilancia">Gere as visões em Vigilância</Link>.
-                  </p>
-                )}
-              </article>
+                  <div className="home-obs-gauge-labels">
+                    <span>0</span>
+                    <span>Média nacional {fmtIndice(mediaNac)}</span>
+                    <span>1</span>
+                  </div>
+                </div>
+              ) : (
+                <p className="home-obs-ivcad-pending">
+                  IVS ainda não calculado.{" "}
+                  <Link to="/vigilancia">Gere as visões em Vigilância</Link>.
+                </p>
+              )}
+            </article>
 
-              <article className="home-obs-chart fx-card">
-                <h2>Top 5 bairros — famílias cadastradas</h2>
-                <p className="home-obs-chart-sub">Bairro territorial (geo × CEP)</p>
-                {painel.top_bairros.length === 0 ? (
-                  <p className="home-obs-chart-empty">Sem bairro na geo. Ingeste tbl_geo e regenere a visão Família.</p>
-                ) : (
-                  <ul className="home-hbar-list">
-                    {painel.top_bairros.map((item) => (
-                      <li key={item.bairro} className="home-hbar-row home-hbar-row--bairro">
-                        <span className="home-hbar-label" title={item.bairro}>
-                          {item.posicao}. {item.bairro}
-                        </span>
-                        <span className="home-hbar-track">
-                          <span
-                            className="home-hbar-fill home-hbar-fill--bairro"
-                            style={{ width: barPct(item.pct_do_total, maxBairroPct) }}
-                          />
-                        </span>
-                        <span className="home-hbar-val">{item.familias.toLocaleString("pt-BR")}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </article>
-            </div>
+            <article className="home-obs-chart fx-card home-obs-chart--renda">
+              <h2>Famílias por faixa de renda per capita</h2>
+              <ul className="home-hbar-list">
+                {painel.por_faixa_renda.map((item) => (
+                  <li key={item.rotulo} className="home-hbar-row">
+                    <span className="home-hbar-label">{item.titulo}</span>
+                    <span className="home-hbar-track">
+                      <span
+                        className={`home-hbar-fill home-hbar-fill--${item.rotulo}`}
+                        style={{ width: barPct(item.pct, maxRendaPct) }}
+                      />
+                    </span>
+                    <span className="home-hbar-val">{item.total.toLocaleString("pt-BR")}</span>
+                  </li>
+                ))}
+              </ul>
+            </article>
 
-            <div className="home-obs-charts">
-              <article className="home-obs-chart fx-card">
-                <h2>Famílias por meses após atualização</h2>
+            <article className="home-obs-chart fx-card home-obs-chart--bairros">
+              <h2>Top 5 bairros — famílias cadastradas</h2>
+              <p className="home-obs-chart-sub">Bairro territorial (geo × CEP)</p>
+              {painel.top_bairros.length === 0 ? (
+                <p className="home-obs-chart-empty">Sem bairro na geo. Ingeste tbl_geo e regenere a visão Família.</p>
+              ) : (
                 <ul className="home-hbar-list">
-                  {painel.por_meses_atualizacao.map((item) => (
-                    <li key={item.rotulo} className="home-hbar-row">
-                      <span className="home-hbar-label">{item.titulo}</span>
+                  {painel.top_bairros.map((item) => (
+                    <li key={item.bairro} className="home-hbar-row home-hbar-row--bairro">
+                      <span className="home-hbar-label" title={item.bairro}>
+                        {item.posicao}. {item.bairro.toLocaleUpperCase("pt-BR")}
+                      </span>
                       <span className="home-hbar-track">
                         <span
-                          className="home-hbar-fill home-hbar-fill--meses"
-                          style={{ width: barPct(item.pct, maxMesesPct) }}
+                          className="home-hbar-fill home-hbar-fill--bairro"
+                          style={{ width: barPct(item.pct_do_total, maxBairroPct) }}
                         />
                       </span>
-                      <span className="home-hbar-val">{item.total.toLocaleString("pt-BR")}</span>
+                      <span className="home-hbar-val">{item.familias.toLocaleString("pt-BR")}</span>
                     </li>
                   ))}
                 </ul>
-              </article>
-
-              <article className="home-obs-chart fx-card">
-                <h2>Famílias por faixa de renda per capita</h2>
-                <ul className="home-hbar-list">
-                  {painel.por_faixa_renda.map((item) => (
-                    <li key={item.rotulo} className="home-hbar-row">
-                      <span className="home-hbar-label">{item.titulo}</span>
-                      <span className="home-hbar-track">
-                        <span
-                          className={`home-hbar-fill home-hbar-fill--${item.rotulo}`}
-                          style={{ width: barPct(item.pct, maxRendaPct) }}
-                        />
-                      </span>
-                      <span className="home-hbar-val">{item.total.toLocaleString("pt-BR")}</span>
-                    </li>
-                  ))}
-                </ul>
-              </article>
-            </div>
+              )}
+            </article>
           </section>
         </>
       )}

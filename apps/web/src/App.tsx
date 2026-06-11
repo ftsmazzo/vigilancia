@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import IngestaoPage from "./pages/IngestaoPage";
 import PainelIndicadoresInicio from "./pages/PainelIndicadoresInicio";
+import PainelObservatorioMds from "./pages/PainelObservatorioMds";
 import UsuariosPage from "./pages/UsuariosPage";
 import ConvivenciaPage from "./pages/ConvivenciaPage";
 import CrasPage from "./pages/CrasPage";
@@ -89,6 +90,10 @@ function AppShell({
           <NavLink to="/" end className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             <LayoutDashboard className="nav-icon" size={18} />
             <span>Início</span>
+          </NavLink>
+          <NavLink to="/observatorio" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+            <PieChart className="nav-icon" size={18} />
+            <span>Observatório</span>
           </NavLink>
           <NavLink to="/ingestao" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             <Database className="nav-icon" size={18} />
@@ -369,6 +374,18 @@ export default function App() {
                 <AppShell loadingMe={loadingMe} me={me} onLogout={handleLogout}>
                   <DashboardHome token={token} />
                 </AppShell>
+              )
+            }
+          />
+          <Route
+            path="/observatorio"
+            element={
+              token ? (
+                <AppShell loadingMe={loadingMe} me={me} onLogout={handleLogout}>
+                  <PainelObservatorioMds token={token} />
+                </AppShell>
+              ) : (
+                <Navigate to="/" replace />
               )
             }
           />

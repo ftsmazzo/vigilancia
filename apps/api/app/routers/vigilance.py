@@ -18,6 +18,7 @@ from ..vigilance.familia_mview import (
     refresh_familia_mview,
 )
 from ..vigilance.home_painel import home_painel_from_views, mapa_territorial_from_views
+from ..vigilance.observatorio_painel import observatorio_painel_from_views
 from ..vigilance.pessoas_mview import refresh_pessoas_mview
 
 router = APIRouter(prefix="/vigilance", tags=["vigilance"])
@@ -566,6 +567,22 @@ def get_home_painel(
     try:
         with db.bind.begin() as conn:
             return home_painel_from_views(conn)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/observatorio-painel")
+def get_observatorio_painel(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """
+    Segunda página estilo Observatório MDS: KPIs territoriais, cadastro em domicílio,
+    atualização, meses desatualizados e faixas de renda (pré e pós PBF).
+    """
+    try:
+        with db.bind.begin() as conn:
+            return observatorio_painel_from_views(conn)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
