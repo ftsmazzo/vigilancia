@@ -18,6 +18,7 @@ from ..vigilance.familia_mview import (
     refresh_familia_mview,
 )
 from ..vigilance.home_painel import home_painel_from_views, mapa_territorial_from_views
+from ..vigilance.mapas import mapas_heatmap_from_views
 from ..vigilance.observatorio_painel import observatorio_painel_from_views
 from ..vigilance.pessoas_mview import refresh_pessoas_mview
 
@@ -600,6 +601,26 @@ def get_mapa_territorial(
     """Mapa de famílias por coordenada (geo) colorido por CRAS territorial."""
     with db.bind.begin() as conn:
         return mapa_territorial_from_views(conn)
+
+
+@router.get("/mapas-heatmap")
+def get_mapas_heatmap(
+    cras_cod: str | None = Query(None, description="Código CRAS, __todos__ ou __sem_cras__"),
+    bairro: str | None = Query(None, description="Bairro territorial (match exato)"),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Mapas de calor: crianças (0–11) e idosos (60+) por bairro georreferenciado."""
+    try:
+        with db.bind.begin() as conn:
+            return mapas_heatmap_from_views(conn, cras_cod, bairro)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Falha nos mapas de calor: {exc}",
+        ) from exc
 
 
 @router.post("/materialized-views/familia/refresh")

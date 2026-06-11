@@ -13,6 +13,7 @@ import {
   Menu,
   Gauge,
   BarChart3,
+  Map,
 } from "lucide-react";
 import IngestaoPage from "./pages/IngestaoPage";
 import PainelIndicadoresInicio from "./pages/PainelIndicadoresInicio";
@@ -24,6 +25,7 @@ import MunicipioPage from "./pages/MunicipioPage";
 import CaracterizacaoPage from "./pages/CaracterizacaoPage";
 import VigilanciaPage from "./pages/VigilanciaPage";
 import IvsPage from "./pages/IvsPage";
+import MapasPage from "./pages/MapasPage";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const TOKEN_KEY = "vigsocial_token";
@@ -102,6 +104,10 @@ function AppShell({
             <NavLink to="/ivs" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
               <Gauge className="nav-icon" size={18} />
               <span>IVS</span>
+            </NavLink>
+            <NavLink to="/mapas" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+              <Map className="nav-icon" size={18} />
+              <span>Mapas</span>
             </NavLink>
             <NavLink to="/assistente" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
               <Sparkles className="nav-icon" size={18} />
@@ -441,6 +447,18 @@ export default function App() {
               token ? (
                 <AppShell loadingMe={loadingMe} me={me} onLogout={handleLogout}>
                   <IvsPage token={token} />
+                </AppShell>
+              ) : (
+                <Navigate to="/" replace />
+              )
+            }
+          />
+          <Route
+            path="/mapas"
+            element={
+              token ? (
+                <AppShell loadingMe={loadingMe} me={me} onLogout={handleLogout}>
+                  <MapasPage token={token} />
                 </AppShell>
               ) : (
                 <Navigate to="/" replace />

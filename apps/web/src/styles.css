@@ -3307,6 +3307,170 @@ p.success {
   }
 }
 
+/* —— Página Mapas (heatmap territorial) —— */
+.mapas-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 0 0 2rem;
+}
+
+.mapas-hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem;
+}
+
+.mapas-hero h1 {
+  margin: 0 0 0.35rem;
+  font-size: 1.35rem;
+}
+
+.mapas-hero-sub {
+  margin: 0;
+  max-width: 52rem;
+  color: var(--fx-subtle);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.mapas-hero-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.mapas-filtros {
+  padding: 1rem 1.25rem;
+}
+
+.mapas-filtros-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.mapas-filtros label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.mapas-filtros label span {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fx-muted);
+}
+
+.mapas-filtros select {
+  width: 100%;
+  padding: 0.5rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.25);
+  color: inherit;
+}
+
+.mapas-recorte-label {
+  margin: 0.75rem 0 0;
+  font-size: 0.82rem;
+  color: var(--fx-subtle);
+}
+
+.mapas-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.mapas-heatmap {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.mapas-heatmap-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1rem 1.1rem 0.65rem;
+}
+
+.mapas-heatmap-head h2 {
+  margin: 0 0 0.2rem;
+  font-size: 1rem;
+}
+
+.mapas-heatmap-head p {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--fx-subtle);
+}
+
+.mapas-heatmap-total {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #f0a060;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.mapas-heatmap-canvas {
+  height: 380px;
+  width: 100%;
+  z-index: 0;
+}
+
+.mapas-heatmap--empty {
+  min-height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  margin: 0 1rem 1rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--fx-subtle);
+  text-align: center;
+}
+
+.mapas-heatmap-legend {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1.1rem 0.85rem;
+  font-size: 0.72rem;
+  color: var(--fx-muted);
+}
+
+.mapas-heatmap-legend-bar {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, hsl(220, 82%, 38%), hsl(60, 82%, 50%), hsl(0, 82%, 50%));
+}
+
+@media (max-width: 1100px) {
+  .mapas-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .mapas-filtros-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mapas-heatmap-canvas {
+    height: 320px;
+  }
+}
+
 /* —— Home Observatório + mapa territorial —— */
 .home-obs-page {
   display: flex;
