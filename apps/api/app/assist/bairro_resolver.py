@@ -34,6 +34,7 @@ _BAIRRO_STOPWORDS = frozenset({
     "vista", "funcao", "função", "termos", "sentido", "base", "acordo",
     "funcao", "parte", "caso", "forma", "modo", "todo", "toda", "todos",
     "novo", "nova", "servico", "serviço", "convivencia", "convivência",
+    "municipio", "município", "contexto", "scfv",
 })
 
 _LOCATION_PATTERNS = (
@@ -52,8 +53,8 @@ _LOCATION_PATTERNS = (
     ),
     re.compile(
         r"(?:crianças?|crianca|idosos?|pessoas?|fam[ií]lias?|mulheres|homens?)"
-        r".*?\b(?:no|na|em)\s+(?!bairro\b|cras\b|conviv|considera|geral|rela|mente\b|"
-        r"funcao|função|servi[cç]o|novo\b|nova\b)([A-Za-zÀ-ú][A-Za-zÀ-ú0-9\s'\-]{3,}?)(?:\?|\.|$)",
+        r".*?\b(?:no|na|em)\s+(?!bairro\b|cras\b|munic[ií]pio\b|conviv|considera|geral|rela|mente\b|"
+        r"funcao|função|servi[cç]o|novo\b|nova\b|contexto\b)([A-Za-zÀ-ú][A-Za-zÀ-ú0-9\s'\-]{3,}?)(?:\?|\.|$)",
         re.I,
     ),
 )
@@ -186,8 +187,10 @@ def is_valid_bairro_term(term: str) -> bool:
 
 def message_has_territorial_intent(message: str) -> bool:
     text_msg = message.strip()
-    if re.search(r"\bbairro\b", text_msg, re.I):
-        return True
+    if not re.search(r"\bbairro\b", text_msg, re.I):
+        return False
+    if re.search(r"\b(?:desse|nesse|deste|dese)\s+cras\b", text_msg, re.I):
+        return False
     term = extract_location_term(text_msg)
     return bool(term and is_valid_bairro_term(term))
 
@@ -195,11 +198,16 @@ def message_has_territorial_intent(message: str) -> bool:
 def should_resolve_bairro(message: str, term: str | None) -> bool:
     if not term or not is_valid_bairro_term(term):
         return False
+    from .conversation_intent import skips_bairro_preprocess
+
+    if skips_bairro_preprocess(message, None):
+        return False
     if re.search(r"\bbairro\b", message, re.I):
+        if re.search(r"\b(?:desse|nesse|deste|dese)\s+cras\b", message, re.I):
+            return False
         return True
     if re.search(
-        r"\b(?:índice|indice|ivs|ivcad|quantas?|quantos?|pessoas?|fam[ií]lias?|"
-        r"crianças?|crianca|idosos?)\b",
+        r"\b(?:índice|indice|ivs|ivcad|quantas?|quantos?|pessoas?|fam[ií]lias?|idosos?)\b",
         message,
         re.I,
     ):
@@ -617,6 +625,11 @@ def preprocess_bairro_turn(
     transcript: list[dict[str, str]] | None,
 ) -> BairroPreprocess:
     if not _table_exists(conn, "vig", "mvw_familia"):
+        return BairroPreprocess(message=message)
+
+    from .conversation_intent import skips_bairro_preprocess
+
+    if skips_bairro_preprocess(message, transcript):
         return BairroPreprocess(message=message)
 
     choice = try_parse_bairro_choice(message, transcript)

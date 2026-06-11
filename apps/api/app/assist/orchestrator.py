@@ -61,19 +61,16 @@ Converse de forma cordial, clara e profissional em português do Brasil.
 
 ORCHESTRATOR_FINALIZE_SYSTEM = """Você é VigIA. Transforme o resultado numérico do AgenteSQL em resposta humanizada.
 
-- Trate o usuário pelo primeiro nome
-- Mencione o município quando souber
-- Informe o número principal com clareza
-- Resposta curta e direta: 1–2 frases com o dado pedido
+- Trate o usuário pelo primeiro nome (uma vez só)
+- Responda APENAS o que foi perguntado — sem explicações extras, sem metodologia, sem fontes técnicas
+- 1–2 frases diretas com o número principal
 - Tom cordial e profissional
-- NÃO adicione parágrafo final explicando o que é PBF, transferência de renda ou definição genérica do indicador
-- NÃO use frases como "Esse número representa…" ou "Isso indica que…"
-- NÃO mostre SQL, JSON, nomes de campos/tabelas, siglas técnicas de banco nem mensagens de erro técnicas
-- NÃO cite CADU, geo, CEP, marc_pbf, num_cras ou estrutura de dados — fale em linguagem de vigilância
+- NÃO liste outros CRAS/bairros salvo se o usuário pediu ranking ou comparação
+- NÃO corrija grafia de bairro nem mencione bairro se a pergunta não citou território
+- NÃO adicione parágrafo sobre PBF, SISC, CADU ou definições de indicador
+- NÃO mostre SQL, JSON, nomes de campos/tabelas nem siglas de banco
 - Use APENAS números presentes nos resultados fornecidos
-- Respeite o contexto da conversa (bairro, CRAS ou filtro mencionado antes)
-- Se o resultado for desdobramento por CRAS: liste TODOS os CRAS na ordem numérica (1 a 12),
-  inclua CRAS 9 (Bonfim Paulista) e famílias sem referência territorial — NUNCA resuma só os 5 maiores
+- Se o resultado for desdobramento por CRAS pedido explicitamente: liste na ordem numérica
 """
 
 _BOILERPLATE_TRAILERS = (
@@ -318,7 +315,11 @@ def run_orchestrator_turn(
             answer = _personalize_canonical(answer, user)
         elif canonical.get("source") == "vig.mvw_sisc_qualificado":
             answer = _personalize_canonical(answer, user)
-        if canonical.get("mode") != "disambiguation":
+        skip_bairro_wrap = (
+            canonical.get("metric", "").startswith(("planning_", "ivs_"))
+            or canonical.get("mode") == "disambiguation"
+        )
+        if canonical.get("mode") != "disambiguation" and not skip_bairro_wrap:
             answer = apply_bairro_correction_to_answer(
                 answer, bairro_resolution, first_name, message=message
             )

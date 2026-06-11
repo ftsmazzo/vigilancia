@@ -144,15 +144,15 @@ def try_canonical_metric(
     if not text_msg:
         return None
 
-    sisc = _try_sisc_cross(conn, message, transcript)
-    if sisc:
-        return sisc
-
     planning = try_planning_demand_metric(
         conn, message, transcript, user_first_name=user_first_name
     )
     if planning:
         return planning
+
+    sisc = _try_sisc_cross(conn, message, transcript)
+    if sisc:
+        return sisc
 
     ivs = try_ivs_metric(conn, message, user_first_name=user_first_name)
     if ivs:

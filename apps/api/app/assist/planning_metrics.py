@@ -9,58 +9,45 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from ..vigilance.familia_mview import _table_exists
-from .bairro_resolver import (
-    _pick_variant,
-    _prefix_name,
+from .bairro_resolver import _pick_variant, _prefix_name
+from .conversation_intent import (
+    is_planning_followup,
+    is_planning_turn,
+    planning_thread_active,
+    user_messages_blob,
+    wants_planning_ranking,
 )
 
-_PLANNING = re.compile(
-    r"implantar|implementar|novo\s+servi|abrir|criar|expandir|"
-    r"suger|indic|recomend|onde\s+(?:abrir|implantar|criar)|"
-    r"maior\s+demanda|potencial\s+(?:de\s+)?demanda|"
-    r"preciso\s+(?:de\s+)?(?:um|uma)\s+(?:novo|nova)",
-    re.I,
-)
-_EXISTING_SISC_QUERY = re.compile(
-    r"matriculad|matricul|atendid[oa]s?\s+(?:no|em)\s+(?:sisc|conviv)|"
-    r"quantos?\s+(?:atendid|matricul)|"
-    r"servi[cç]os?\s+(?:de\s+conviv|scfv).*(?:exist|j[aá]\s+temos|temos\s+hoje)",
-    re.I,
-)
 _AGE_RANGE = re.compile(
     r"(\d{1,2})\s*(?:a|-|á|at[eé])\s*(\d{1,2})\s*(?:anos)?",
     re.I,
 )
 _CRAS_SUGGEST = re.compile(
     r"qual\s+cras|cras\s+(?:me\s+)?suger|suger.*cras|"
-    r"cras\s+(?:mais|indicad)|maior\s+demanda.*cras|cras.*maior\s+demanda",
+    r"cras\s+(?:mais|indicad)|maior\s+demanda.*cras|cras.*maior\s+demanda|"
+    r"escolher\s+um\s+cras|escolhe\s+.*cras",
     re.I,
 )
 _BAIRRO_IN_CRAS = re.compile(
-    r"qual\s+bairro|bairro\s+(?:me\s+)?suger|suger.*bairro|"
-    r"em\s+que\s+bairro|bairro\s+(?:mais|indicad)|onde\s+(?:no|em)\s+bairro",
+    r"\bbairro\b.*(?:desse|nesse|deste|dese)\s+cras|"
+    r"(?:desse|nesse|deste|dese)\s+cras.*\bbairro\b|"
+    r"qual\s+bairro|em\s+que\s+bairro|bairro\s+(?:mais|indicad)",
     re.I,
 )
-_CRAS_FROM_TEXT = re.compile(
-    r"cras\s*(\d{1,2})\b|"
-    r"CRAS\s+(\d{1,2})\s*[—\-]",
+_RECOMMENDED_CRAS = re.compile(
+    r"(?:mais indicado|eu sugeriria|indicaria|sugeriria)[^\n]{0,120}?"
+    r"(?:\*\*)?CRAS\s*(\d{1,2})",
     re.I,
 )
-_FAIXA = re.compile(r"crianç|crianc|adolesc|menor|faixa\s+et[aá]ria", re.I)
+_CRAS_HEAD = re.compile(r"\*\*CRAS\s*(\d{1,2})\*\*", re.I)
 
 
 def _fmt_int(n: int) -> str:
     return f"{n:,}".replace(",", ".")
 
 
-def _conversation_blob(message: str, transcript: list[dict[str, str]] | None) -> str:
-    parts = [m.get("content", "") for m in (transcript or [])]
-    parts.append(message)
-    return " ".join(parts)
-
-
 def parse_age_range(message: str, transcript: list[dict[str, str]] | None) -> tuple[int, int]:
-    blob = _conversation_blob(message, transcript)
+    blob = user_messages_blob(transcript, message)
     match = _AGE_RANGE.search(message) or _AGE_RANGE.search(blob)
     if match:
         lo, hi = int(match.group(1)), int(match.group(2))
@@ -74,42 +61,35 @@ def parse_age_range(message: str, transcript: list[dict[str, str]] | None) -> tu
     return 6, 17
 
 
-def is_planning_demand(message: str, transcript: list[dict[str, str]] | None) -> bool:
-    text_msg = message.strip()
-    if not text_msg:
-        return False
-    if _EXISTING_SISC_QUERY.search(text_msg):
-        return False
-    blob = _conversation_blob(message, transcript)
-    if not _PLANNING.search(text_msg):
-        return False
-    return bool(_FAIXA.search(text_msg) or _FAIXA.search(blob) or _CRAS_SUGGEST.search(text_msg))
-
-
-def _extract_cras_from_transcript(transcript: list[dict[str, str]] | None) -> str | None:
+def _extract_recommended_cras(transcript: list[dict[str, str]] | None) -> str | None:
     if not transcript:
         return None
     for msg in reversed(transcript):
         if msg.get("role") != "assistant":
             continue
         content = msg.get("content", "")
-        m = _CRAS_FROM_TEXT.search(content)
+        if not planning_thread_active(transcript):
+            continue
+        head = content.split("Outros CRAS")[0].split("Demais unidades")[0]
+        m = _RECOMMENDED_CRAS.search(head)
         if m:
-            return (m.group(1) or m.group(2) or "").strip()
-        m = re.search(r"\*\*CRAS\s+(\d{1,2})", content, re.I)
+            return m.group(1).strip()
+        m = _CRAS_HEAD.search(head)
         if m:
-            return m.group(1)
+            return m.group(1).strip()
     return None
 
 
 def _cras_label(num: str, nome: str) -> str:
     n = (num or "").strip()
     name = (nome or "").strip()
-    if n and name:
-        return f"CRAS {n} — {name}"
-    if n:
+    if not n:
+        return name or "CRAS sem referência"
+    if not name or re.fullmatch(rf"cras\s*{re.escape(n)}", name, re.I):
         return f"CRAS {n}"
-    return name or "CRAS sem referência"
+    if name.lower().startswith(f"cras {n}".lower()):
+        return name
+    return f"CRAS {n} — {name}"
 
 
 def _rank_cras_by_demand(
@@ -175,8 +155,8 @@ def try_planning_demand_metric(
     *,
     user_first_name: str = "",
 ) -> dict[str, Any] | None:
-    """Demanda potencial no CADU para planejar novo serviço (não usa matrícula SISC)."""
-    if not is_planning_demand(message, transcript):
+    """Demanda potencial no CADU para planejar novo SCFV (não matrícula SISC)."""
+    if not is_planning_turn(message, transcript):
         return None
     if not _table_exists(conn, "vig", "mvw_familia") or not _table_exists(conn, "vig", "mvw_pessoas"):
         return None
@@ -184,16 +164,16 @@ def try_planning_demand_metric(
     age_min, age_max = parse_age_range(message, transcript)
     faixa = f"{age_min} a {age_max} anos"
 
-    if _BAIRRO_IN_CRAS.search(message):
-        num_cras = _extract_cras_from_transcript(transcript)
+    if is_planning_followup(message, transcript) or _BAIRRO_IN_CRAS.search(message):
+        num_cras = _extract_recommended_cras(transcript)
         if not num_cras:
             return None
 
         top = _top_bairro_in_cras(conn, num_cras, age_min, age_max)
         if not top:
             answer = (
-                f"Não encontrei bairros com crianças/adolescentes de **{faixa}** "
-                f"no território do **CRAS {num_cras}**."
+                f"No território do **CRAS {num_cras}**, não encontrei crianças de **{faixa}** "
+                "com bairro territorializado no CADU."
             )
             return {
                 "answer": _prefix_name(user_first_name, answer),
@@ -207,10 +187,10 @@ def try_planning_demand_metric(
         bairro = str(top["bairro"])
         total = int(top["total"] or 0)
         templates = [
-            f"Dentro do **CRAS {num_cras}**, o bairro **{bairro}** concentra a maior demanda "
-            f"potencial: **{_fmt_int(total)}** crianças/adolescentes de **{faixa}** no CADU.",
-            f"No território do **CRAS {num_cras}**, eu indicaria o bairro **{bairro}** — "
-            f"**{_fmt_int(total)}** pessoas nessa faixa etária no cadastro.",
+            f"No **CRAS {num_cras}**, o bairro **{bairro}** concentra a maior demanda "
+            f"(**{_fmt_int(total)}** crianças de **{faixa}** no CADU).",
+            f"Dentro do **CRAS {num_cras}**, eu olharia o bairro **{bairro}** "
+            f"— **{_fmt_int(total)}** nessa faixa etária no cadastro.",
         ]
         answer = _prefix_name(user_first_name, _pick_variant(message, templates))
         sql = (
@@ -228,15 +208,12 @@ def try_planning_demand_metric(
             "metric": "planning_bairro_em_cras",
         }
 
-    if not (_CRAS_SUGGEST.search(message) or _PLANNING.search(message)):
+    if not (_CRAS_SUGGEST.search(message) or is_planning_turn(message, transcript)):
         return None
 
     rows = _rank_cras_by_demand(conn, age_min, age_max)
     if not rows:
-        answer = (
-            f"Não encontrei crianças/adolescentes de **{faixa}** territorializadas "
-            "no CADU para comparar CRAS."
-        )
+        answer = f"Não encontrei crianças de **{faixa}** territorializadas por CRAS no CADU."
         return {
             "answer": _prefix_name(user_first_name, answer),
             "sql": None,
@@ -253,23 +230,20 @@ def try_planning_demand_metric(
     rotulo = _cras_label(num, nome)
 
     templates = [
-        f"Para implantar um **novo Serviço de Convivência** para crianças de **{faixa}**, "
-        f"o **{rotulo}** é o mais indicado pelo CADU: **{_fmt_int(total)}** pessoas "
-        f"nessa faixa no território dele. Olhei **demanda potencial no cadastro**, "
-        f"não quem já está matriculado no SISC.",
-        f"Pelo CADU, eu sugeriria o **{rotulo}** — são **{_fmt_int(total)}** "
-        f"crianças/adolescentes de **{faixa}** no território. "
-        f"É demanda no cadastro, não matrícula atual no SISC.",
+        f"Para um **SCFV** de **{faixa}**, eu indicaria o **{rotulo}**: "
+        f"**{_fmt_int(total)}** crianças nessa faixa no território (CADU).",
+        f"Pelo CADU, o **{rotulo}** reúne a maior demanda — "
+        f"**{_fmt_int(total)}** crianças de **{faixa}** no território.",
     ]
     answer = _prefix_name(user_first_name, _pick_variant(message, templates))
 
-    if len(rows) > 1:
+    if wants_planning_ranking(message) and len(rows) > 1:
         others = [
             f"- **{_cras_label(str(r.get('num_cras') or ''), str(r.get('nom_cras') or ''))}**: "
             f"{_fmt_int(int(r.get('total') or 0))}"
             for r in rows[1:6]
         ]
-        answer += "\n\n**Outros CRAS (demanda no CADU):**\n" + "\n".join(others)
+        answer += "\n\n**Demais CRAS (CADU):**\n" + "\n".join(others)
 
     sql = (
         "SELECT btrim(f.num_cras), MAX(f.nom_cras), COUNT(p.cadu_row_id) "

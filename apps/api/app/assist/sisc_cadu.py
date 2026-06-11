@@ -52,23 +52,43 @@ def conversation_blob(message: str, transcript: list[dict[str, str]] | None) -> 
     return " ".join(parts)
 
 
-def is_sisc_context(message: str, transcript: list[dict[str, str]] | None) -> bool:
-    from .planning_metrics import is_planning_demand
+def user_messages_only(transcript: list[dict[str, str]] | None, message: str = "") -> str:
+    parts = [m.get("content", "") for m in (transcript or []) if m.get("role") == "user"]
+    if message:
+        parts.append(message)
+    return " ".join(parts)
 
-    if is_planning_demand(message, transcript):
+
+def is_sisc_context(message: str, transcript: list[dict[str, str]] | None) -> bool:
+    from .conversation_intent import is_planning_turn, user_asks_sisc_existing
+
+    if is_planning_turn(message, transcript):
         return False
-    blob = conversation_blob(message, transcript)
-    return bool(_SISC.search(message) or _SISC.search(blob))
+    if user_asks_sisc_existing(message, transcript):
+        return True
+    if _SISC.search(message) and not re.search(
+        r"implantar|novo\s+serv|scfv|suger|indic|demanda",
+        message,
+        re.I,
+    ):
+        return True
+    return bool(
+        _SISC.search(message)
+        and re.search(r"matriculad|atendid|quantos?\s+(?:atendid|matricul)", message, re.I)
+    )
 
 
 def wants_cras_breakdown(message: str, transcript: list[dict[str, str]] | None) -> bool:
-    blob = conversation_blob(message, transcript)
-    if _CRAS_BREAKDOWN.search(message) or _CRAS_BREAKDOWN.search(blob):
+    from .conversation_intent import is_planning_turn
+
+    if is_planning_turn(message, transcript):
+        return False
+    if _CRAS_BREAKDOWN.search(message):
         return True
     if _CRAS_RANKING.search(message):
         return True
-    # "qual CRAS …" com convivência/SISC no contexto
-    if _CRAS.search(message) and _SISC.search(blob) and re.search(
+    user_blob = user_messages_only(transcript, message)
+    if _CRAS.search(message) and _SISC.search(user_blob) and re.search(
         r"qual|mais|maior|atende|ranking", message, re.I
     ):
         return True
