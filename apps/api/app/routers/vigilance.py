@@ -610,7 +610,7 @@ def get_mapas_heatmap(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    """Mapas de calor: crianças (0–11) e idosos (60+) por bairro georreferenciado."""
+    """Mapas de calor por bairro georreferenciado (crianças, idosos, PBF, escolaridade)."""
     try:
         with db.bind.begin() as conn:
             return mapas_heatmap_from_views(conn, cras_cod, bairro)

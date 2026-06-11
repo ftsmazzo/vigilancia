@@ -2,14 +2,33 @@ import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
+export type HeatmapMetric =
+  | "criancas"
+  | "idosos"
+  | "familias_pbf"
+  | "adultos_sem_medio";
+
 export type HeatmapPonto = {
   bairro: string;
   num_cras: string;
   lat: number;
   lng: number;
+  familias: number;
   pessoas: number;
   criancas: number;
   idosos: number;
+  familias_pbf: number;
+  adultos_sem_medio: number;
+};
+
+export type HeatmapTotais = {
+  criancas: number;
+  idosos: number;
+  familias_pbf: number;
+  adultos_sem_medio: number;
+  pessoas: number;
+  familias: number;
+  bairros?: number;
 };
 
 export type HeatmapPayload = {
@@ -18,28 +37,50 @@ export type HeatmapPayload = {
   centro: [number, number];
   bounds?: [[number, number], [number, number]] | null;
   pontos: HeatmapPonto[];
+  totais_geo?: HeatmapTotais;
+  totais_cadu?: HeatmapTotais;
 };
-
-type Metric = "criancas" | "idosos";
 
 type Props = {
   mapa: HeatmapPayload;
-  metric: Metric;
+  metric: HeatmapMetric;
   titulo: string;
   subtitulo: string;
-  totalMetrica: number;
+  totalGeo: number;
+  totalCadu: number;
+  unidadeLabel: string;
 };
 
-function metricValue(p: HeatmapPonto, metric: Metric): number {
-  return metric === "criancas" ? p.criancas : p.idosos;
+const METRIC_TOOLTIP: Record<HeatmapMetric, string> = {
+  criancas: "crianças (0–11 anos)",
+  idosos: "idosos (60 anos ou mais)",
+  familias_pbf: "famílias na folha PBF",
+  adultos_sem_medio: "pessoas 18–59 sem ensino médio completo",
+};
+
+function metricValue(p: HeatmapPonto, metric: HeatmapMetric): number {
+  return p[metric];
 }
 
-/** Azul (baixo) → amarelo → vermelho (alto). */
-function heatColor(ratio: number): string {
+/** Transparente (baixo) → amarelo → laranja → vermelho (alto). */
+function heatStyle(ratio: number): { color: string; fillOpacity: number; radius: number } {
   const t = Math.min(1, Math.max(0, ratio));
-  const hue = 220 - t * 220;
-  const light = 38 + t * 12;
-  return `hsl(${hue}, 82%, ${light}%)`;
+
+  if (t <= 0) {
+    return { color: "#e63900", fillOpacity: 0, radius: 0 };
+  }
+
+  const hue = 48 - t * 48;
+  const sat = 78 + t * 18;
+  const light = 58 - t * 22;
+  const fillOpacity = 0.06 + Math.pow(t, 0.72) * 0.52;
+  const radius = 280 + Math.pow(t, 0.55) * 3200;
+
+  return {
+    color: `hsl(${hue}, ${sat}%, ${light}%)`,
+    fillOpacity,
+    radius,
+  };
 }
 
 export default function HeatmapTerritorialMap({
@@ -47,7 +88,9 @@ export default function HeatmapTerritorialMap({
   metric,
   titulo,
   subtitulo,
-  totalMetrica,
+  totalGeo,
+  totalCadu,
+  unidadeLabel,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -76,30 +119,22 @@ export default function HeatmapTerritorialMap({
       if (val <= 0) continue;
 
       const ratio = val / maxVal;
-      const color = heatColor(ratio);
-      const glowRadius = 350 + Math.sqrt(ratio) * 2200;
-      const markerR = 5 + Math.sqrt(ratio) * 14;
+      const style = heatStyle(ratio);
+      if (style.radius <= 0) continue;
 
       L.circle([p.lat, p.lng], {
-        radius: glowRadius,
-        color,
-        fillColor: color,
-        fillOpacity: 0.12 + ratio * 0.22,
+        radius: style.radius,
+        color: style.color,
+        fillColor: style.color,
+        fillOpacity: style.fillOpacity,
         weight: 0,
-      }).addTo(map);
-
-      L.circleMarker([p.lat, p.lng], {
-        radius: markerR,
-        color: color,
-        fillColor: color,
-        fillOpacity: 0.75,
-        weight: 1,
-        opacity: 0.9,
+        opacity: 0,
       })
         .bindTooltip(
           `<strong>${p.bairro}</strong><br/>` +
-            `${val.toLocaleString("pt-BR")} ${metric === "criancas" ? "crianças (0–11)" : "idosos (60+)"}<br/>` +
-            `${p.pessoas.toLocaleString("pt-BR")} pessoas no bairro` +
+            `${val.toLocaleString("pt-BR")} ${METRIC_TOOLTIP[metric]}<br/>` +
+            `${p.pessoas.toLocaleString("pt-BR")} pessoas · ` +
+            `${p.familias.toLocaleString("pt-BR")} famílias` +
             (p.num_cras ? `<br/>CRAS ${p.num_cras}` : ""),
           { sticky: true },
         )
@@ -117,6 +152,10 @@ export default function HeatmapTerritorialMap({
       mapRef.current = null;
     };
   }, [mapa, metric]);
+
+  const diff = totalCadu - totalGeo;
+  const cobertura =
+    totalCadu > 0 ? Math.round((1000 * totalGeo) / totalCadu) / 10 : 100;
 
   if (!mapa.disponivel) {
     return (
@@ -139,13 +178,23 @@ export default function HeatmapTerritorialMap({
           <h2>{titulo}</h2>
           <p>{subtitulo}</p>
         </div>
-        <strong className="mapas-heatmap-total">{totalMetrica.toLocaleString("pt-BR")}</strong>
+        <div className="mapas-heatmap-totals">
+          <strong className="mapas-heatmap-total">{totalGeo.toLocaleString("pt-BR")}</strong>
+          <span className="mapas-heatmap-ref">
+            de {totalCadu.toLocaleString("pt-BR")} {unidadeLabel} no CADU
+          </span>
+          {diff > 0 && (
+            <span className="mapas-heatmap-cobertura">
+              {cobertura}% georreferenciado · {diff.toLocaleString("pt-BR")} fora do mapa
+            </span>
+          )}
+        </div>
       </header>
       <div ref={ref} className="mapas-heatmap-canvas" aria-label={titulo} />
       <div className="mapas-heatmap-legend" aria-hidden>
-        <span>Menor</span>
+        <span>Baixa</span>
         <span className="mapas-heatmap-legend-bar" />
-        <span>Maior</span>
+        <span>Alta</span>
       </div>
     </article>
   );

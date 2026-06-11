@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import HeatmapTerritorialMap, { type HeatmapPayload } from "../components/HeatmapTerritorialMap";
+import HeatmapTerritorialMap, {
+  type HeatmapPayload,
+  type HeatmapTotais,
+} from "../components/HeatmapTerritorialMap";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -20,13 +23,19 @@ type BairroOption = {
 };
 
 type MapasPainel = HeatmapPayload & {
-  totais: {
-    criancas: number;
-    idosos: number;
-    pessoas: number;
-    bairros: number;
-  };
+  totais_geo: HeatmapTotais;
+  totais_cadu: HeatmapTotais;
   recorte: { cras_cod: string | null; bairro: string | null };
+};
+
+const emptyTotais: HeatmapTotais = {
+  criancas: 0,
+  idosos: 0,
+  familias_pbf: 0,
+  adultos_sem_medio: 0,
+  pessoas: 0,
+  familias: 0,
+  bairros: 0,
 };
 
 const emptyMapa: MapasPainel = {
@@ -34,7 +43,8 @@ const emptyMapa: MapasPainel = {
   mensagem: "Carregando…",
   centro: [-21.1775, -47.8103],
   pontos: [],
-  totais: { criancas: 0, idosos: 0, pessoas: 0, bairros: 0 },
+  totais_geo: emptyTotais,
+  totais_cadu: emptyTotais,
   recorte: { cras_cod: null, bairro: null },
 };
 
@@ -114,14 +124,17 @@ export default function MapasPage({ token }: Props) {
         ? `CRAS ${painel.recorte.cras_cod}`
         : "Município inteiro";
 
+  const geo = painel.totais_geo ?? emptyTotais;
+  const cadu = painel.totais_cadu ?? emptyTotais;
+
   return (
     <div className="mapas-page">
       <header className="mapas-hero fx-card">
         <div>
           <h1>Mapas territoriais</h1>
           <p className="mapas-hero-sub">
-            Mapas de calor por bairro — concentração de crianças (0–11 anos) e idosos (60 anos ou mais) no
-            território georreferenciado.
+            Mapas de calor por bairro georreferenciado. O valor em destaque considera apenas famílias com
+            coordenadas; abaixo dele, o total do CADU no mesmo recorte (como na Caracterização).
           </p>
         </div>
         <div className="mapas-hero-actions">
@@ -172,8 +185,8 @@ export default function MapasPage({ token }: Props) {
           {!loading && painel.disponivel && (
             <>
               {" · "}
-              {painel.totais.bairros.toLocaleString("pt-BR")} bairros ·{" "}
-              {painel.totais.pessoas.toLocaleString("pt-BR")} pessoas
+              {(geo.bairros ?? 0).toLocaleString("pt-BR")} bairros ·{" "}
+              {geo.pessoas.toLocaleString("pt-BR")} pessoas no mapa
             </>
           )}
         </p>
@@ -187,15 +200,37 @@ export default function MapasPage({ token }: Props) {
           mapa={painel}
           metric="criancas"
           titulo="Crianças (0–11 anos)"
-          subtitulo="Intensidade por bairro no recorte selecionado"
-          totalMetrica={painel.totais.criancas}
+          subtitulo="Intensidade relativa por bairro (centroide geo)"
+          totalGeo={geo.criancas}
+          totalCadu={cadu.criancas}
+          unidadeLabel="crianças"
         />
         <HeatmapTerritorialMap
           mapa={painel}
           metric="idosos"
           titulo="Idosos (60 anos ou mais)"
-          subtitulo="Intensidade por bairro no recorte selecionado"
-          totalMetrica={painel.totais.idosos}
+          subtitulo="Intensidade relativa por bairro (centroide geo)"
+          totalGeo={geo.idosos}
+          totalCadu={cadu.idosos}
+          unidadeLabel="idosos"
+        />
+        <HeatmapTerritorialMap
+          mapa={painel}
+          metric="familias_pbf"
+          titulo="Famílias com Bolsa Família"
+          subtitulo="Famílias na folha PBF (marc_pbf) por bairro georreferenciado"
+          totalGeo={geo.familias_pbf}
+          totalCadu={cadu.familias_pbf}
+          unidadeLabel="famílias PBF"
+        />
+        <HeatmapTerritorialMap
+          mapa={painel}
+          metric="adultos_sem_medio"
+          titulo="18–59 anos sem ensino médio completo"
+          subtitulo="Pessoas na faixa etária adulta sem grau 5 ou superior no CADU"
+          totalGeo={geo.adultos_sem_medio}
+          totalCadu={cadu.adultos_sem_medio}
+          unidadeLabel="pessoas"
         />
       </div>
     </div>

@@ -3412,12 +3412,33 @@ p.success {
   color: var(--fx-subtle);
 }
 
+.mapas-heatmap-totals {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.15rem;
+  text-align: right;
+  min-width: 0;
+}
+
 .mapas-heatmap-total {
   font-size: 1.35rem;
   font-weight: 800;
   color: #f0a060;
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+  line-height: 1.1;
+}
+
+.mapas-heatmap-ref {
+  font-size: 0.72rem;
+  color: var(--fx-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.mapas-heatmap-cobertura {
+  font-size: 0.68rem;
+  color: var(--fx-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .mapas-heatmap-canvas {
@@ -3452,7 +3473,14 @@ p.success {
   flex: 1;
   height: 8px;
   border-radius: 4px;
-  background: linear-gradient(90deg, hsl(220, 82%, 38%), hsl(60, 82%, 50%), hsl(0, 82%, 50%));
+  background: linear-gradient(
+    90deg,
+    rgba(255, 200, 80, 0.15) 0%,
+    hsl(48, 88%, 58%) 25%,
+    hsl(28, 92%, 52%) 55%,
+    hsl(8, 92%, 46%) 80%,
+    hsl(0, 88%, 40%) 100%
+  );
 }
 
 @media (max-width: 1100px) {
