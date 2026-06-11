@@ -54,12 +54,16 @@ type Props = {
 
 const HEAT_GRADIENT: Record<number, string> = {
   0.0: "rgba(255,255,255,0)",
-  0.12: "rgba(255,237,160,0.35)",
-  0.35: "rgba(254,178,76,0.55)",
-  0.58: "rgba(253,141,60,0.72)",
-  0.78: "rgba(240,59,32,0.85)",
-  1.0: "rgba(189,0,38,0.95)",
+  0.25: "rgba(255,237,160,0.10)",
+  0.5: "rgba(254,178,76,0.18)",
+  0.72: "rgba(253,141,60,0.26)",
+  0.88: "rgba(240,59,32,0.32)",
+  1.0: "rgba(189,0,38,0.38)",
 };
+
+/** Escala global do calor (~25% da intensidade anterior). */
+const HEAT_SCALE = 0.25;
+const HEAT_PERCENTILE = 92;
 
 function metricValue(p: HeatmapPonto, metric: HeatmapMetric): number {
   if (metric === "familias_pbf") return p.na_folha_pbf;
@@ -99,9 +103,16 @@ function convexHullLatLng(points: Array<{ lat: number; lng: number }>): [number,
   return [...lower, ...upper].map((p) => [p.lat, p.lng]);
 }
 
-function heatIntensity(weight: number, maxWeight: number): number {
-  if (weight <= 0 || maxWeight <= 0) return 0;
-  return Math.pow(weight / maxWeight, 0.65);
+function percentile(values: number[], p: number): number {
+  if (values.length === 0) return 1;
+  const sorted = [...values].sort((a, b) => a - b);
+  const idx = Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1);
+  return sorted[Math.max(0, idx)];
+}
+
+function heatIntensity(weight: number, refMax: number): number {
+  if (weight <= 0 || refMax <= 0) return 0;
+  return Math.pow(weight / refMax, 0.9) * HEAT_SCALE;
 }
 
 export default function HeatmapTerritorialMap({
@@ -126,13 +137,13 @@ export default function HeatmapTerritorialMap({
     }
 
     const weights = mapa.pontos.map((p) => metricValue(p, metric)).filter((w) => w > 0);
-    const maxWeight = Math.max(1, ...weights);
+    const refMax = weights.length > 0 ? Math.max(1, percentile(weights, HEAT_PERCENTILE)) : 1;
 
     const heatPoints: Array<[number, number, number]> = mapa.pontos
       .map((p) => {
         const w = metricValue(p, metric);
         if (w <= 0) return null;
-        return [p.lat, p.lng, heatIntensity(w, maxWeight)] as [number, number, number];
+        return [p.lat, p.lng, heatIntensity(w, refMax)] as [number, number, number];
       })
       .filter((p): p is [number, number, number] => p !== null);
 
@@ -159,11 +170,11 @@ export default function HeatmapTerritorialMap({
 
     if (heatPoints.length > 0) {
       L.heatLayer(heatPoints, {
-        radius: 28,
-        blur: 22,
+        radius: 18,
+        blur: 14,
         maxZoom: 17,
         max: 1,
-        minOpacity: 0.28,
+        minOpacity: 0.05,
         gradient: HEAT_GRADIENT,
       }).addTo(map);
     }

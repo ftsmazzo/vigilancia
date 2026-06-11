@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import HeatmapTerritorialMap, {
   type HeatmapPayload,
@@ -6,6 +6,7 @@ import HeatmapTerritorialMap, {
 } from "../components/HeatmapTerritorialMap";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+const FILTER_DEBOUNCE_MS = 350;
 
 type Props = {
   token: string;
@@ -49,14 +50,16 @@ const emptyMapa: MapasPainel = {
 };
 
 export default function MapasPage({ token }: Props) {
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [painel, setPainel] = useState<MapasPainel>(emptyMapa);
   const [catalog, setCatalog] = useState<CrasOption[]>([]);
   const [bairrosOptions, setBairrosOptions] = useState<BairroOption[]>([]);
-  const [loadingBairros, setLoadingBairros] = useState(false);
+  const [loadingBairros, setLoadingBairros] = useState(true);
   const [crasCod, setCrasCod] = useState("__todos__");
   const [bairroFiltro, setBairroFiltro] = useState("");
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     fetch(`${API_URL}/api/v1/cras/catalog`, {
@@ -71,13 +74,8 @@ export default function MapasPage({ token }: Props) {
   }, [token]);
 
   useEffect(() => {
-    setBairroFiltro("");
-    if (!crasCod || crasCod === "__todos__" || crasCod === "__sem_cras__") {
-      setBairrosOptions([]);
-      return;
-    }
     setLoadingBairros(true);
-    fetch(`${API_URL}/api/v1/cras/bairros?num_cras=${encodeURIComponent(crasCod)}`, {
+    fetch(`${API_URL}/api/v1/vigilance/mapas-bairros`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then(async (res) => {
@@ -87,10 +85,10 @@ export default function MapasPage({ token }: Props) {
       })
       .catch(() => setBairrosOptions([]))
       .finally(() => setLoadingBairros(false));
-  }, [token, crasCod]);
+  }, [token]);
 
   const loadPainel = useCallback(async () => {
-    setLoading(true);
+    setRefreshing(true);
     setError("");
     try {
       const params = new URLSearchParams();
@@ -107,22 +105,27 @@ export default function MapasPage({ token }: Props) {
       setPainel(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro ao carregar mapas.");
-      setPainel(emptyMapa);
+      if (initialLoading) setPainel(emptyMapa);
     } finally {
-      setLoading(false);
+      setRefreshing(false);
+      setInitialLoading(false);
     }
-  }, [token, crasCod, bairroFiltro]);
+  }, [token, crasCod, bairroFiltro, initialLoading]);
 
   useEffect(() => {
-    void loadPainel();
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      void loadPainel();
+    }, FILTER_DEBOUNCE_MS);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
   }, [loadPainel]);
 
-  const recorteLabel =
-    painel.recorte.bairro != null
-      ? painel.recorte.bairro
-      : painel.recorte.cras_cod != null
-        ? `CRAS ${painel.recorte.cras_cod}`
-        : "Município inteiro";
+  const recorteParts: string[] = [];
+  if (painel.recorte.bairro) recorteParts.push(painel.recorte.bairro);
+  if (painel.recorte.cras_cod) recorteParts.push(`CRAS ${painel.recorte.cras_cod}`);
+  const recorteLabel = recorteParts.length > 0 ? recorteParts.join(" · ") : "Município inteiro";
 
   const geo = painel.totais_geo ?? emptyTotais;
   const cadu = painel.totais_cadu ?? emptyTotais;
@@ -135,8 +138,8 @@ export default function MapasPage({ token }: Props) {
         <div>
           <h1>Mapas territoriais</h1>
           <p className="mapas-hero-sub">
-            Calor contínuo a partir das coordenadas reais das famílias georreferenciadas — sem bolhas por CRAS.
-            Ao filtrar CRAS ou bairro, o contorno da região é destacado de forma orgânica.
+            Filtros de CRAS e bairro são independentes. O calor usa as coordenadas reais das famílias
+            georreferenciadas.
           </p>
         </div>
         <div className="mapas-hero-actions">
@@ -165,14 +168,10 @@ export default function MapasPage({ token }: Props) {
             <select
               value={bairroFiltro}
               onChange={(e) => setBairroFiltro(e.target.value)}
-              disabled={crasCod === "__todos__" || crasCod === "__sem_cras__" || loadingBairros}
+              disabled={loadingBairros}
             >
               <option value="">
-                {crasCod === "__todos__" || crasCod === "__sem_cras__"
-                  ? "Selecione um CRAS"
-                  : loadingBairros
-                    ? "Carregando…"
-                    : "Todos os bairros do CRAS"}
+                {loadingBairros ? "Carregando bairros…" : "Todos os bairros"}
               </option>
               {bairrosOptions.map((b) => (
                 <option key={b.bairro} value={b.bairro}>
@@ -184,7 +183,8 @@ export default function MapasPage({ token }: Props) {
         </div>
         <p className="mapas-recorte-label">
           Recorte: <strong>{recorteLabel}</strong>
-          {!loading && painel.disponivel && (
+          {refreshing && <span className="mapas-refresh-hint"> · Atualizando…</span>}
+          {!initialLoading && painel.disponivel && !refreshing && (
             <>
               {" · "}
               {(geo.bairros ?? 0).toLocaleString("pt-BR")} bairros ·{" "}
@@ -195,50 +195,54 @@ export default function MapasPage({ token }: Props) {
       </section>
 
       {error && <p className="error-msg">{error}</p>}
-      {loading && !painel.disponivel && !error && <p className="loading-msg">Carregando mapas…</p>}
+      {initialLoading && !painel.disponivel && !error && (
+        <p className="loading-msg">Carregando mapas…</p>
+      )}
 
-      <div className="mapas-grid">
-        <HeatmapTerritorialMap
-          mapa={painel}
-          metric="criancas"
-          titulo="Crianças (0–11 anos)"
-          subtitulo="Densidade por coordenada familiar (0–11 anos)"
-          totalGeo={geo.criancas}
-          totalCadu={cadu.criancas}
-          unidadeLabel="crianças"
-          destacarRecorte={destacarRecorte}
-        />
-        <HeatmapTerritorialMap
-          mapa={painel}
-          metric="idosos"
-          titulo="Idosos (60 anos ou mais)"
-          subtitulo="Densidade por coordenada familiar (60+ anos)"
-          totalGeo={geo.idosos}
-          totalCadu={cadu.idosos}
-          unidadeLabel="idosos"
-          destacarRecorte={destacarRecorte}
-        />
-        <HeatmapTerritorialMap
-          mapa={painel}
-          metric="familias_pbf"
-          titulo="Famílias com Bolsa Família"
-          subtitulo="Famílias na folha PBF (marc_pbf) por coordenada"
-          totalGeo={geo.familias_pbf}
-          totalCadu={cadu.familias_pbf}
-          unidadeLabel="famílias PBF"
-          destacarRecorte={destacarRecorte}
-        />
-        <HeatmapTerritorialMap
-          mapa={painel}
-          metric="adultos_sem_medio"
-          titulo="18–59 anos sem ensino médio completo"
-          subtitulo="Pessoas adultas sem grau 5 ou superior no CADU"
-          totalGeo={geo.adultos_sem_medio}
-          totalCadu={cadu.adultos_sem_medio}
-          unidadeLabel="pessoas"
-          destacarRecorte={destacarRecorte}
-        />
-      </div>
+      {!initialLoading && (
+        <div className={`mapas-grid${refreshing ? " mapas-grid--refreshing" : ""}`}>
+          <HeatmapTerritorialMap
+            mapa={painel}
+            metric="criancas"
+            titulo="Crianças (0–11 anos)"
+            subtitulo="Densidade por coordenada familiar (0–11 anos)"
+            totalGeo={geo.criancas}
+            totalCadu={cadu.criancas}
+            unidadeLabel="crianças"
+            destacarRecorte={destacarRecorte}
+          />
+          <HeatmapTerritorialMap
+            mapa={painel}
+            metric="idosos"
+            titulo="Idosos (60 anos ou mais)"
+            subtitulo="Densidade por coordenada familiar (60+ anos)"
+            totalGeo={geo.idosos}
+            totalCadu={cadu.idosos}
+            unidadeLabel="idosos"
+            destacarRecorte={destacarRecorte}
+          />
+          <HeatmapTerritorialMap
+            mapa={painel}
+            metric="familias_pbf"
+            titulo="Famílias com Bolsa Família"
+            subtitulo="Famílias na folha PBF (marc_pbf) por coordenada"
+            totalGeo={geo.familias_pbf}
+            totalCadu={cadu.familias_pbf}
+            unidadeLabel="famílias PBF"
+            destacarRecorte={destacarRecorte}
+          />
+          <HeatmapTerritorialMap
+            mapa={painel}
+            metric="adultos_sem_medio"
+            titulo="18–59 anos sem ensino médio completo"
+            subtitulo="Pessoas adultas sem grau 5 ou superior no CADU"
+            totalGeo={geo.adultos_sem_medio}
+            totalCadu={cadu.adultos_sem_medio}
+            unidadeLabel="pessoas"
+            destacarRecorte={destacarRecorte}
+          />
+        </div>
+      )}
     </div>
   );
 }

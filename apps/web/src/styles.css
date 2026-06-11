@@ -3381,6 +3381,17 @@ p.success {
   color: var(--fx-subtle);
 }
 
+.mapas-refresh-hint {
+  color: var(--fx-muted);
+  font-style: italic;
+}
+
+.mapas-grid--refreshing {
+  opacity: 0.72;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
 .mapas-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

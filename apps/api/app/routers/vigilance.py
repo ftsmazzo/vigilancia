@@ -18,7 +18,7 @@ from ..vigilance.familia_mview import (
     refresh_familia_mview,
 )
 from ..vigilance.home_painel import home_painel_from_views, mapa_territorial_from_views
-from ..vigilance.mapas import mapas_heatmap_from_views
+from ..vigilance.mapas import bairros_geo_catalog_from_views, mapas_heatmap_from_views
 from ..vigilance.observatorio_painel import observatorio_painel_from_views
 from ..vigilance.pessoas_mview import refresh_pessoas_mview
 
@@ -601,6 +601,25 @@ def get_mapa_territorial(
     """Mapa de famílias por coordenada (geo) colorido por CRAS territorial."""
     with db.bind.begin() as conn:
         return mapa_territorial_from_views(conn)
+
+
+@router.get("/mapas-bairros")
+def get_mapas_bairros(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Bairros georreferenciados (lista única, independente de CRAS)."""
+    try:
+        with db.bind.begin() as conn:
+            items = bairros_geo_catalog_from_views(conn)
+        return {"items": items}
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Falha ao listar bairros: {exc}",
+        ) from exc
 
 
 @router.get("/mapas-heatmap")
