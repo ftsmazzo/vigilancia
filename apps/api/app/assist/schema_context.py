@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from ..municipio_context import load_context_prompt
 from ..vigilance.familia_mview import _table_exists
 from .dictionary import build_dictionary_prompt
+from .geo_territorial import build_geo_territorial_hint
 
 CATALOG_STATIC = """
 ## Fonte verdade e medidas (modelo VigSocial)
@@ -81,6 +82,7 @@ Conversas em sequência ("dessas crianças… depois por CRAS"): mantenha filtro
 - Use COUNT(DISTINCT f.codigo_familiar) para contar famílias.
 - Use COUNT(p.cadu_row_id) ou COUNT(*) em pessoas para contar indivíduos.
 - CRAS territorial (família): f.num_cras, f.nom_cras — fonte geo via CEP (não use num_cras_cadu salvo auditoria).
+- **Bairro territorial**: f.bairro (geo via CEP); f.bairro_cadu só para auditoria. Filtro: ILIKE parcial.
 - CRAS no SISC (atendimento convivência): s.cras_codigo, s.cras_nome — use para "dividir por CRAS" após pergunta sobre SISC.
 - Desdobramento por CRAS territorial: GROUP BY f.num_cras, f.nom_cras; ORDER BY num_cras numérico 1→12; NULL/sem geo por último.
 - CRAS 9 = Bonfim Paulista. Informe famílias sem num_cras como sem referência territorial.
@@ -109,6 +111,10 @@ def build_schema_context(conn: Connection, db: Session | None = None) -> str:
             parts.append("\n" + dict_block)
     except Exception:
         pass
+
+    geo_hint = build_geo_territorial_hint(conn)
+    if geo_hint:
+        parts.append("\n" + geo_hint)
 
     if db is not None:
         try:

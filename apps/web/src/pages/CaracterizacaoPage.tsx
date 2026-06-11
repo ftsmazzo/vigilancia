@@ -166,8 +166,6 @@ export default function CaracterizacaoPage({ token }: Props) {
           </p>
           <p className="caract-meta">{painel?.fonte}</p>
           <p className="caract-link">
-            <Link to="/cras">Painel quantitativo por CRAS</Link>
-            {" · "}
             <Link to="/ivs">Índice de vulnerabilidade (IVS)</Link>
           </p>
         </div>

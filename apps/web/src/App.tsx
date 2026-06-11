@@ -5,7 +5,6 @@ import {
   Database, 
   Activity, 
   Users, 
-  MapPin, 
   PieChart, 
   Sparkles, 
   Building, 
@@ -20,7 +19,6 @@ import PainelIndicadoresInicio from "./pages/PainelIndicadoresInicio";
 import PainelObservatorioMds from "./pages/PainelObservatorioMds";
 import UsuariosPage from "./pages/UsuariosPage";
 import ConvivenciaPage from "./pages/ConvivenciaPage";
-import CrasPage from "./pages/CrasPage";
 import AssistPage from "./pages/AssistPage";
 import MunicipioPage from "./pages/MunicipioPage";
 import CaracterizacaoPage from "./pages/CaracterizacaoPage";
@@ -105,14 +103,6 @@ function AppShell({
               <Gauge className="nav-icon" size={18} />
               <span>IVS</span>
             </NavLink>
-            <NavLink to="/convivencia" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-              <Users className="nav-icon" size={18} />
-              <span>Convivência</span>
-            </NavLink>
-            <NavLink to="/cras" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-              <MapPin className="nav-icon" size={18} />
-              <span>CRAS</span>
-            </NavLink>
             <NavLink to="/assistente" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
               <Sparkles className="nav-icon" size={18} />
               <span>Assistente</span>
@@ -121,6 +111,12 @@ function AppShell({
 
           <div className="shell-nav-group shell-nav-group--admin">
             <span className="shell-nav-group-label">Administração</span>
+            {me?.role === "superadmin" && (
+              <NavLink to="/convivencia" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+                <Users className="nav-icon" size={18} />
+                <span>Convivência</span>
+              </NavLink>
+            )}
             <NavLink to="/ingestao" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
               <Database className="nav-icon" size={18} />
               <span>Ingestão</span>
@@ -455,26 +451,19 @@ export default function App() {
             path="/convivencia"
             element={
               token ? (
-                <AppShell loadingMe={loadingMe} me={me} onLogout={handleLogout}>
-                  <ConvivenciaPage token={token} />
-                </AppShell>
+                me?.role === "superadmin" ? (
+                  <AppShell loadingMe={loadingMe} me={me} onLogout={handleLogout}>
+                    <ConvivenciaPage token={token} />
+                  </AppShell>
+                ) : (
+                  <Navigate to="/" replace />
+                )
               ) : (
                 <Navigate to="/" replace />
               )
             }
           />
-          <Route
-            path="/cras"
-            element={
-              token ? (
-                <AppShell loadingMe={loadingMe} me={me} onLogout={handleLogout}>
-                  <CrasPage token={token} />
-                </AppShell>
-              ) : (
-                <Navigate to="/" replace />
-              )
-            }
-          />
+          <Route path="/cras" element={<Navigate to="/caracterizacao" replace />} />
           <Route
             path="/assistente"
             element={

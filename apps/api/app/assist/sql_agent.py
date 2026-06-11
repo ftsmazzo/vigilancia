@@ -15,6 +15,8 @@ from sqlalchemy.orm import Session
 
 from .cras_breakdown import format_cras_breakdown_answer, format_cras_breakdown_summary, is_cras_breakdown
 from .llm import AssistLlmError, chat_completion
+from .dictionary import build_dictionary_prompt
+from .geo_territorial import build_geo_territorial_hint
 from .schema_context import CATALOG_STATIC
 from .schema_introspection import build_live_schema_markdown
 from .sql_guard import SqlGuardError, wrap_limit
@@ -39,6 +41,11 @@ Regras obrigatórias:
 - SISC / convivência: vig.mvw_sisc_qualificado (s), NÃO p.ind_atend_cras.
 - SISC vinculado ao CADU: s.classificacao_vinculo = 'vinculado_cadu'.
 - CRAS territorial CADU: f.num_cras, f.nom_cras. CRAS do SISC: s.cras_codigo, s.cras_nome.
+- **Bairro territorial (geo)**: f.bairro via CEP × raw.geo__tbl_geo (f.tem_geo). NUNCA filtre f.bairro_cadu salvo pedido explícito de "bairro no CADU".
+- Filtro por bairro: btrim(f.bairro::text) ILIKE '%termo%' (parcial, case-insensitive). Ex.: bairro Campos Elíseos → ILIKE '%Campos Elíseos%'.
+- Filtro por CRAS territorial: btrim(f.num_cras::text) = '1' (texto '1' a '12').
+- Bairros distintos: COUNT(DISTINCT btrim(f.bairro::text)) WHERE btrim(f.bairro::text) <> ''.
+- CRAS distintos: COUNT(DISTINCT btrim(f.num_cras::text)) WHERE btrim(f.num_cras::text) <> ''.
 - Desdobramento por CRAS (CADU): GROUP BY f.num_cras, f.nom_cras; ORDER BY num_cras numérico 1→12 (NULL por último).
 - CRAS 9 = Bonfim Paulista. Famílias com num_cras vazio/null = sem referência territorial (informe aparte).
 - Preferir agregações (COUNT, SUM) em vez de listar linhas.
@@ -119,6 +126,9 @@ def _build_sql_context(conn: Connection, db: Session | None) -> str:
         CATALOG_STATIC.strip(),
         build_live_schema_markdown(conn),
     ]
+    geo_hint = build_geo_territorial_hint(conn)
+    if geo_hint:
+        parts.append(geo_hint)
     try:
         block = build_dictionary_prompt()
         if block:

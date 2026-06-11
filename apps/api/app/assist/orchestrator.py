@@ -246,6 +246,8 @@ def run_orchestrator_turn(
                 user,
                 municipio_block,
             )
+        elif canonical.get("metric", "").startswith("geo_"):
+            answer = _personalize_canonical(answer, user)
         elif canonical.get("source") == "vig.mvw_sisc_qualificado":
             answer = _personalize_canonical(answer, user)
         return {

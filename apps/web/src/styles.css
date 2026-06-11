@@ -2850,7 +2850,9 @@ p.success {
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  max-width: 960px;
+  width: 100%;
+  max-width: none;
+  margin: 0;
 }
 
 .ivs-hero {
@@ -2864,15 +2866,15 @@ p.success {
 
 .ivs-hero h1 {
   margin: 0 0 0.35rem;
-  font-size: 1.35rem;
+  font-size: 1.65rem;
 }
 
 .ivs-hero-sub {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   color: var(--fx-muted);
   line-height: 1.5;
-  max-width: 42rem;
+  max-width: none;
 }
 
 .ivs-hero-actions {
@@ -2886,23 +2888,25 @@ p.success {
 }
 
 .ivs-filtros-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem 1rem;
-  align-items: flex-end;
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 1rem;
+  align-items: end;
 }
 
 .ivs-filtros label {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
-  min-width: 220px;
-  flex: 1;
+  gap: 0.35rem;
+  min-width: 0;
 }
 
 .ivs-filtros label span {
-  font-size: 0.8rem;
-  color: var(--fx-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fx-subtle);
 }
 
 .ivs-filtros select,
@@ -2978,7 +2982,7 @@ p.success {
 
 .ivs-overview {
   display: grid;
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: minmax(260px, 300px) 1fr;
   gap: 1rem;
   align-items: start;
 }
@@ -3213,6 +3217,10 @@ p.success {
 }
 
 @media (max-width: 768px) {
+  .ivs-filtros-grid {
+    grid-template-columns: 1fr;
+  }
+
   .ivs-universo {
     grid-template-columns: 1fr;
   }

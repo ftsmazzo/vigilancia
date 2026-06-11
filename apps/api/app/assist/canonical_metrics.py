@@ -12,6 +12,7 @@ from .cras_breakdown import (
     format_cras_breakdown_answer,
     sort_cras_rows,
 )
+from .geo_territorial import try_geo_territorial_metric
 from .sisc_cadu import run_sisc_cadu_query
 
 _FOLHA_PBF = re.compile(
@@ -140,6 +141,10 @@ def try_canonical_metric(
     sisc = _try_sisc_cross(conn, message, transcript)
     if sisc:
         return sisc
+
+    geo = try_geo_territorial_metric(conn, message, transcript)
+    if geo:
+        return geo
 
     cadu_cras = _try_cadu_familias_por_cras(conn, message, transcript)
     if cadu_cras:
