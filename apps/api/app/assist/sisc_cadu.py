@@ -53,6 +53,10 @@ def conversation_blob(message: str, transcript: list[dict[str, str]] | None) -> 
 
 
 def is_sisc_context(message: str, transcript: list[dict[str, str]] | None) -> bool:
+    from .planning_metrics import is_planning_demand
+
+    if is_planning_demand(message, transcript):
+        return False
     blob = conversation_blob(message, transcript)
     return bool(_SISC.search(message) or _SISC.search(blob))
 

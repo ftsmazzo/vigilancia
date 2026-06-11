@@ -18,7 +18,9 @@ from .bairro_resolver import (
     _term_differs,
     extract_location_term,
     format_bairro_disambiguation,
+    is_valid_bairro_term,
     resolve_bairro,
+    should_resolve_bairro,
 )
 
 _IVS = re.compile(
@@ -39,11 +41,16 @@ _CRAS_NUM = re.compile(r"\bcras\s*(\d{1,2})\b", re.I)
 
 _TERR_BAIRRO = re.compile(
     r"(?:"
-    r"(?:índice|indice|ivs|ivcad|dimens[aã]o|nc|dpi|dca|tqa|dr|ch).*?"
-    r"\b(?:do|da|de|no|na|em)\s+(?!cras\b)([A-Za-zÀ-ú][A-Za-zÀ-ú0-9\s'\-]{2,}?)(?:\?|\.|$)|"
     r"\bbairro\s+(.+?)(?:\?|\.|$)|"
-    r"\b(?:no|na|em)\s+bairro\s+(.+?)(?:\?|\.|$)"
+    r"(?:no|do|da|de)\s+bairro\s+(.+?)(?:\?|\.|$)"
     r")",
+    re.I,
+)
+
+_TERR_TRAILING = re.compile(
+    r"\b(?:do|da|de)\s+(?!nc\b|dpi\b|dca\b|tqa\b|dr\b|ch\b|cras\b|"
+    r"índice|indice|ivs|ivcad|dimens[aã]o\b)"
+    r"([A-Za-zÀ-ú][A-Za-zÀ-ú0-9\s'\-]{3,}?)(?:\?|\.|$)",
     re.I,
 )
 
@@ -74,15 +81,27 @@ def _clean_territory_term(term: str) -> str:
 
 
 def extract_ivs_territory(message: str) -> str | None:
-    term = extract_location_term(message)
-    if term:
-        return term
-    match = _TERR_BAIRRO.search(message.strip())
+    text_msg = message.strip()
+
+    match = _TERR_BAIRRO.search(text_msg)
     if match:
         raw = next(g for g in match.groups() if g)
         cleaned = _clean_territory_term(raw)
-        if len(cleaned) >= 2:
+        if is_valid_bairro_term(cleaned):
             return cleaned
+
+    term = extract_location_term(text_msg)
+    if term:
+        return term
+
+    trailing: list[str] = []
+    for match in _TERR_TRAILING.finditer(text_msg):
+        cleaned = _clean_territory_term(match.group(1))
+        if is_valid_bairro_term(cleaned):
+            trailing.append(cleaned)
+    if trailing:
+        return trailing[-1]
+
     return None
 
 
@@ -322,7 +341,7 @@ def try_ivs_metric(
     bairro_canon: str | None = None
     resolution = None
     term = extract_ivs_territory(text_msg)
-    if term and not num_cras:
+    if term and not num_cras and should_resolve_bairro(text_msg, term):
         resolution = resolve_bairro(conn, term)
         if resolution.status == "multiple":
             return {

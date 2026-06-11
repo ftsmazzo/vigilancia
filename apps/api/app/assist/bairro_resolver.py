@@ -28,22 +28,32 @@ _OPTION_LINE = re.compile(r"^(\d+)\.\s+\*\*([^*]+)\*\*", re.M)
 _CHOICE_NUM = re.compile(r"^(?:op[cç][ãa]o\s+)?(\d+)\.?$", re.I)
 _CRAS_IN_TERM = re.compile(r"\bcras\b|\bcras\s*\d", re.I)
 
+_IVS_DIM_SIGLAS = frozenset({"nc", "dpi", "dca", "tqa", "dr", "ch"})
+_BAIRRO_STOPWORDS = frozenset({
+    "consideracao", "consideração", "geral", "relacao", "relação", "mente",
+    "vista", "funcao", "função", "termos", "sentido", "base", "acordo",
+    "funcao", "parte", "caso", "forma", "modo", "todo", "toda", "todos",
+    "novo", "nova", "servico", "serviço", "convivencia", "convivência",
+})
+
 _LOCATION_PATTERNS = (
     re.compile(
+        r"(?:no|do|da|de)\s+bairro\s+(.+?)(?:\?|\.|$)",
+        re.I,
+    ),
+    re.compile(
+        r"\bbairro\s+(.+?)(?:\?|\.|$)",
+        re.I,
+    ),
+    re.compile(
         r"(?:crianças?|crianca|idosos?|pessoas?|fam[ií]lias?|mulheres|homens?)"
-        r".*?\b(?:no|na|em)\s+(.+?)(?:\?|\.|$)",
+        r".*?\b(?:no|na|em)\s+bairro\s+(.+?)(?:\?|\.|$)",
         re.I,
     ),
     re.compile(
-        r"(?:no|do|da)\s+bairro\s+(.+?)(?:\?|\.|$)",
-        re.I,
-    ),
-    re.compile(
-        r"bairro\s+(.+?)(?:\?|\.|$)",
-        re.I,
-    ),
-    re.compile(
-        r"\b(?:no|na|em)\s+([A-Za-zÀ-ú][A-Za-zÀ-ú0-9\s'\-]{2,}?)(?:\?|\.|$)",
+        r"(?:crianças?|crianca|idosos?|pessoas?|fam[ií]lias?|mulheres|homens?)"
+        r".*?\b(?:no|na|em)\s+(?!bairro\b|cras\b|conviv|considera|geral|rela|mente\b|"
+        r"funcao|função|servi[cç]o|novo\b|nova\b)([A-Za-zÀ-ú][A-Za-zÀ-ú0-9\s'\-]{3,}?)(?:\?|\.|$)",
         re.I,
     ),
 )
@@ -157,6 +167,46 @@ class BairroPreprocess:
     early_response: dict[str, Any] | None = None
 
 
+def is_valid_bairro_term(term: str) -> bool:
+    cleaned = _clean_term(term)
+    if len(cleaned) < 3:
+        return False
+    folded = _fold(cleaned)
+    if folded in _IVS_DIM_SIGLAS:
+        return False
+    if folded in _BAIRRO_STOPWORDS:
+        return False
+    first = folded.split()[0]
+    if first in _IVS_DIM_SIGLAS or first in _BAIRRO_STOPWORDS:
+        return False
+    if _CRAS_IN_TERM.search(cleaned):
+        return False
+    return True
+
+
+def message_has_territorial_intent(message: str) -> bool:
+    text_msg = message.strip()
+    if re.search(r"\bbairro\b", text_msg, re.I):
+        return True
+    term = extract_location_term(text_msg)
+    return bool(term and is_valid_bairro_term(term))
+
+
+def should_resolve_bairro(message: str, term: str | None) -> bool:
+    if not term or not is_valid_bairro_term(term):
+        return False
+    if re.search(r"\bbairro\b", message, re.I):
+        return True
+    if re.search(
+        r"\b(?:índice|indice|ivs|ivcad|quantas?|quantos?|pessoas?|fam[ií]lias?|"
+        r"crianças?|crianca|idosos?)\b",
+        message,
+        re.I,
+    ):
+        return True
+    return False
+
+
 def extract_location_term(message: str) -> str | None:
     text_msg = message.strip()
     for pattern in _LOCATION_PATTERNS:
@@ -164,7 +214,7 @@ def extract_location_term(message: str) -> str | None:
         if not match:
             continue
         term = _clean_term(match.group(1) or "")
-        if len(term) >= 2 and not _CRAS_IN_TERM.search(term):
+        if is_valid_bairro_term(term):
             return term
     return None
 
@@ -401,8 +451,12 @@ def apply_bairro_correction_to_answer(
     answer: str,
     resolution: BairroResolution | None,
     user_first_name: str = "",
+    *,
+    message: str = "",
 ) -> str:
-    """Mantém respostas já nomeadas; evita nota robótica separada."""
+    """Incorpora bairro resolvido só quando a pergunta tinha intenção territorial."""
+    if message and not message_has_territorial_intent(message):
+        return answer
     if not resolution or not resolution.canonical or not _term_differs(resolution):
         return answer
     if f"**{resolution.canonical}**" in answer:
@@ -451,6 +505,9 @@ def try_parse_bairro_choice(message: str, transcript: list[dict[str, str]] | Non
         if transcript[idx].get("role") == "user":
             original_user = transcript[idx].get("content", "").strip()
             break
+
+    if original_user and not should_resolve_bairro(original_user, extract_location_term(original_user)):
+        return None
 
     chosen: str | None = None
     num_match = _CHOICE_NUM.match(text_msg)
@@ -515,7 +572,7 @@ def try_pessoas_bairro_metric(
         return None
 
     term = extract_location_term(message)
-    if not term:
+    if not term or not should_resolve_bairro(message, term):
         return None
 
     resolution = resolve_bairro(conn, term)
@@ -575,7 +632,7 @@ def preprocess_bairro_turn(
         )
 
     term = extract_location_term(message)
-    if not term:
+    if not term or not should_resolve_bairro(message, term):
         return BairroPreprocess(message=message)
 
     resolution = resolve_bairro(conn, term)

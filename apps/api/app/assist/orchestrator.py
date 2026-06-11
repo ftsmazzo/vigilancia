@@ -14,10 +14,12 @@ from ..municipio_context import load_context_prompt
 from .cras_breakdown import format_cras_breakdown_answer
 from .bairro_resolver import (
     apply_bairro_correction_to_answer,
+    message_has_territorial_intent,
     preprocess_bairro_turn,
     resolve_bairro,
     extract_location_term,
     format_bairro_disambiguation,
+    should_resolve_bairro,
     try_pessoas_bairro_metric,
 )
 from .canonical_metrics import try_canonical_metric
@@ -37,7 +39,8 @@ Analise a mensagem atual e o histórico da conversa.
 **mode = "data"** quando:
 - O usuário pede quantidade, total, percentual, listagem agregada
 - Perguntas sobre CADU, PBF, SISC, CRAS, famílias, pessoas, renda, deficiência, **IVS/IVCAD (índices de vulnerabilidade)**, etc.
-- Follow-up numérico ("dessas", "entre elas", "e quantas têm...") — reformule com o contexto anterior
+- **Planejamento** (implantar novo serviço, qual CRAS indicar por demanda no CADU) — use CADU territorial, NÃO matrícula SISC existente
+- Follow-up numérico ("dessas", "entre elas", "e quantas têm...") — reformule com o contexto anterior, sem arrastar bairro de turnos anteriores se a pergunta mudou de assunto
 
 Quando mode = "data", preencha sql_question com UM pedido claro para o AgenteSQL:
 - Objetivo, sem instruções de SQL
@@ -309,12 +312,16 @@ def run_orchestrator_turn(
             answer = _personalize_canonical(answer, user)
         elif canonical.get("metric", "").startswith("ivs_"):
             pass
+        elif canonical.get("metric", "").startswith("planning_"):
+            pass
         elif canonical.get("mode") == "disambiguation":
             answer = _personalize_canonical(answer, user)
         elif canonical.get("source") == "vig.mvw_sisc_qualificado":
             answer = _personalize_canonical(answer, user)
         if canonical.get("mode") != "disambiguation":
-            answer = apply_bairro_correction_to_answer(answer, bairro_resolution, first_name)
+            answer = apply_bairro_correction_to_answer(
+                answer, bairro_resolution, first_name, message=message
+            )
         return {
             "answer": _trim_answer_boilerplate(answer),
             "sql": canonical.get("sql"),
@@ -336,7 +343,11 @@ def run_orchestrator_turn(
         }
 
     sql_question = plan.get("sql_question") or message.strip()
-    if bairro_resolution and bairro_resolution.canonical:
+    if (
+        bairro_resolution
+        and bairro_resolution.canonical
+        and message_has_territorial_intent(message)
+    ):
         sql_question = (
             f"{sql_question}\n\n"
             f"[Bairro territorial confirmado: {bairro_resolution.canonical}. "
@@ -348,7 +359,7 @@ def run_orchestrator_turn(
         answer = _cras_answer_with_context(sql_result.rows, user, municipio_block)
     elif sql_result.ok and sql_result.row_count == 0:
         term = extract_location_term(message)
-        if term:
+        if term and should_resolve_bairro(message, term):
             resolution = resolve_bairro(conn, term)
             if resolution.status == "multiple":
                 return {
@@ -363,7 +374,7 @@ def run_orchestrator_turn(
         answer = _finalize_data_reply(message, transcript, sql_question, sql_result, user_block)
     else:
         term = extract_location_term(message)
-        if term:
+        if term and should_resolve_bairro(message, term):
             resolution = resolve_bairro(conn, term)
             if resolution.status == "multiple":
                 return {
@@ -377,7 +388,9 @@ def run_orchestrator_turn(
                 }
         answer = _finalize_data_reply(message, transcript, sql_question, sql_result, user_block)
 
-    answer = apply_bairro_correction_to_answer(answer, bairro_resolution, first_name)
+    answer = apply_bairro_correction_to_answer(
+        answer, bairro_resolution, first_name, message=message
+    )
 
     return {
         "answer": _trim_answer_boilerplate(answer),

@@ -14,6 +14,7 @@ from .cras_breakdown import (
 )
 from .geo_territorial import try_geo_contextual_followup, try_geo_territorial_metric
 from .ivs_metrics import try_ivs_metric
+from .planning_metrics import try_planning_demand_metric
 from .sisc_cadu import run_sisc_cadu_query
 
 _FOLHA_PBF = re.compile(
@@ -146,6 +147,12 @@ def try_canonical_metric(
     sisc = _try_sisc_cross(conn, message, transcript)
     if sisc:
         return sisc
+
+    planning = try_planning_demand_metric(
+        conn, message, transcript, user_first_name=user_first_name
+    )
+    if planning:
+        return planning
 
     ivs = try_ivs_metric(conn, message, user_first_name=user_first_name)
     if ivs:
