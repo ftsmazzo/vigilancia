@@ -26,11 +26,13 @@ SQL_AGENT_SYSTEM = """Você é o AgenteSQL — especialista em gerar SQL Postgre
 
 Regras obrigatórias:
 - Apenas SELECT; uma instrução; sem ponto e vírgula no final.
-- Use SOMENTE estas relações (schema vig):
+- Use SOMENTE estas relações (schema vig e core):
   - vig.mvw_familia (alias f) — famílias CADU
   - vig.mvw_pessoas (p) — pessoas CADU
   - vig.mvw_familia_domicilio (d) — moradia/vulnerabilidades
   - vig.mvw_sisc_qualificado (s) — Serviço de Convivência (SISC) × CADU
+  - core.mvw_ivs_familia (i) — IVS/IVCAD v1.0.5 por família (join i.codigo_familiar = f.codigo_familiar)
+- IVS/IVCAD: filtre i.elegivel_ivs; território via f.bairro e f.num_cras; dimensões idx_nc, idx_dpi, idx_dca, idx_tqa, idx_dr, idx_ch; composto i.ivs.
 - Contagem de famílias: COUNT(DISTINCT f.codigo_familiar).
 - Contagem de pessoas: COUNT(p.cadu_row_id) ou COUNT(*).
 - Mulher: p.cod_sexo = '2'. Homem: p.cod_sexo = '1'.

@@ -13,11 +13,17 @@ from sqlalchemy.engine import Connection
 
 from ..vigilance.familia_mview import _table_exists
 
-_FUZZY_MIN = 0.58
-_SINGLE_MIN = 0.72
-_SINGLE_GAP = 0.10
+_FUZZY_MIN = 0.55
+_SINGLE_MIN = 0.78
+_SINGLE_GAP = 0.08
+_TOKEN_AUTO = 0.82
+_TOKEN_MATCH = 0.82
 
-_DISAMBIG_MARKER = re.compile(r"quis dizer|parecidos no territ", re.I)
+_DISAMBIG_MARKER = re.compile(
+    r"qual deles|me confirma|mais de um bairro|parecidos|confirma qual|"
+    r"bate com mais|\d+\.\s+\*\*",
+    re.I,
+)
 _OPTION_LINE = re.compile(r"^(\d+)\.\s+\*\*([^*]+)\*\*", re.M)
 _CHOICE_NUM = re.compile(r"^(?:op[cç][ãa]o\s+)?(\d+)\.?$", re.I)
 _CRAS_IN_TERM = re.compile(r"\bcras\b|\bcras\s*\d", re.I)
@@ -64,22 +70,75 @@ def _clean_term(term: str) -> str:
     return cleaned
 
 
+def _pick_variant(seed: str, templates: list[str]) -> str:
+    if not templates:
+        return ""
+    idx = hash(_fold(seed)) % len(templates)
+    return templates[idx]
+
+
+def _prefix_name(first_name: str, answer: str) -> str:
+    if not first_name or answer.lower().startswith(first_name.lower()):
+        return answer
+    return f"{first_name}, {answer[0].lower()}{answer[1:]}"
+
+
+def _term_differs(resolution: BairroResolution) -> bool:
+    if not resolution.canonical:
+        return False
+    return resolution.corrected or _fold(resolution.user_term) != _fold(resolution.canonical)
+
+
+def _token_coverage(term: str, bairro: str) -> float:
+    t_tokens = _fold(term).split()
+    b_tokens = _fold(bairro).split()
+    if not t_tokens or not b_tokens:
+        return 0.0
+    matched = sum(
+        1
+        for tt in t_tokens
+        if any(SequenceMatcher(None, tt, bt).ratio() >= _TOKEN_MATCH for bt in b_tokens)
+    )
+    return matched / len(t_tokens)
+
+
 def _score(term: str, bairro: str) -> float:
+    """Similaridade 0–1. Aceita parte do nome composto e grafia aproximada."""
     t, b = _fold(term), _fold(bairro)
     if not t or not b:
         return 0.0
     if t == b:
         return 1.0
     if t in b or b in t:
-        return max(0.88, SequenceMatcher(None, t, b).ratio())
-    ratio = SequenceMatcher(None, t, b).ratio()
+        return max(0.92, SequenceMatcher(None, t, b).ratio())
+
+    scores: list[float] = [SequenceMatcher(None, t, b).ratio()]
     t_tokens = t.split()
     b_tokens = b.split()
-    if t_tokens and b_tokens:
-        overlap = sum(1 for tok in t_tokens if any(SequenceMatcher(None, tok, bt).ratio() >= 0.82 for bt in b_tokens))
-        token_boost = overlap / max(len(t_tokens), len(b_tokens))
-        ratio = max(ratio, 0.55 * ratio + 0.45 * token_boost)
-    return ratio
+
+    for bt in b_tokens:
+        scores.append(SequenceMatcher(None, t, bt).ratio())
+    for tt in t_tokens:
+        scores.append(SequenceMatcher(None, tt, b).ratio())
+        for bt in b_tokens:
+            scores.append(SequenceMatcher(None, tt, bt).ratio())
+
+    coverage = _token_coverage(term, bairro)
+    if coverage >= 1.0:
+        scores.append(0.96)
+    elif coverage >= 0.5:
+        scores.append(0.72 + 0.24 * coverage)
+
+    return max(scores)
+
+
+def _best_token_match(term: str, bairro: str) -> float:
+    t, b = _fold(term), _fold(bairro)
+    if not t or not b:
+        return 0.0
+    scores = [SequenceMatcher(None, t, bt).ratio() for bt in b.split()]
+    scores.append(SequenceMatcher(None, t, b).ratio())
+    return max(scores) if scores else 0.0
 
 
 @dataclass
@@ -153,6 +212,13 @@ def resolve_bairro(conn: Connection, term: str) -> BairroResolution:
         return BairroResolution(status="none", user_term=cleaned)
 
     ilike = _ilike_matches(conn, cleaned)
+    if not ilike and len(cleaned.split()) > 1:
+        for token in sorted(cleaned.split(), key=len, reverse=True):
+            if len(token) >= 4:
+                ilike = _ilike_matches(conn, token, limit=8)
+                if ilike:
+                    break
+
     if len(ilike) == 1:
         canonical = ilike[0]["bairro"]
         if _fold(canonical) == _fold(cleaned):
@@ -216,6 +282,16 @@ def resolve_bairro(conn: Connection, term: str) -> BairroResolution:
 
     best_score = ranked[0][1]
     second_score = ranked[1][1]
+    best_token = _best_token_match(cleaned, ranked[0][0]["bairro"])
+    if best_token >= _TOKEN_AUTO and best_token - _best_token_match(cleaned, ranked[1][0]["bairro"]) >= _SINGLE_GAP:
+        canonical = ranked[0][0]["bairro"]
+        return BairroResolution(
+            status="single_fuzzy",
+            user_term=cleaned,
+            canonical=canonical,
+            matches=[ranked[0][0]],
+            corrected=_fold(canonical) != _fold(cleaned),
+        )
     if best_score >= _SINGLE_MIN and best_score - second_score >= _SINGLE_GAP:
         canonical = ranked[0][0]["bairro"]
         return BairroResolution(
@@ -242,33 +318,103 @@ def bairro_sql_filter(resolution: BairroResolution | None, term: str) -> tuple[s
 
 
 def format_bairro_disambiguation(resolution: BairroResolution, user_first_name: str = "") -> str:
-    prefix = f"{user_first_name}, " if user_first_name else ""
-    intro = (
-        f"{prefix}não encontrei **{resolution.user_term}** com essa grafia exata. "
-        "Estes bairros do território parecem ser o que você quis dizer — qual deles?"
-    )
+    term = resolution.user_term
+    seed = f"disambig:{term}"
+    intros = [
+        "«{term}» aparece em mais de um bairro no território. Qual deles você quer?",
+        "Encontrei alguns bairros parecidos com «{term}». Me confirma qual?",
+        "«{term}» bate com mais de um bairro aqui — qual você tinha em mente?",
+        "Tenho mais de uma opção para «{term}». Qual delas?",
+    ]
+    intro = _pick_variant(seed, intros).format(term=term)
+    intro = _prefix_name(user_first_name, intro)
     lines = [intro, ""]
     for index, match in enumerate(resolution.matches[:5], start=1):
         lines.append(f"{index}. **{match['bairro']}** ({_fmt_int(int(match['familias']))} famílias)")
-    lines.extend(["", "Responda com **1**, **2**, etc., ou com o nome completo do bairro."])
+    footers = [
+        "Responda com **1**, **2**, etc., ou com o nome completo do bairro.",
+        "Pode responder **1**, **2**… ou escrever o nome completo.",
+        "Digite o número (**1**, **2**…) ou o nome do bairro.",
+    ]
+    lines.extend(["", _pick_variant(seed + ":footer", footers)])
     return "\n".join(lines)
 
 
-def format_bairro_correction_note(resolution: BairroResolution, user_first_name: str = "") -> str:
-    if not resolution.corrected or not resolution.canonical:
-        return ""
-    prefix = f"{user_first_name}, " if user_first_name else ""
-    return (
-        f"{prefix}notei um pequeno deslize na grafia de «{resolution.user_term}» — "
-        f"consultei **{resolution.canonical}**, que é como o bairro consta no território."
-    )
+def format_pessoas_bairro_answer(
+    resolution: BairroResolution,
+    total: int,
+    *,
+    seed: str = "",
+    user_first_name: str = "",
+) -> str:
+    bairro = resolution.canonical or ""
+    n = _fmt_int(total)
+    pick = seed or f"{resolution.user_term}:{bairro}:pessoas"
+
+    if not _term_differs(resolution):
+        templates = [
+            f"No bairro **{bairro}**, há **{n}** pessoas no Cadastro Único.",
+            f"Em **{bairro}**, são **{n}** pessoas cadastradas no CADU.",
+            f"Por **{bairro}**, contabilizei **{n}** pessoas no território.",
+        ]
+    else:
+        templates = [
+            f"Creio que falamos do **{bairro}**: por lá há **{n}** pessoas no Cadastro Único.",
+            f"No **{bairro}** — deve ser esse o bairro — há **{n}** pessoas no CADU.",
+            f"Considerando **{bairro}**, encontrei **{n}** pessoas cadastradas.",
+            f"Por **{bairro}**, são **{n}** pessoas no Cadastro Único.",
+            f"Em **{bairro}**, contabilizei **{n}** pessoas no território.",
+        ]
+
+    return _prefix_name(user_first_name, _pick_variant(pick, templates))
 
 
-def apply_bairro_correction_to_answer(answer: str, resolution: BairroResolution | None, user_first_name: str = "") -> str:
-    note = format_bairro_correction_note(resolution, user_first_name) if resolution else ""
-    if not note:
+def format_familias_bairro_answer(
+    resolution: BairroResolution,
+    total: int,
+    *,
+    seed: str = "",
+    user_first_name: str = "",
+) -> str:
+    bairro = resolution.canonical or ""
+    n = _fmt_int(total)
+    pick = seed or f"{resolution.user_term}:{bairro}:familias"
+
+    if not _term_differs(resolution):
+        templates = [
+            f"No bairro **{bairro}**, há **{n}** famílias no Cadastro Único.",
+            f"Em **{bairro}**, são **{n}** famílias cadastradas no CADU.",
+            f"Por **{bairro}**, contabilizei **{n}** famílias no território.",
+        ]
+    else:
+        templates = [
+            f"Creio que falamos do **{bairro}**: por lá há **{n}** famílias no Cadastro Único.",
+            f"No **{bairro}** — deve ser esse o bairro — há **{n}** famílias no CADU.",
+            f"Considerando **{bairro}**, encontrei **{n}** famílias cadastradas.",
+            f"Por **{bairro}**, são **{n}** famílias no Cadastro Único.",
+        ]
+
+    return _prefix_name(user_first_name, _pick_variant(pick, templates))
+
+
+def apply_bairro_correction_to_answer(
+    answer: str,
+    resolution: BairroResolution | None,
+    user_first_name: str = "",
+) -> str:
+    """Mantém respostas já nomeadas; evita nota robótica separada."""
+    if not resolution or not resolution.canonical or not _term_differs(resolution):
         return answer
-    return f"{note}\n\n{answer}"
+    if f"**{resolution.canonical}**" in answer:
+        return answer
+    leads = [
+        f"Creio que falamos do **{resolution.canonical}**.",
+        f"Considerando **{resolution.canonical}**.",
+        f"Por **{resolution.canonical}**.",
+    ]
+    lead = _pick_variant(f"{resolution.user_term}{resolution.canonical}:lead", leads)
+    lead = _prefix_name(user_first_name, lead)
+    return f"{lead} {answer}"
 
 
 def _parse_disambiguation_options(content: str) -> list[str]:
@@ -333,6 +479,78 @@ def try_parse_bairro_choice(message: str, transcript: list[dict[str, str]] | Non
         new_message = f"No bairro {chosen}"
 
     return chosen, new_message
+
+
+def count_pessoas_bairro(
+    conn: Connection,
+    resolution: BairroResolution,
+) -> int:
+    if not resolution.canonical:
+        return 0
+    row = conn.execute(
+        text(
+            """
+            SELECT COUNT(p.cadu_row_id)::bigint AS pessoas
+            FROM vig.mvw_pessoas p
+            INNER JOIN vig.mvw_familia f ON f.codigo_familiar = p.codigo_familiar
+            WHERE lower(btrim(f.bairro::text)) = lower(:bairro_canon)
+            """
+        ),
+        {"bairro_canon": resolution.canonical},
+    ).mappings().first()
+    return int((row or {}).get("pessoas") or 0)
+
+
+def try_pessoas_bairro_metric(
+    conn: Connection,
+    message: str,
+    user_first_name: str = "",
+) -> dict[str, Any] | None:
+    """Resposta canônica: quantas pessoas no bairro X (com correção de grafia)."""
+    if not _table_exists(conn, "vig", "mvw_familia") or not _table_exists(conn, "vig", "mvw_pessoas"):
+        return None
+    if not re.search(r"\bpessoas?\b", message, re.I):
+        return None
+    if not re.search(r"\b(?:no|na|em|bairro)\b", message, re.I):
+        return None
+
+    term = extract_location_term(message)
+    if not term:
+        return None
+
+    resolution = resolve_bairro(conn, term)
+    if resolution.status == "multiple":
+        return {
+            "answer": format_bairro_disambiguation(resolution, user_first_name),
+            "sql": None,
+            "row_count": 0,
+            "preview": resolution.matches,
+            "mode": "disambiguation",
+            "metric": "bairro_disambiguation",
+        }
+    if resolution.status == "none" or not resolution.canonical:
+        return None
+
+    total = count_pessoas_bairro(conn, resolution)
+    answer = format_pessoas_bairro_answer(
+        resolution,
+        total,
+        seed=message,
+        user_first_name=user_first_name,
+    )
+
+    return {
+        "answer": answer,
+        "sql": (
+            "SELECT COUNT(p.cadu_row_id) FROM vig.mvw_pessoas p "
+            "INNER JOIN vig.mvw_familia f ON f.codigo_familiar = p.codigo_familiar "
+            f"WHERE lower(btrim(f.bairro::text)) = lower('{resolution.canonical.replace(chr(39), '')}')"
+        ),
+        "row_count": 1,
+        "preview": [{"bairro": resolution.canonical, "pessoas": total}],
+        "mode": "canonical",
+        "metric": "geo_pessoas_por_bairro",
+    }
 
 
 def preprocess_bairro_turn(

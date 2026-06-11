@@ -13,6 +13,7 @@ from .cras_breakdown import (
     sort_cras_rows,
 )
 from .geo_territorial import try_geo_contextual_followup, try_geo_territorial_metric
+from .ivs_metrics import try_ivs_metric
 from .sisc_cadu import run_sisc_cadu_query
 
 _FOLHA_PBF = re.compile(
@@ -131,6 +132,8 @@ def try_canonical_metric(
     conn: Connection,
     message: str,
     transcript: list[dict[str, str]] | None = None,
+    *,
+    user_first_name: str = "",
 ) -> dict | None:
     """
     Resposta sem LLM/SQL quando a pergunta bate com KPI oficial do painel.
@@ -143,6 +146,10 @@ def try_canonical_metric(
     sisc = _try_sisc_cross(conn, message, transcript)
     if sisc:
         return sisc
+
+    ivs = try_ivs_metric(conn, message, user_first_name=user_first_name)
+    if ivs:
+        return ivs
 
     contextual = try_geo_contextual_followup(conn, message, transcript)
     if contextual:

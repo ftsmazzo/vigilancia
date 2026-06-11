@@ -13,6 +13,7 @@ from .bairro_resolver import (
     bairro_sql_filter,
     extract_location_term,
     format_bairro_disambiguation,
+    format_familias_bairro_answer,
     resolve_bairro,
 )
 
@@ -450,8 +451,7 @@ def try_geo_territorial_metric(
                 "metric": "geo_familias_bairro_vazio",
             }
 
-        b = (resolution.canonical or matches[0]["bairro"]) if matches else term
-        answer = f"No bairro **{b}**, há **{_fmt_int(total)}** famílias no Cadastro Único."
+        answer = format_familias_bairro_answer(resolution, total, seed=text_msg)
 
         return {
             "answer": answer,

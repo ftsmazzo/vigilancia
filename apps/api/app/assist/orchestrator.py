@@ -12,7 +12,14 @@ from sqlalchemy.orm import Session
 from ..models import User
 from ..municipio_context import load_context_prompt
 from .cras_breakdown import format_cras_breakdown_answer
-from .bairro_resolver import apply_bairro_correction_to_answer, preprocess_bairro_turn
+from .bairro_resolver import (
+    apply_bairro_correction_to_answer,
+    preprocess_bairro_turn,
+    resolve_bairro,
+    extract_location_term,
+    format_bairro_disambiguation,
+    try_pessoas_bairro_metric,
+)
 from .canonical_metrics import try_canonical_metric
 from .kb_client import query_knowledge_base
 from .llm import chat_completion
@@ -29,7 +36,7 @@ Analise a mensagem atual e o histórico da conversa.
 
 **mode = "data"** quando:
 - O usuário pede quantidade, total, percentual, listagem agregada
-- Perguntas sobre CADU, PBF, SISC, CRAS, famílias, pessoas, renda, deficiência, etc.
+- Perguntas sobre CADU, PBF, SISC, CRAS, famílias, pessoas, renda, deficiência, **IVS/IVCAD (índices de vulnerabilidade)**, etc.
 - Follow-up numérico ("dessas", "entre elas", "e quantas têm...") — reformule com o contexto anterior
 
 Quando mode = "data", preencha sql_question com UM pedido claro para o AgenteSQL:
@@ -281,8 +288,15 @@ def run_orchestrator_turn(
     message = bairro_pre.message
     bairro_resolution = bairro_pre.resolution
 
+    pessoas_bairro = try_pessoas_bairro_metric(conn, message, first_name)
+    if pessoas_bairro:
+        return {
+            **pessoas_bairro,
+            "answer": _trim_answer_boilerplate(pessoas_bairro["answer"]),
+        }
+
     # Métricas canônicas (SISC×CADU, CRAS, PBF) têm prioridade — sempre com SQL explícito
-    canonical = try_canonical_metric(conn, message, transcript)
+    canonical = try_canonical_metric(conn, message, transcript, user_first_name=first_name)
     if canonical:
         answer = canonical["answer"]
         if canonical.get("metric") == "cadu_familias_por_cras":
@@ -293,6 +307,8 @@ def run_orchestrator_turn(
             )
         elif canonical.get("metric", "").startswith("geo_"):
             answer = _personalize_canonical(answer, user)
+        elif canonical.get("metric", "").startswith("ivs_"):
+            pass
         elif canonical.get("mode") == "disambiguation":
             answer = _personalize_canonical(answer, user)
         elif canonical.get("source") == "vig.mvw_sisc_qualificado":
@@ -330,7 +346,35 @@ def run_orchestrator_turn(
     sql_result = run_sql_agent(conn, db, sql_question)
     if sql_result.ok and sql_result.formatted_answer:
         answer = _cras_answer_with_context(sql_result.rows, user, municipio_block)
+    elif sql_result.ok and sql_result.row_count == 0:
+        term = extract_location_term(message)
+        if term:
+            resolution = resolve_bairro(conn, term)
+            if resolution.status == "multiple":
+                return {
+                    "answer": _trim_answer_boilerplate(
+                        format_bairro_disambiguation(resolution, first_name)
+                    ),
+                    "sql": None,
+                    "row_count": 0,
+                    "preview": resolution.matches,
+                    "mode": "disambiguation",
+                }
+        answer = _finalize_data_reply(message, transcript, sql_question, sql_result, user_block)
     else:
+        term = extract_location_term(message)
+        if term:
+            resolution = resolve_bairro(conn, term)
+            if resolution.status == "multiple":
+                return {
+                    "answer": _trim_answer_boilerplate(
+                        format_bairro_disambiguation(resolution, first_name)
+                    ),
+                    "sql": None,
+                    "row_count": 0,
+                    "preview": resolution.matches,
+                    "mode": "disambiguation",
+                }
         answer = _finalize_data_reply(message, transcript, sql_question, sql_result, user_block)
 
     answer = apply_bairro_correction_to_answer(answer, bairro_resolution, first_name)

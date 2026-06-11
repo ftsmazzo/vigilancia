@@ -10,6 +10,7 @@ from ..municipio_context import load_context_prompt
 from ..vigilance.familia_mview import _table_exists
 from .dictionary import build_dictionary_prompt
 from .geo_territorial import build_geo_territorial_hint
+from .ivs_metrics import build_ivs_assist_hint
 
 CATALOG_STATIC = """
 ## Fonte verdade e medidas (modelo VigSocial)
@@ -115,6 +116,8 @@ def build_schema_context(conn: Connection, db: Session | None = None) -> str:
     geo_hint = build_geo_territorial_hint(conn)
     if geo_hint:
         parts.append("\n" + geo_hint)
+
+    parts.append("\n" + build_ivs_assist_hint())
 
     if db is not None:
         try:
