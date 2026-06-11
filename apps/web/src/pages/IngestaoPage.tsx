@@ -240,6 +240,10 @@ export default function IngestaoPage({ token }: Props) {
   const [geoBulkLastPreview, setGeoBulkLastPreview] = useState<{ fam: number; lin: number } | null>(null);
   const [geoCepApplyLoading, setGeoCepApplyLoading] = useState(false);
   const [geoCepApplyStatus, setGeoCepApplyStatus] = useState("");
+  const [bairrosCrasFile, setBairrosCrasFile] = useState<File | null>(null);
+  const [geoCrasLoading, setGeoCrasLoading] = useState(false);
+  const [geoCrasStatus, setGeoCrasStatus] = useState("");
+  const [geoCrasPreview, setGeoCrasPreview] = useState<Record<string, unknown> | null>(null);
 
   async function submitCadu(e: FormEvent) {
     e.preventDefault();
@@ -428,6 +432,49 @@ export default function IngestaoPage({ token }: Props) {
       await loadRuns();
     } else {
       setGeoStatus(res.errorText || "Falha na ingestão.");
+    }
+  }
+
+  async function applyGeoCras(dryRun: boolean) {
+    if (!bairrosCrasFile) {
+      setGeoCrasStatus("Selecione o arquivo bairros_cras.csv.");
+      return;
+    }
+    setGeoCrasLoading(true);
+    setGeoCrasStatus("");
+    if (!dryRun) setGeoCrasPreview(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", bairrosCrasFile);
+      const q = dryRun ? "?dry_run=true" : "";
+      const response = await fetch(`${API_URL}/api/v1/geo/apply-cras-bairros${q}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      });
+      const data = (await response.json().catch(() => ({}))) as Record<string, unknown> & { detail?: unknown };
+      if (!response.ok) {
+        const msg =
+          typeof data.detail === "string"
+            ? data.detail
+            : "Falha ao aplicar CRAS na tbl_geo.";
+        throw new Error(msg);
+      }
+      setGeoCrasPreview(data);
+      if (dryRun) {
+        setGeoCrasStatus(
+          `Prévia: ${String(data.linhas_geo_atualizadas ?? 0)} linhas receberiam CRAS ` +
+            `(mapa com ${String(data.bairros_no_mapa ?? 0)} bairros).`,
+        );
+      } else {
+        setGeoCrasStatus(
+          `CRAS gravado em ${String(data.linhas_geo_atualizadas ?? 0)} linhas de raw.geo__tbl_geo.`,
+        );
+      }
+    } catch (e) {
+      setGeoCrasStatus(e instanceof Error ? e.message : "Erro inesperado.");
+    } finally {
+      setGeoCrasLoading(false);
     }
   }
 
@@ -988,6 +1035,77 @@ export default function IngestaoPage({ token }: Props) {
                 <small>{geoUploading ? `Enviando: ${geoProgress}%` : "Aguardando envio"}</small>
               </div>
               {geoStatus && <p className={geoStatus.includes("atualizada") ? "status-ok" : "error"}>{geoStatus}</p>}
+
+              <div
+                className="auth-form"
+                style={{ marginTop: "1.25rem", padding: "0.75rem 0", borderTop: "1px solid var(--color-border, #333)" }}
+              >
+                <h2 style={{ fontSize: "1.05rem", margin: "0 0 0.5rem" }}>CRAS por bairro (pontual)</h2>
+                <p className="ingestao-desc" style={{ marginBottom: "0.75rem" }}>
+                  Envie <code className="inline-code">bairros_cras.csv</code> (matriz CRAS 1–12 × bairros, delimitador{" "}
+                  <strong>;</strong>). Preenche <code className="inline-code">cras</code> em{" "}
+                  <code className="inline-code">raw.geo__tbl_geo</code> pelo <strong>bairro</strong> (sem rua). Duplicata
+                  em CRAS 1–7 e 8–12: prevalece 8–12. Abreviações Jd/Cond/Vl são normalizadas; alias{" "}
+                  <em>Residencial Vida Nova Ribeirão</em> → <em>Jardim Cristo Redentor</em>.
+                </p>
+                <label>
+                  Arquivo bairros_cras.csv
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={(ev) => setBairrosCrasFile(ev.target.files?.[0] || null)}
+                    disabled={geoCrasLoading}
+                  />
+                </label>
+                <div className="vig-actions" style={{ flexWrap: "wrap", gap: "0.5rem", marginTop: "0.5rem" }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => void applyGeoCras(true)}
+                    disabled={geoCrasLoading}
+                  >
+                    {geoCrasLoading ? "Processando…" : "Prévia (dry-run)"}
+                  </button>
+                  <button type="button" onClick={() => void applyGeoCras(false)} disabled={geoCrasLoading}>
+                    Aplicar CRAS na tbl_geo
+                  </button>
+                </div>
+                {geoCrasStatus && (
+                  <p
+                    className={
+                      geoCrasStatus.includes("Prévia") || geoCrasStatus.includes("gravado") ? "status-ok" : "error"
+                    }
+                    style={{ marginTop: "0.75rem" }}
+                  >
+                    {geoCrasStatus}
+                  </p>
+                )}
+                {geoCrasPreview && (
+                  <ul className="vig-warnings" style={{ listStyle: "disc", marginTop: "0.5rem" }}>
+                    <li>Bairros no mapa: {String(geoCrasPreview.bairros_no_mapa ?? "—")}</li>
+                    <li>Linhas com bairro na geo: {String(geoCrasPreview.linhas_geo_com_bairro ?? "—")}</li>
+                    <li>CRAS atualizados: {String(geoCrasPreview.linhas_geo_atualizadas ?? "—")}</li>
+                    <li>
+                      Bairros renomeados na geo:{" "}
+                      {String(geoCrasPreview.linhas_geo_bairro_renomeadas ?? "—")}
+                    </li>
+                    {Array.isArray(geoCrasPreview.bairros_geo_sem_match) &&
+                      (geoCrasPreview.bairros_geo_sem_match as string[]).length > 0 && (
+                        <li>
+                          Bairros na geo sem match (amostra):{" "}
+                          {(geoCrasPreview.bairros_geo_sem_match as string[]).slice(0, 8).join("; ")}
+                        </li>
+                      )}
+                    {Array.isArray(geoCrasPreview.conflitos_bairro) &&
+                      (geoCrasPreview.conflitos_bairro as unknown[]).length > 0 && (
+                        <li>
+                          Duplicatas resolvidas (CRAS 8–12 prevalece):{" "}
+                          {(geoCrasPreview.conflitos_bairro as unknown[]).length}
+                        </li>
+                      )}
+                  </ul>
+                )}
+              </div>
 
               <div
                 className="auth-form"

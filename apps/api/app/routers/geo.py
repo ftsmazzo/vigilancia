@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -13,11 +13,80 @@ from ..db import get_db
 from ..deps import get_current_user
 from ..models import User
 from ..vigilance.familia_mview import ensure_vig_functions
+from ..vigilance.geo_cras import apply_cras_bairros_to_geo, parse_bairros_cras_csv
 
 router = APIRouter(prefix="/geo", tags=["geo"])
 
 CADU_TABLE = "cecad__cadu"
 GEO_TABLE = "geo__tbl_geo"
+
+
+@router.post("/apply-cras-bairros")
+async def geo_apply_cras_bairros(
+    file: UploadFile = File(..., description="Matriz bairros_cras.csv (delimitador ;)"),
+    dry_run: bool = Query(False, description="Se true, só simula sem gravar cras na tbl_geo"),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """
+    Preenche `cras` em raw.geo__tbl_geo cruzando **bairro** com a matriz municipal.
+
+    O arquivo `bairros_cras.csv` tem colunas CRAS 1…12 (cabeçalho + linhas de bairros).
+    Células com vários bairros (separados por ; ou ,) são expandidas.
+
+    Duplicatas: se o bairro aparece em CRAS 1–7 e 8–12, prevalece o CRAS 8–12 (redistribuição
+    territorial recente). Abreviações (Jd, Cond, Vl, etc.) são normalizadas no cruzamento.
+
+    **Rua/endereço não entra neste cruzamento** — só o campo `bairro` da tbl_geo.
+    """
+    if not _raw_table_exists(db, GEO_TABLE):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Tabela raw.geo__tbl_geo não encontrada. "
+                "Envie tbl_geo.csv em Ingestão → Geo antes."
+            ),
+        )
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Arquivo vazio.")
+
+    try:
+        mapping, conflicts = parse_bairros_cras_csv(content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    with db.bind.begin() as conn:
+        result = apply_cras_bairros_to_geo(
+            conn,
+            bairro_to_cras=mapping,
+            conflicts=conflicts,
+            dry_run=dry_run,
+        )
+
+    return {
+        "status": "preview" if dry_run else "success",
+        "metodo": "bairro",
+        "nota_rua": (
+            "Endereço/rua da tbl_geo não foi usado. "
+            "Se precisar de cruzamento por logradouro, avise para evoluirmos depois."
+        ),
+        "regra_duplicata": (
+            "Bairro em CRAS antigo (1–7) e novo (8–12): mantém 8–12. "
+            "Abreviações Jd/Cond/Vl/Pq/Conj expandidas na comparação."
+        ),
+        "bairros_no_mapa": result.bairros_no_mapa,
+        "linhas_geo_atualizadas": result.linhas_geo_atualizadas,
+        "linhas_geo_bairro_renomeadas": result.linhas_geo_bairro_renomeadas,
+        "linhas_geo_ja_com_cras": result.linhas_geo_ja_com_cras,
+        "linhas_sem_bairro": result.linhas_sem_bairro,
+        "linhas_geo_com_bairro": result.linhas_geo_total,
+        "bairros_geo_sem_match": result.bairros_geo_sem_match,
+        "conflitos_bairro": result.conflitos_bairro,
+        "amostra_atualizacoes": result.amostra_atualizacoes,
+        "amostra_renomes_bairro": result.amostra_renomes_bairro,
+    }
 
 
 def _geo_fam_pipeline_ctes() -> str:
