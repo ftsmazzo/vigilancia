@@ -110,13 +110,10 @@ def _ranking_bairros_geo(
     """
     Top bairros por famílias, usando bairro territorial da geo (vig.mvw_familia, chave CEP).
     """
-    if not _table_exists(conn, "raw", GEO_TABLE):
+    if not _table_exists(conn, "vig", "mvw_familia"):
         return {
             "disponivel": False,
-            "mensagem": (
-                "Base geográfica não encontrada. Ingeste tbl_geo.csv "
-                "(source=geo, dataset=tbl_geo) para o ranking por bairro."
-            ),
+            "mensagem": "Visão vig.mvw_familia ausente.",
             "items": [],
         }
 

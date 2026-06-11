@@ -15,6 +15,13 @@ type FaixaItem = {
   pct: number;
 };
 
+type BairroRankItem = {
+  posicao: number;
+  bairro: string;
+  familias: number;
+  pct_do_total: number;
+};
+
 type HomePainel = {
   total_familias: number;
   total_pessoas: number;
@@ -25,6 +32,7 @@ type HomePainel = {
   ivs_media_nacional: number;
   por_meses_atualizacao: FaixaItem[];
   por_faixa_renda: FaixaItem[];
+  top_bairros: BairroRankItem[];
   mapa: MapaTerritorial;
 };
 
@@ -70,6 +78,7 @@ export default function PainelIndicadoresInicio({ token }: Props) {
 
   const maxMesesPct = Math.max(...(painel?.por_meses_atualizacao.map((x) => x.pct) ?? [1]), 1);
   const maxRendaPct = Math.max(...(painel?.por_faixa_renda.map((x) => x.pct) ?? [1]), 1);
+  const maxBairroPct = Math.max(...(painel?.top_bairros.map((x) => x.pct_do_total) ?? [1]), 1);
 
   const ivsVal = painel?.ivs_medio ?? null;
   const ivsPctGauge = ivsVal != null ? Math.min(100, ivsVal * 100) : 0;
@@ -152,6 +161,31 @@ export default function PainelIndicadoresInicio({ token }: Props) {
                     IVS ainda não calculado.{" "}
                     <Link to="/vigilancia">Gere as visões em Vigilância</Link>.
                   </p>
+                )}
+              </article>
+
+              <article className="home-obs-chart fx-card">
+                <h2>Top 5 bairros — famílias cadastradas</h2>
+                <p className="home-obs-chart-sub">Bairro territorial (geo × CEP)</p>
+                {painel.top_bairros.length === 0 ? (
+                  <p className="home-obs-chart-empty">Sem bairro na geo. Ingeste tbl_geo e regenere a visão Família.</p>
+                ) : (
+                  <ul className="home-hbar-list">
+                    {painel.top_bairros.map((item) => (
+                      <li key={item.bairro} className="home-hbar-row home-hbar-row--bairro">
+                        <span className="home-hbar-label" title={item.bairro}>
+                          {item.posicao}. {item.bairro}
+                        </span>
+                        <span className="home-hbar-track">
+                          <span
+                            className="home-hbar-fill home-hbar-fill--bairro"
+                            style={{ width: barPct(item.pct_do_total, maxBairroPct) }}
+                          />
+                        </span>
+                        <span className="home-hbar-val">{item.familias.toLocaleString("pt-BR")}</span>
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </article>
             </div>

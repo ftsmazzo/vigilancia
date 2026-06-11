@@ -3407,6 +3407,11 @@ p.success {
   font-size: 0.8rem;
 }
 
+.home-obs-chart:has(.home-hbar-fill--renda_0_218) .home-hbar-row {
+  grid-template-columns: minmax(9rem, 42%) 1fr auto;
+  font-size: 0.74rem;
+}
+
 .home-hbar-label {
   color: var(--fx-muted);
   line-height: 1.25;
@@ -3428,6 +3433,53 @@ p.success {
 
 .home-hbar-fill--meses {
   background: #1e40af;
+}
+
+.home-hbar-fill--renda_0_218 {
+  background: #dc2626;
+}
+
+.home-hbar-fill--renda_219_810 {
+  background: #ea580c;
+}
+
+.home-hbar-fill--renda_811_1621 {
+  background: #ca8a04;
+}
+
+.home-hbar-fill--renda_1622_3242 {
+  background: #2563eb;
+}
+
+.home-hbar-fill--renda_acima_3242 {
+  background: #1e3a8a;
+}
+
+.home-hbar-fill--renda_nao_informada {
+  background: #94a3b8;
+}
+
+.home-hbar-fill--bairro {
+  background: #0d9488;
+}
+
+.home-hbar-row--bairro .home-hbar-label {
+  font-size: 0.76rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-obs-chart-sub {
+  margin: -0.5rem 0 0.75rem;
+  font-size: 0.78rem;
+  color: var(--fx-muted);
+}
+
+.home-obs-chart-empty {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--fx-muted);
 }
 
 .home-hbar-fill--pobreza {

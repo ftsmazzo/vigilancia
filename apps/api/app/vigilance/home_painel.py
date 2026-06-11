@@ -5,8 +5,21 @@ from __future__ import annotations
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-from .cadu_params import LIMIAR_POBREZA_EXTREMA, SM_METADE, sql_marcador_pbf_cadu
+from .cadu_params import sql_marcador_pbf_cadu
+from .caracterizacao import (
+    _familia_renda_per_capita_buckets,
+    _ranking_bairros_geo,
+)
 from .familia_mview import _table_exists
+
+RENDA_TITULOS: dict[str, str] = {
+    "renda_0_218": "R$ 0,00 a R$ 218,00",
+    "renda_219_810": "R$ 218,01 a R$ 810,00",
+    "renda_811_1621": "R$ 810,01 a R$ 1.621,00",
+    "renda_1622_3242": "R$ 1.621,01 a R$ 3.242,00",
+    "renda_acima_3242": "Acima de R$ 3.242,00",
+    "renda_nao_informada": "Renda não informada",
+}
 
 # lat_num/long_num na geo e na MV podem vir como TEXT após ingestão CSV.
 _LAT_EXPR = "NULLIF(regexp_replace(btrim({col}::text), ',', '.', 'g'), '')::double precision"
@@ -95,22 +108,7 @@ def home_painel_from_views(conn: Connection) -> dict:
         )
     ).mappings().all()
 
-    renda_rows = conn.execute(
-        text(
-            f"""
-            SELECT
-              CASE
-                WHEN renda_per_capita IS NULL OR renda_per_capita < 0 THEN 'nao_informada'
-                WHEN renda_per_capita <= {LIMIAR_POBREZA_EXTREMA} THEN 'pobreza'
-                WHEN renda_per_capita <= {SM_METADE} THEN 'baixa_renda'
-                ELSE 'acima_meio_sm'
-              END AS rotulo,
-              COUNT(*)::bigint AS total
-            FROM vig.mvw_familia
-            GROUP BY 1
-            """
-        )
-    ).mappings().all()
+    renda_buckets = _familia_renda_per_capita_buckets(conn, "", {})
 
     ivs_medio = None
     ivs_disponivel = _table_exists(conn, "core", "mvw_ivs_familia")
@@ -126,8 +124,6 @@ def home_painel_from_views(conn: Connection) -> dict:
 
     meses_order = ["ate_12", "12_18", "18_24", "24_36", "37_48", "acima_48", "nao_informado"]
     meses_map = {str(r["rotulo"]): int(r["total"] or 0) for r in meses_rows}
-    renda_order = ["pobreza", "baixa_renda", "acima_meio_sm", "nao_informada"]
-    renda_map = {str(r["rotulo"]): int(r["total"] or 0) for r in renda_rows}
 
     meses_labels = {
         "ate_12": "Até 12 meses",
@@ -138,12 +134,6 @@ def home_painel_from_views(conn: Connection) -> dict:
         "acima_48": "Acima de 48 meses",
         "nao_informado": "Sem data de atualização",
     }
-    renda_labels = {
-        "pobreza": "Pobreza (até R$ 218)",
-        "baixa_renda": "Baixa renda (até R$ 810,50)",
-        "acima_meio_sm": "Acima de ½ salário mínimo",
-        "nao_informada": "Renda não informada",
-    }
 
     total_fam = int(base.get("total_familias") or 0)
 
@@ -151,6 +141,7 @@ def home_painel_from_views(conn: Connection) -> dict:
         return round(100.0 * n / total_fam, 2) if total_fam else 0.0
 
     mapa = mapa_territorial_from_views(conn)
+    top_bairros = _ranking_bairros_geo(conn, "", {}, limit=5)
 
     return {
         "total_familias": total_fam,
@@ -172,14 +163,15 @@ def home_painel_from_views(conn: Connection) -> dict:
         ],
         "por_faixa_renda": [
             {
-                "rotulo": k,
-                "titulo": renda_labels.get(k, k),
-                "total": renda_map.get(k, 0),
-                "pct": pct(renda_map.get(k, 0)),
+                "rotulo": r["rotulo"],
+                "titulo": RENDA_TITULOS.get(str(r["rotulo"]), str(r["rotulo"])),
+                "total": int(r["total"] or 0),
+                "pct": float(r["pct"] or 0),
             }
-            for k in renda_order
-            if k in renda_map and renda_map[k] > 0
+            for r in renda_buckets
+            if int(r["total"] or 0) > 0
         ],
+        "top_bairros": top_bairros.get("items", [])[:5],
         "mapa": mapa,
     }
 
