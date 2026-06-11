@@ -3145,3 +3145,324 @@ p.success {
     text-align: left;
   }
 }
+
+/* —— Home Observatório + mapa territorial —— */
+.home-obs-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 1200px;
+}
+
+.home-obs-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem;
+}
+
+.home-obs-head h1 {
+  margin: 0 0 0.35rem;
+  font-size: 1.35rem;
+}
+
+.home-obs-head p {
+  margin: 0;
+  color: var(--fx-muted);
+  font-size: 0.9rem;
+}
+
+.home-obs-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.home-obs-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+}
+
+.home-obs-kpi {
+  padding: 1rem 1.15rem;
+  text-align: center;
+}
+
+.home-obs-kpi small {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--fx-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.home-obs-kpi strong {
+  display: block;
+  margin-top: 0.35rem;
+  font-size: 1.65rem;
+  font-weight: 700;
+  color: var(--fx-text);
+}
+
+.home-obs-main {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+.home-obs-left {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.home-map-panel {
+  padding: 0;
+  overflow: hidden;
+}
+
+.home-map-head {
+  padding: 0.85rem 1rem 0.5rem;
+}
+
+.home-map-head h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1rem;
+}
+
+.home-map-head small {
+  color: var(--fx-muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.home-map {
+  height: 340px;
+  width: 100%;
+  z-index: 0;
+}
+
+.home-map--empty {
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  text-align: center;
+}
+
+.home-map-empty-msg {
+  margin: 0;
+  color: var(--fx-muted);
+}
+
+.home-map-empty-hint {
+  margin-top: 0.5rem;
+  color: var(--fx-muted);
+}
+
+.home-map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.65rem;
+  list-style: none;
+  margin: 0;
+  padding: 0.65rem 1rem 0.85rem;
+  border-top: 1px solid var(--fx-border);
+}
+
+.home-map-legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  color: var(--fx-muted);
+}
+
+.home-map-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.home-obs-ivcad {
+  padding: 1rem 1.15rem;
+}
+
+.home-obs-ivcad h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  line-height: 1.35;
+}
+
+.home-obs-ivcad-desc {
+  margin: 0 0 1rem;
+  font-size: 0.82rem;
+  color: var(--fx-muted);
+  line-height: 1.45;
+}
+
+.home-obs-ivcad-pending {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--fx-muted);
+}
+
+.home-obs-gauge-wrap {
+  margin-top: 0.25rem;
+}
+
+.home-obs-gauge {
+  position: relative;
+  height: 2.75rem;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--fx-surface-2, rgba(0, 0, 0, 0.04));
+}
+
+.home-obs-gauge-track {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, #22c55e 0%, #eab308 50%, #ef4444 100%);
+  opacity: 0.25;
+}
+
+.home-obs-gauge-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, #3b82f6, #6366f1);
+  opacity: 0.85;
+  border-radius: 999px 0 0 999px;
+  transition: width 0.4s ease;
+}
+
+.home-obs-gauge-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: #fbbf24;
+  transform: translateX(-50%);
+  z-index: 2;
+}
+
+.home-obs-gauge-value {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.35rem;
+  font-weight: 700;
+  z-index: 3;
+  text-shadow: 0 0 8px var(--fx-surface, #fff);
+}
+
+.home-obs-gauge-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.35rem;
+  font-size: 0.72rem;
+  color: var(--fx-muted);
+}
+
+.home-obs-charts {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.home-obs-chart {
+  padding: 1rem 1.1rem;
+}
+
+.home-obs-chart h2 {
+  margin: 0 0 0.85rem;
+  font-size: 0.95rem;
+  line-height: 1.3;
+}
+
+.home-hbar-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.home-hbar-row {
+  display: grid;
+  grid-template-columns: minmax(7rem, 38%) 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.8rem;
+}
+
+.home-hbar-label {
+  color: var(--fx-muted);
+  line-height: 1.25;
+}
+
+.home-hbar-track {
+  height: 1.1rem;
+  background: var(--fx-surface-2, rgba(0, 0, 0, 0.05));
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.home-hbar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  min-width: 2px;
+}
+
+.home-hbar-fill--meses {
+  background: #1e40af;
+}
+
+.home-hbar-fill--pobreza {
+  background: #dc2626;
+}
+
+.home-hbar-fill--baixa_renda {
+  background: #ea580c;
+}
+
+.home-hbar-fill--acima_meio_sm {
+  background: #1e3a8a;
+}
+
+.home-hbar-fill--nao_informada {
+  background: #94a3b8;
+}
+
+.home-hbar-val {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  min-width: 4.5rem;
+  text-align: right;
+}
+
+@media (max-width: 960px) {
+  .home-obs-kpis {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .home-obs-main {
+    grid-template-columns: 1fr;
+  }
+
+  .home-map {
+    height: 280px;
+  }
+}

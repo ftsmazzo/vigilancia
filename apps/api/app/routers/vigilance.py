@@ -17,6 +17,7 @@ from ..vigilance.familia_mview import (
     ensure_vig_functions,
     refresh_familia_mview,
 )
+from ..vigilance.home_painel import home_painel_from_views, mapa_territorial_from_views
 from ..vigilance.pessoas_mview import refresh_pessoas_mview
 
 router = APIRouter(prefix="/vigilance", tags=["vigilance"])
@@ -551,6 +552,32 @@ def get_vigilance_kpis(
         "pct_bpc_deficiente": pct(total_bpc_deficiente, total_bpc),
         "manutencoes": manutencoes,
     }
+
+
+@router.get("/home-painel")
+def get_home_painel(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """
+    Painel inicial estilo Observatório MDS: KPIs, IVS médio, faixas de renda/atualização
+    e dados do mapa territorial (famílias georreferenciadas por CRAS via CEP × geo).
+    """
+    try:
+        with db.bind.begin() as conn:
+            return home_painel_from_views(conn)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/mapa-territorial")
+def get_mapa_territorial(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Mapa de famílias por coordenada (geo) colorido por CRAS territorial."""
+    with db.bind.begin() as conn:
+        return mapa_territorial_from_views(conn)
 
 
 @router.post("/materialized-views/familia/refresh")
