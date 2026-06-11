@@ -53,8 +53,10 @@ ORCHESTRATOR_FINALIZE_SYSTEM = """Você é VigIA. Transforme o resultado numéri
 - Trate o usuário pelo primeiro nome
 - Mencione o município quando souber
 - Informe o número principal com clareza
-- Contextualize em uma frase o que o indicador significa
+- Resposta curta e direta: 1–2 frases com o dado pedido
 - Tom cordial e profissional
+- NÃO adicione parágrafo final explicando o que é PBF, transferência de renda ou definição genérica do indicador
+- NÃO use frases como "Esse número representa…" ou "Isso indica que…"
 - NÃO mostre SQL, JSON, nomes de campos/tabelas, siglas técnicas de banco nem mensagens de erro técnicas
 - NÃO cite CADU, geo, CEP, marc_pbf, num_cras ou estrutura de dados — fale em linguagem de vigilância
 - Use APENAS números presentes nos resultados fornecidos
@@ -62,6 +64,25 @@ ORCHESTRATOR_FINALIZE_SYSTEM = """Você é VigIA. Transforme o resultado numéri
 - Se o resultado for desdobramento por CRAS: liste TODOS os CRAS na ordem numérica (1 a 12),
   inclua CRAS 9 (Bonfim Paulista) e famílias sem referência territorial — NUNCA resuma só os 5 maiores
 """
+
+_BOILERPLATE_TRAILERS = (
+    re.compile(
+        r"(?:\n\n|\.\s+)Esse número representa[^.!?]*[.!?]?\s*$",
+        re.I | re.S,
+    ),
+    re.compile(
+        r"(?:\n\n|\.\s+)Esse indicador (?:representa|mostra|reflete)[^.!?]*[.!?]?\s*$",
+        re.I | re.S,
+    ),
+    re.compile(
+        r"(?:\n\n|\.\s+)Isso (?:representa|corresponde|indica)[^.!?]*transferência de renda[^.!?]*[.!?]?\s*$",
+        re.I | re.S,
+    ),
+    re.compile(
+        r"(?:\n\n|\.\s+)Isso significa que[^.!?]*[.!?]?\s*$",
+        re.I | re.S,
+    ),
+)
 
 
 def _municipio_nome(municipio_block: str) -> str:
@@ -85,6 +106,17 @@ def _first_name(full_name: str | None) -> str:
     if not full_name:
         return ""
     return full_name.strip().split()[0]
+
+
+def _trim_answer_boilerplate(answer: str) -> str:
+    text = answer.strip()
+    for _ in range(4):
+        prev = text
+        for pat in _BOILERPLATE_TRAILERS:
+            text = pat.sub("", text).strip()
+        if text == prev:
+            break
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
 def _user_context_block(user: User, municipio_block: str) -> str:
@@ -157,7 +189,7 @@ def _chat_reply(
         {"role": "system", "content": system},
         *transcript,
     ]
-    return chat_completion(messages, temperature=0.5, role="orch").strip()
+    return _trim_answer_boilerplate(chat_completion(messages, temperature=0.5, role="orch").strip())
 
 
 def _finalize_data_reply(
@@ -190,7 +222,7 @@ def _finalize_data_reply(
                 ),
             },
         ]
-        return chat_completion(fail_messages, temperature=0.4, role="orch").strip()
+        return _trim_answer_boilerplate(chat_completion(fail_messages, temperature=0.4, role="orch").strip())
 
     messages: list[dict[str, str]] = [
         {
@@ -207,7 +239,7 @@ def _finalize_data_reply(
             ),
         },
     ]
-    return chat_completion(messages, temperature=0.35, role="orch").strip()
+    return _trim_answer_boilerplate(chat_completion(messages, temperature=0.35, role="orch").strip())
 
 
 def _personalize_canonical(answer: str, user: User) -> str:
@@ -253,7 +285,7 @@ def run_orchestrator_turn(
         elif canonical.get("source") == "vig.mvw_sisc_qualificado":
             answer = _personalize_canonical(answer, user)
         return {
-            "answer": answer,
+            "answer": _trim_answer_boilerplate(answer),
             "sql": canonical.get("sql"),
             "row_count": canonical.get("row_count", 0),
             "preview": canonical.get("preview") or [],
@@ -265,7 +297,7 @@ def run_orchestrator_turn(
     if plan["mode"] == "chat":
         answer = _chat_reply(message, transcript, rag_block, user_block)
         return {
-            "answer": answer,
+            "answer": _trim_answer_boilerplate(answer),
             "sql": None,
             "row_count": 0,
             "preview": [],
@@ -281,7 +313,7 @@ def run_orchestrator_turn(
         answer = _finalize_data_reply(message, transcript, sql_question, sql_result, user_block)
 
     return {
-        "answer": answer,
+        "answer": _trim_answer_boilerplate(answer),
         "sql": sql_result.sql,
         "row_count": sql_result.row_count,
         "preview": sql_result.preview,
