@@ -19,19 +19,20 @@ universo de famílias e pessoas do município. Toda pergunta parte daqui.
 **Medidas e cruzamentos** (sempre ligados ao CADU por `codigo_familiar` ou `num_nis` / `nis_norm`):
 - **Folha PBF** (SIBEC): quem recebe pagamento — KPI folha pode incluir famílias fora do CADU local; no CADU use `marc_pbf`.
 - **SISC (Convivência)**: matrícula no serviço — `vig.mvw_sisc_qualificado`; divisão territorial do atendimento: `s.cras_codigo`, `s.cras_nome`.
-- **Território CADU**: referência da família no cadastro — `f.num_cras`, `f.nom_cras` (pode diferir do CRAS do SISC na mesma pessoa).
+- **Território (bairro, endereço, CRAS, lat/long)**: `f.bairro`, `f.endereco`, `f.num_cras`, `f.nom_cras`, `f.lat_num`, `f.long_num` vêm de **raw.geo__tbl_geo** via `f.cep` = `cep_norm` (coluna `f.tem_geo`). Texto original do CADU: `f.bairro_cadu`, `f.num_cras_cadu`.
 
 Conversas em sequência ("dessas crianças… depois por CRAS"): mantenha filtros anteriores e acrescente `GROUP BY s.cras_nome, s.cras_codigo`.
 
 ## Visões disponíveis (PostgreSQL, schema vig)
 
-### vig.mvw_familia — uma linha por família (CADU)
+### vig.mvw_familia — uma linha por família (CADU + territorialização geo)
 - codigo_familiar (text, chave familiar)
-- num_cras, nom_cras (unidade territorial / CRAS de referência)
+- num_cras, nom_cras — **CRAS territorial da geo** (via CEP); audit CADU: num_cras_cadu, nom_cras_cadu
 - renda_per_capita (numeric), faixa_renda (text), renda_total
 - marc_pbf (boolean: família do CADU presente na folha SIBEC importada)
 - marc_pbf_cadu (texto: marcador "recebe PBF" no CADU — não é a mesma coisa que a folha de pagamento)
-- bairro, endereco, cep
+- bairro, endereco — **da geo via CEP**; audit: bairro_cadu, endereco_cadu
+- cep, tem_geo (boolean), lat_num, long_num (georreferência da geo)
 - meses_desatualizado (int), data_atualizacao, data_cadastro
 
 ### vig.mvw_pessoas — uma linha por pessoa no CADU
@@ -79,9 +80,9 @@ Conversas em sequência ("dessas crianças… depois por CRAS"): mantenha filtro
 - Família ↔ domicílio: d.codigo_familiar = f.codigo_familiar
 - Use COUNT(DISTINCT f.codigo_familiar) para contar famílias.
 - Use COUNT(p.cadu_row_id) ou COUNT(*) em pessoas para contar indivíduos.
-- CRAS no CADU (família): f.num_cras, f.nom_cras.
+- CRAS territorial (família): f.num_cras, f.nom_cras — fonte geo via CEP (não use num_cras_cadu salvo auditoria).
 - CRAS no SISC (atendimento convivência): s.cras_codigo, s.cras_nome — use para "dividir por CRAS" após pergunta sobre SISC.
-- Desdobramento por CRAS (CADU): GROUP BY f.num_cras, f.nom_cras; ORDER BY num_cras numérico 1→12; NULL/sem referência por último.
+- Desdobramento por CRAS territorial: GROUP BY f.num_cras, f.nom_cras; ORDER BY num_cras numérico 1→12; NULL/sem geo por último.
 - CRAS 9 = Bonfim Paulista. Informe famílias sem num_cras como sem referência territorial.
 """
 

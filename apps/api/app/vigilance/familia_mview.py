@@ -1,7 +1,7 @@
 """Materialized view vig.mvw_familia: uma linha por código familiar (CADU + folha PBF).
 
-A folha de pagamento só lista famílias que recebem benefício; o valor consolidado vem da coluna
-vlrtotal (ou nome normalizado equivalente após a ingestão).
+Territorialização (bairro, endereço, CRAS, lat/long) vem de raw.geo__tbl_geo via CEP quando a base
+geo está ingerida. Campos *_cadu preservam o texto original do CADU para auditoria.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from sqlalchemy.engine import Connection
 
 CADU_TABLE = "cecad__cadu"
 PBF_TABLE = "sibec__programa_bolsa_familia"
+GEO_TABLE = "geo__tbl_geo"
 
 PBF_COD_CANDIDATES = (
     "cod_familiar",
@@ -394,6 +395,7 @@ def build_familia_mview_sql(
     pbf_cod: str | None,
     pbf_valor: str | None,
     pbf_ref: str | None,
+    use_geo: bool = False,
 ) -> str:
     c = _cadu_required_columns()
 
@@ -412,6 +414,51 @@ def build_familia_mview_sql(
       )
     )"""
 
+    geo_cte = ""
+    geo_join = ""
+    if use_geo:
+        geo_cte = f""",
+    geo_agg AS (
+      SELECT
+        g.cep_norm,
+        mode() WITHIN GROUP (
+          ORDER BY lower(NULLIF(btrim(g.bairro::text), ''))
+        ) AS bairro,
+        mode() WITHIN GROUP (
+          ORDER BY lower(NULLIF(btrim(g.endereco::text), ''))
+        ) AS endereco,
+        mode() WITHIN GROUP (
+          ORDER BY NULLIF(btrim(g.cras::text), '')
+        ) AS cras,
+        max(g.lat_num) AS lat_num,
+        max(g.long_num) AS long_num
+      FROM raw.{_qi(GEO_TABLE)} g
+      WHERE g.cep_norm IS NOT NULL
+        AND length(btrim(g.cep_norm::text)) = 8
+      GROUP BY g.cep_norm
+    )"""
+        geo_join = "LEFT JOIN geo_agg g ON g.cep_norm = d.cep"
+
+    if use_geo:
+        bairro_out = "g.bairro"
+        endereco_out = "g.endereco"
+        num_cras_out = "vig.ltrim_zeros_text(g.cras::text)"
+        nom_cras_out = """CASE
+          WHEN g.cras IS NOT NULL AND btrim(g.cras::text) <> ''
+          THEN 'CRAS ' || btrim(g.cras::text)
+        END"""
+        tem_geo_out = "(g.cep_norm IS NOT NULL)"
+        lat_out = "g.lat_num"
+        lng_out = "g.long_num"
+    else:
+        bairro_out = "d.bairro_cadu"
+        endereco_out = "d.endereco_cadu"
+        num_cras_out = "d.num_cras_cadu"
+        nom_cras_out = "d.nom_cras_cadu"
+        tem_geo_out = "FALSE"
+        lat_out = "NULL::double precision"
+        lng_out = "NULL::double precision"
+
     sql = f"""
     CREATE MATERIALIZED VIEW vig.mvw_familia AS
     WITH cadu_base AS (
@@ -421,11 +468,11 @@ def build_familia_mview_sql(
         vig.parse_cadu_date({qc('atual')}) AS data_atualizacao,
         vig.ltrim_zeros_text({qc('forma')}) AS tipo_coleta,
         vig.parse_cadu_date({qc('entrev')}) AS data_entrevista,
-        vig.clean_spaces({qc('bairro')}) AS bairro,
-        {endereco_expr} AS endereco,
+        vig.clean_spaces({qc('bairro')}) AS bairro_cadu,
+        {endereco_expr} AS endereco_cadu,
         vig.norm_cep({qc('cep')}) AS cep,
-        vig.ltrim_zeros_text({qc('cras_cod')}) AS num_cras,
-        vig.clean_spaces({qc('cras_nom')}) AS nom_cras,
+        vig.ltrim_zeros_text({qc('cras_cod')}) AS num_cras_cadu,
+        vig.clean_spaces({qc('cras_nom')}) AS nom_cras_cadu,
         vig.parse_money_br({qc('renda_pc')}) AS renda_per_capita,
         vig.ltrim_zeros_text({qc('fx_rfpc')}) AS faixa_renda,
         vig.parse_money_br({qc('renda_tot')}) AS renda_total,
@@ -442,11 +489,11 @@ def build_familia_mview_sql(
         data_atualizacao,
         tipo_coleta,
         data_entrevista,
-        bairro,
-        endereco,
+        bairro_cadu,
+        endereco_cadu,
         cep,
-        num_cras,
-        nom_cras,
+        num_cras_cadu,
+        nom_cras_cadu,
         renda_per_capita,
         faixa_renda,
         renda_total,
@@ -461,18 +508,25 @@ def build_familia_mview_sql(
     ),
     pbf_agg AS (
       {pbf_subquery}
-    )
+    ){geo_cte}
     SELECT
       d.codigo_familiar,
       d.data_cadastro,
       d.data_atualizacao,
       d.tipo_coleta,
       d.data_entrevista,
-      d.bairro,
-      d.endereco,
+      {bairro_out} AS bairro,
+      {endereco_out} AS endereco,
       d.cep,
-      d.num_cras,
-      d.nom_cras,
+      {num_cras_out} AS num_cras,
+      {nom_cras_out} AS nom_cras,
+      d.bairro_cadu,
+      d.endereco_cadu,
+      d.num_cras_cadu,
+      d.nom_cras_cadu,
+      {tem_geo_out} AS tem_geo,
+      {lat_out} AS lat_num,
+      {lng_out} AS long_num,
       d.renda_per_capita,
       d.faixa_renda,
       d.renda_total,
@@ -484,6 +538,7 @@ def build_familia_mview_sql(
       d.data_pbf
     FROM cadu_dedup d
     LEFT JOIN pbf_agg p ON p.codigo_familiar = d.codigo_familiar
+    {geo_join}
     """
     return re.sub(r"\s+", " ", sql).strip()
 
@@ -524,11 +579,24 @@ def refresh_familia_mview(conn: Connection) -> FamiliaRefreshResult:
             "Tabela raw.sibec__programa_bolsa_familia ausente. Gere a visão só com CADU; vlrtotal e marc_pbf (folha) virão nulos/falsos."
         )
 
+    use_geo = _table_exists(conn, "raw", GEO_TABLE)
+    if use_geo:
+        warnings.append(
+            "Território (bairro, endereço, CRAS, lat/long) vem de raw.geo__tbl_geo via CEP da família. "
+            "Campos *_cadu preservam o texto original do CADU."
+        )
+    else:
+        warnings.append(
+            "Base geo ausente: bairro/CRAS/endereço continuam do CADU. "
+            "Ingeste tbl_geo.csv e regenere esta visão para territorialização pela geo."
+        )
+
     mview_sql = build_familia_mview_sql(
         cadu_cols=cadu_cols,
         pbf_cod=pbf_cod,
         pbf_valor=pbf_valor,
         pbf_ref=pbf_ref,
+        use_geo=use_geo,
     )
 
     conn.execute(text("DROP MATERIALIZED VIEW IF EXISTS vig.mvw_familia CASCADE"))

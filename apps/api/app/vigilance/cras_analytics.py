@@ -412,7 +412,7 @@ def cras_painel_from_views(conn: Connection, cras_cod: str | None = None) -> dic
         titulo = "Município — todos os CRAS (CADU)"
         cod_exib = "__todos__"
     elif cras_sel == "__sem_cras__":
-        titulo = "Famílias sem CRAS informado no CADU"
+        titulo = "Famílias sem CRAS territorial na geo (CEP sem match ou sem cras)"
         cod_exib = "__sem_cras__"
     else:
         titulo = base.get("cras_nome") or cras_sel
@@ -426,9 +426,9 @@ def cras_painel_from_views(conn: Connection, cras_cod: str | None = None) -> dic
         "cras_selecionado": cod_exib,
         "cras_titulo": titulo,
         "dicionario": {
-            "codigo_campo": "d.cod_unidade_territorial_fam → vig.mvw_familia.num_cras",
-            "nome_campo": "d.nom_unidade_territorial_fam → vig.mvw_familia.nom_cras",
-            "fonte": "Cadastro Único (visões Família + Pessoas)",
+            "codigo_campo": "raw.geo__tbl_geo.cras → vig.mvw_familia.num_cras (via CEP)",
+            "nome_campo": "derivado: 'CRAS ' || num_cras",
+            "fonte": "Cadastro Único + territorialização geo (CEP × tbl_geo)",
             "campos_pessoa": (
                 "p.dta_nasc_pessoa/idade, p.cod_sexo_pessoa, p.cod_raca_cor_pessoa, "
                 "p.grau_instrucao, p.cod_deficiencia_memb, p.ind_atend_cras_memb, p.marc_sit_rua"

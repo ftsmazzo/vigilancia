@@ -108,8 +108,7 @@ def _ranking_bairros_geo(
     limit: int = 10,
 ) -> dict:
     """
-    Top bairros por famílias no CADU, com bairro validado via CEP × raw.geo__tbl_geo.
-    Famílias sem CEP na geo usam o bairro do CADU (marcadas na resposta).
+    Top bairros por famílias, usando bairro territorial da geo (vig.mvw_familia, chave CEP).
     """
     if not _table_exists(conn, "raw", GEO_TABLE):
         return {
@@ -122,28 +121,16 @@ def _ranking_bairros_geo(
         }
 
     sql = f"""
-    WITH geo_bairro AS (
-      SELECT
-        cep_norm,
-        mode() WITHIN GROUP (ORDER BY lower(btrim(bairro::text))) AS bairro_geo
-      FROM raw.{GEO_TABLE}
-      WHERE cep_norm IS NOT NULL
-        AND btrim(bairro::text) <> ''
-      GROUP BY cep_norm
-    ),
-    fam AS (
+    WITH fam AS (
       SELECT
         f.codigo_familiar,
-        vig.norm_cep(f.cep::text) AS cep_n,
         COALESCE(
-          g.bairro_geo,
           NULLIF(btrim(f.bairro::text), ''),
           '(sem bairro)'
         ) AS bairro_label,
-        (g.cep_norm IS NOT NULL) AS bairro_via_geo,
+        COALESCE(f.tem_geo, FALSE) AS bairro_via_geo,
         COALESCE(f.marc_pbf, FALSE) AS na_folha_pbf
       FROM vig.mvw_familia f
-      LEFT JOIN geo_bairro g ON g.cep_norm = vig.norm_cep(f.cep::text)
       WHERE TRUE {where_extra}
     ),
     agg AS (
@@ -184,7 +171,7 @@ def _ranking_bairros_geo(
     ]
     return {
         "disponivel": True,
-        "fonte_bairro": "CEP da família (vig.mvw_familia) × bairro em raw.geo__tbl_geo; fallback CADU",
+        "fonte_bairro": "vig.mvw_familia.bairro via CEP × raw.geo__tbl_geo (tem_geo=true)",
         "fonte_pbf": "Famílias com marc_pbf na visão (vínculo folha PBF no CADU)",
         "items": items,
     }
@@ -194,7 +181,7 @@ def _titulo_escopo(cras_sel: str, cras_nome: str | None) -> str:
     if cras_sel in ("", "__todos__"):
         return "Município — Cadastro Único (todas as famílias)"
     if cras_sel == "__sem_cras__":
-        return "Famílias sem CRAS territorial no CADU"
+        return "Famílias sem CRAS territorial na geo (CEP sem match)"
     return cras_nome or f"CRAS {cras_sel}"
 
 
