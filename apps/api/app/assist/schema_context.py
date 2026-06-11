@@ -49,6 +49,15 @@ Conversas em sequência ("dessas crianças… depois por CRAS"): mantenha filtro
 - situacao_domicilio, tipo_piso, tipo_parede, agua_canalizada, existencia_banheiro
 - inseguranca_alimentar, risco_violacao_direitos, gpte
 - total_pessoas (contagem CPF na família)
+- desp_aluguel, qtd_pessoas_domic (campos CADU para IVS/CH)
+
+### core.mvw_ivs_familia — IVS (Índice de Vulnerabilidade Social, metodologia IVCAD v1.0.5)
+- codigo_familiar (text, chave familiar)
+- elegivel_ivs (boolean — universo IN084)
+- ivs (numeric 0–1, índice composto); ivcad é alias do mesmo valor
+- idx_nc, idx_dpi, idx_dca, idx_tqa, idx_dr, idx_ch (dimensões 0–1)
+- versao_metodologica, calculado_em
+- Requer refresh após vig.mvw_familia, vig.mvw_pessoas e vig.mvw_familia_domicilio.
 
 ### vig.mvw_sisc_qualificado — atendidos SISC × CADU (Serviço de Convivência; após qualificar)
 - nis_norm (NIS do atendido), codigo_familiar (quando vinculado ao CADU)
@@ -85,6 +94,13 @@ def build_schema_context(conn: Connection, db: Session | None = None) -> str:
     if _table_exists(conn, "vig", "mvw_pessoas"):
         row = conn.execute(text("SELECT COUNT(*) FROM vig.mvw_pessoas")).scalar()
         parts.append(f"vig.mvw_pessoas tem {int(row or 0):,} registros de pessoas.".replace(",", "."))
+    if _table_exists(conn, "core", "mvw_ivs_familia"):
+        row = conn.execute(
+            text("SELECT COUNT(*) FILTER (WHERE elegivel_ivs) FROM core.mvw_ivs_familia")
+        ).scalar()
+        parts.append(
+            f"core.mvw_ivs_familia: {int(row or 0):,} famílias elegíveis ao IVS.".replace(",", ".")
+        )
 
     try:
         dict_block = build_dictionary_prompt()

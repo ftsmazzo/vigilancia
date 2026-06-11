@@ -14,6 +14,8 @@ ALLOWED_MVIEWS = (
     "mvw_sisc_qualificado",
 )
 
+CORE_IVIEWS = ("mvw_ivs_familia",)
+
 
 def build_live_schema_markdown(conn: Connection) -> str:
     """Colunas reais via information_schema (alinha AgenteSQL ao banco em produção)."""
@@ -33,8 +35,23 @@ def build_live_schema_markdown(conn: Connection) -> str:
         )
     ).fetchall()
 
-    if not rows:
-        return "(Nenhuma coluna encontrada em vig.mvw_*.)"
+    ivs_rows: list = []
+    if _table_exists(conn, "core", "mvw_ivs_familia"):
+        ivs_names = ", ".join(f"'{n}'" for n in CORE_IVIEWS)
+        ivs_rows = conn.execute(
+            text(
+                f"""
+                SELECT table_name, column_name, data_type
+                FROM information_schema.columns
+                WHERE table_schema = 'core'
+                  AND table_name IN ({ivs_names})
+                ORDER BY table_name, ordinal_position
+                """
+            )
+        ).fetchall()
+
+    if not rows and not ivs_rows:
+        return "(Nenhuma coluna encontrada em vig.mvw_* / core.mvw_ivs_familia.)"
 
     lines = ["## Schema vig (introspecção ao vivo)", ""]
     current_table = ""
@@ -43,5 +60,14 @@ def build_live_schema_markdown(conn: Connection) -> str:
             current_table = table_name
             lines.append(f"### vig.{table_name}")
         lines.append(f"- {column_name} ({data_type})")
+
+    if ivs_rows:
+        lines.extend(["", "## Schema core (IVS)", ""])
+        current_table = ""
+        for table_name, column_name, data_type in ivs_rows:
+            if table_name != current_table:
+                current_table = table_name
+                lines.append(f"### core.{table_name}")
+            lines.append(f"- {column_name} ({data_type})")
 
     return "\n".join(lines)

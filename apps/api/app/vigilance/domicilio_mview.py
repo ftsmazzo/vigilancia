@@ -31,6 +31,8 @@ _DOM_COLS: dict[str, str] = {
     "indigena_reside": "d_cod_indigena_reside_fam",
     "quilombola": "d_ind_familia_quilombola_fam",
     "familias_domic": "d_qtd_familias_domic_fam",
+    "qtd_pessoas_domic": "d_qtd_pessoas_domic_fam",
+    "desp_aluguel": "d_val_desp_aluguel_fam",
     "cod_cras": "d_cod_centro_assist_fam",
     "risco_viol": "d_ind_risco_scl_vlco_drts",
     "risco_alim": "d_ind_risco_scl_inseg_alim",
@@ -47,10 +49,16 @@ def _col_expr(cols: set[str], phys: str) -> str:
 
 
 def _validate_domicilio_columns(cols: set[str]) -> list[str]:
-    """Retorna lista de colunas físicas ausentes (exceto CPF pessoa, tratado à parte)."""
+    """Retorna colunas físicas ausentes (exceto opcionais e CPF pessoa)."""
+    optional = frozenset(
+        {
+            "d_qtd_pessoas_domic_fam",
+            "d_val_desp_aluguel_fam",
+        }
+    )
     missing: list[str] = []
     for _k, phys in _DOM_COLS.items():
-        if phys not in cols:
+        if phys not in cols and phys not in optional:
             missing.append(phys)
     return missing
 
@@ -109,6 +117,8 @@ def build_domicilio_mview_sql(*, cadu_cols: set[str], has_cpf_col: bool) -> str:
         vig.ltrim_zeros_text({q("d_cod_indigena_reside_fam")}) AS familia_indigena,
         vig.ltrim_zeros_text({q("d_ind_familia_quilombola_fam")}) AS familia_quilombola,
         vig.ltrim_zeros_text({q("d_qtd_familias_domic_fam")}) AS familias_domicilio,
+        vig.parse_money_br({q("d_val_desp_aluguel_fam")}::text) AS desp_aluguel,
+        NULLIF(regexp_replace(COALESCE({q("d_qtd_pessoas_domic_fam")}::text, ''), '[^0-9]', '', 'g'), '')::integer AS qtd_pessoas_domic,
         vig.ltrim_zeros_text({q("d_cod_centro_assist_fam")}) AS codigo_cras,
         vig.ltrim_zeros_text({q("d_ind_risco_scl_vlco_drts")}) AS risco_violacao_direitos,
         vig.ltrim_zeros_text({q("d_ind_risco_scl_inseg_alim")}) AS inseguranca_alimentar,
@@ -135,6 +145,8 @@ def build_domicilio_mview_sql(*, cadu_cols: set[str], has_cpf_col: bool) -> str:
         familia_indigena,
         familia_quilombola,
         familias_domicilio,
+        desp_aluguel,
+        qtd_pessoas_domic,
         codigo_cras,
         risco_violacao_direitos,
         inseguranca_alimentar,
@@ -164,6 +176,8 @@ def build_domicilio_mview_sql(*, cadu_cols: set[str], has_cpf_col: bool) -> str:
       d.familia_quilombola,
       COALESCE(c.total_pessoas, 0)::bigint AS total_pessoas,
       d.familias_domicilio,
+      d.desp_aluguel,
+      COALESCE(d.qtd_pessoas_domic, c.total_pessoas::integer) AS qtd_pessoas_domic,
       d.codigo_cras,
       d.risco_violacao_direitos,
       d.inseguranca_alimentar,

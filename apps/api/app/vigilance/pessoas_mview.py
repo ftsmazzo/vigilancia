@@ -35,6 +35,8 @@ PESSOAS_FIELDS: list[tuple[str, str, str]] = [
     ("cod_concluiu_frequentou", "p_cod_concluiu_frequentou_memb", "code"),
     ("grau_instrucao", "p_grau_instrucao", "code"),
     ("cod_agricultura_trab", "p_cod_agricultura_trab_memb", "code"),
+    ("cod_trabalhou", "p_cod_trabalhou_memb", "code"),
+    ("cod_afastado_trab", "p_cod_afastado_trab_memb", "code"),
     ("cod_principal_trab", "p_cod_principal_trab_memb", "code"),
     ("fx_renda_individual_805", "p_fx_renda_individual_805", "code"),
     ("fx_renda_individual_808", "p_fx_renda_individual_808", "code"),
@@ -145,9 +147,15 @@ def _expr(ref: str, mode: str) -> str:
 
 
 def _validate_pessoas_columns(cols: set[str]) -> list[str]:
+    optional = frozenset(
+        {
+            "p_cod_trabalhou_memb",
+            "p_cod_afastado_trab_memb",
+        }
+    )
     missing: list[str] = []
     for _alias, phys, _m in PESSOAS_FIELDS:
-        if phys not in cols:
+        if phys not in cols and phys not in optional:
             missing.append(phys)
     return missing
 

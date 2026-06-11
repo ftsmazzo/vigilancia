@@ -13,7 +13,7 @@ FORBIDDEN = re.compile(
     re.I,
 )
 
-ALLOWED_SCHEMAS = frozenset({"vig"})
+ALLOWED_SCHEMAS = frozenset({"vig", "core"})
 
 # Views materializadas permitidas (evita raw.cecad__cadu gigante no MVP).
 ALLOWED_RELATIONS = frozenset(
@@ -22,6 +22,7 @@ ALLOWED_RELATIONS = frozenset(
         "vig.mvw_pessoas",
         "vig.mvw_familia_domicilio",
         "vig.mvw_sisc_qualificado",
+        "core.mvw_ivs_familia",
     }
 )
 
@@ -38,9 +39,9 @@ def _normalize(sql: str) -> str:
 
 
 def _referenced_relations(sql: str) -> set[str]:
-    """Extrai apenas vig.nome_tabela (ignora alias f., p., d., s.)."""
+    """Extrai vig.* e core.mvw_* (ignora alias f., p., d., s.)."""
     found: set[str] = set()
-    for m in re.finditer(r"\b(vig)\.(mvw_[a-z0-9_]+)\b", sql, re.I):
+    for m in re.finditer(r"\b(vig|core)\.(mvw_[a-z0-9_]+)\b", sql, re.I):
         found.add(f"{m.group(1).lower()}.{m.group(2).lower()}")
     return found
 
@@ -53,7 +54,7 @@ def validate_select_sql(sql: str) -> str:
         raise SqlGuardError("Comando não permitido na consulta.")
     refs = _referenced_relations(s)
     if not refs:
-        raise SqlGuardError("A consulta deve usar tabelas vig.mvw_* (ex.: vig.mvw_familia).")
+        raise SqlGuardError("A consulta deve usar tabelas vig.mvw_* ou core.mvw_ivs_familia.")
     bad = {r for r in refs if r.split(".", 1)[0] not in ALLOWED_SCHEMAS}
     if bad:
         raise SqlGuardError(f"Schema não permitido: {', '.join(sorted(bad))}")

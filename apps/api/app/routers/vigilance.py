@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..deps import get_current_user
 from ..models import User
+from ..ivs.ivs_familia import refresh_ivs_familia
 from ..vigilance.domicilio_mview import refresh_domicilio_mview
 from ..vigilance.familia_mview import (
     bolsa_folha_kpis_from_raw,
@@ -615,3 +616,66 @@ def refresh_pessoas(
         "elapsed_ms": elapsed_ms,
         "warnings": result.warnings,
     }
+
+
+@router.post("/materialized-views/ivs/refresh")
+def refresh_ivs(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Recria `core.mvw_ivs_familia` — IVS (Índice de Vulnerabilidade Social, IVCAD v1.0.5)."""
+    t0 = time.perf_counter()
+    try:
+        with db.bind.begin() as conn:
+            result = refresh_ivs_familia(conn)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Falha ao calcular IVS: {exc}",
+        ) from exc
+
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+    return {
+        "status": "success",
+        "view_schema": "core",
+        "view_name": "mvw_ivs_familia",
+        "row_count": result.row_count,
+        "elegivel_count": result.elegivel_count,
+        "elapsed_ms": elapsed_ms,
+        "warnings": result.warnings,
+    }
+
+
+@router.get("/ivs/resumo")
+def get_ivs_resumo(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Médias IVS e dimensões no universo elegível (requer refresh prévio)."""
+    with db.bind.begin() as conn:
+        exists = conn.execute(text("SELECT to_regclass('core.mvw_ivs_familia')")).scalar()
+        if not exists:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="IVS não calculado. Execute POST /vigilance/materialized-views/ivs/refresh.",
+            )
+        row = conn.execute(
+            text(
+                """
+                SELECT
+                  COUNT(*) FILTER (WHERE elegivel_ivs)::bigint AS familias_elegiveis,
+                  COUNT(*)::bigint AS familias_total,
+                  ROUND(AVG(ivs) FILTER (WHERE elegivel_ivs)::numeric, 4) AS ivs_medio,
+                  ROUND(AVG(idx_nc) FILTER (WHERE elegivel_ivs)::numeric, 4) AS idx_nc,
+                  ROUND(AVG(idx_dpi) FILTER (WHERE elegivel_ivs)::numeric, 4) AS idx_dpi,
+                  ROUND(AVG(idx_dca) FILTER (WHERE elegivel_ivs)::numeric, 4) AS idx_dca,
+                  ROUND(AVG(idx_tqa) FILTER (WHERE elegivel_ivs)::numeric, 4) AS idx_tqa,
+                  ROUND(AVG(idx_dr) FILTER (WHERE elegivel_ivs)::numeric, 4) AS idx_dr,
+                  ROUND(AVG(idx_ch) FILTER (WHERE elegivel_ivs)::numeric, 4) AS idx_ch
+                FROM core.mvw_ivs_familia
+                """
+            )
+        ).mappings().first()
+    return dict(row or {})
