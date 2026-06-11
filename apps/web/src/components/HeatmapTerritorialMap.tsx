@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import "leaflet.heat";
 
 export type HeatmapMetric =
   | "criancas"
@@ -13,12 +14,11 @@ export type HeatmapPonto = {
   num_cras: string;
   lat: number;
   lng: number;
-  familias: number;
   pessoas: number;
   criancas: number;
   idosos: number;
-  familias_pbf: number;
   adultos_sem_medio: number;
+  na_folha_pbf: number;
 };
 
 export type HeatmapTotais = {
@@ -49,38 +49,59 @@ type Props = {
   totalGeo: number;
   totalCadu: number;
   unidadeLabel: string;
+  destacarRecorte?: boolean;
 };
 
-const METRIC_TOOLTIP: Record<HeatmapMetric, string> = {
-  criancas: "crianças (0–11 anos)",
-  idosos: "idosos (60 anos ou mais)",
-  familias_pbf: "famílias na folha PBF",
-  adultos_sem_medio: "pessoas 18–59 sem ensino médio completo",
+const HEAT_GRADIENT: Record<number, string> = {
+  0.0: "rgba(255,255,255,0)",
+  0.12: "rgba(255,237,160,0.35)",
+  0.35: "rgba(254,178,76,0.55)",
+  0.58: "rgba(253,141,60,0.72)",
+  0.78: "rgba(240,59,32,0.85)",
+  1.0: "rgba(189,0,38,0.95)",
 };
 
 function metricValue(p: HeatmapPonto, metric: HeatmapMetric): number {
+  if (metric === "familias_pbf") return p.na_folha_pbf;
   return p[metric];
 }
 
-/** Transparente (baixo) → amarelo → laranja → vermelho (alto). */
-function heatStyle(ratio: number): { color: string; fillOpacity: number; radius: number } {
-  const t = Math.min(1, Math.max(0, ratio));
-
-  if (t <= 0) {
-    return { color: "#e63900", fillOpacity: 0, radius: 0 };
+/** Envoltória convexa (monotone chain) para contorno orgânico do recorte. */
+function convexHullLatLng(points: Array<{ lat: number; lng: number }>): [number, number][] {
+  if (points.length < 3) {
+    return points.map((p) => [p.lat, p.lng]);
   }
 
-  const hue = 48 - t * 48;
-  const sat = 78 + t * 18;
-  const light = 58 - t * 22;
-  const fillOpacity = 0.06 + Math.pow(t, 0.72) * 0.52;
-  const radius = 280 + Math.pow(t, 0.55) * 3200;
+  const sorted = [...points].sort((a, b) => (a.lng === b.lng ? a.lat - b.lat : a.lng - b.lng));
 
-  return {
-    color: `hsl(${hue}, ${sat}%, ${light}%)`,
-    fillOpacity,
-    radius,
-  };
+  const cross = (o: { lat: number; lng: number }, a: { lat: number; lng: number }, b: { lat: number; lng: number }) =>
+    (a.lng - o.lng) * (b.lat - o.lat) - (a.lat - o.lat) * (b.lng - o.lng);
+
+  const lower: typeof sorted = [];
+  for (const p of sorted) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
+      lower.pop();
+    }
+    lower.push(p);
+  }
+
+  const upper: typeof sorted = [];
+  for (let i = sorted.length - 1; i >= 0; i -= 1) {
+    const p = sorted[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
+      upper.pop();
+    }
+    upper.push(p);
+  }
+
+  upper.pop();
+  lower.pop();
+  return [...lower, ...upper].map((p) => [p.lat, p.lng]);
+}
+
+function heatIntensity(weight: number, maxWeight: number): number {
+  if (weight <= 0 || maxWeight <= 0) return 0;
+  return Math.pow(weight / maxWeight, 0.65);
 }
 
 export default function HeatmapTerritorialMap({
@@ -91,6 +112,7 @@ export default function HeatmapTerritorialMap({
   totalGeo,
   totalCadu,
   unidadeLabel,
+  destacarRecorte = false,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -103,8 +125,16 @@ export default function HeatmapTerritorialMap({
       mapRef.current = null;
     }
 
-    const valores = mapa.pontos.map((p) => metricValue(p, metric));
-    const maxVal = Math.max(1, ...valores);
+    const weights = mapa.pontos.map((p) => metricValue(p, metric)).filter((w) => w > 0);
+    const maxWeight = Math.max(1, ...weights);
+
+    const heatPoints: Array<[number, number, number]> = mapa.pontos
+      .map((p) => {
+        const w = metricValue(p, metric);
+        if (w <= 0) return null;
+        return [p.lat, p.lng, heatIntensity(w, maxWeight)] as [number, number, number];
+      })
+      .filter((p): p is [number, number, number] => p !== null);
 
     const map = L.map(ref.current, { scrollWheelZoom: true });
     mapRef.current = map;
@@ -114,31 +144,28 @@ export default function HeatmapTerritorialMap({
       maxZoom: 18,
     }).addTo(map);
 
-    for (const p of mapa.pontos) {
-      const val = metricValue(p, metric);
-      if (val <= 0) continue;
+    if (destacarRecorte && mapa.pontos.length >= 3) {
+      const hull = convexHullLatLng(mapa.pontos);
+      if (hull.length >= 3) {
+        L.polygon(hull, {
+          color: "rgba(240, 160, 96, 0.55)",
+          weight: 1.5,
+          fillColor: "rgba(240, 160, 96, 0.08)",
+          fillOpacity: 1,
+          dashArray: "6 8",
+        }).addTo(map);
+      }
+    }
 
-      const ratio = val / maxVal;
-      const style = heatStyle(ratio);
-      if (style.radius <= 0) continue;
-
-      L.circle([p.lat, p.lng], {
-        radius: style.radius,
-        color: style.color,
-        fillColor: style.color,
-        fillOpacity: style.fillOpacity,
-        weight: 0,
-        opacity: 0,
-      })
-        .bindTooltip(
-          `<strong>${p.bairro}</strong><br/>` +
-            `${val.toLocaleString("pt-BR")} ${METRIC_TOOLTIP[metric]}<br/>` +
-            `${p.pessoas.toLocaleString("pt-BR")} pessoas · ` +
-            `${p.familias.toLocaleString("pt-BR")} famílias` +
-            (p.num_cras ? `<br/>CRAS ${p.num_cras}` : ""),
-          { sticky: true },
-        )
-        .addTo(map);
+    if (heatPoints.length > 0) {
+      L.heatLayer(heatPoints, {
+        radius: 28,
+        blur: 22,
+        maxZoom: 17,
+        max: 1,
+        minOpacity: 0.28,
+        gradient: HEAT_GRADIENT,
+      }).addTo(map);
     }
 
     if (mapa.bounds && mapa.bounds.length === 2) {
@@ -151,11 +178,10 @@ export default function HeatmapTerritorialMap({
       map.remove();
       mapRef.current = null;
     };
-  }, [mapa, metric]);
+  }, [mapa, metric, destacarRecorte]);
 
   const diff = totalCadu - totalGeo;
-  const cobertura =
-    totalCadu > 0 ? Math.round((1000 * totalGeo) / totalCadu) / 10 : 100;
+  const cobertura = totalCadu > 0 ? Math.round((1000 * totalGeo) / totalCadu) / 10 : 100;
 
   if (!mapa.disponivel) {
     return (

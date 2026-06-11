@@ -126,6 +126,8 @@ export default function MapasPage({ token }: Props) {
 
   const geo = painel.totais_geo ?? emptyTotais;
   const cadu = painel.totais_cadu ?? emptyTotais;
+  const destacarRecorte =
+    (crasCod !== "__todos__" && crasCod !== "") || bairroFiltro.trim().length > 0;
 
   return (
     <div className="mapas-page">
@@ -133,8 +135,8 @@ export default function MapasPage({ token }: Props) {
         <div>
           <h1>Mapas territoriais</h1>
           <p className="mapas-hero-sub">
-            Mapas de calor por bairro georreferenciado. O valor em destaque considera apenas famílias com
-            coordenadas; abaixo dele, o total do CADU no mesmo recorte (como na Caracterização).
+            Calor contínuo a partir das coordenadas reais das famílias georreferenciadas — sem bolhas por CRAS.
+            Ao filtrar CRAS ou bairro, o contorno da região é destacado de forma orgânica.
           </p>
         </div>
         <div className="mapas-hero-actions">
@@ -200,37 +202,41 @@ export default function MapasPage({ token }: Props) {
           mapa={painel}
           metric="criancas"
           titulo="Crianças (0–11 anos)"
-          subtitulo="Intensidade relativa por bairro (centroide geo)"
+          subtitulo="Densidade por coordenada familiar (0–11 anos)"
           totalGeo={geo.criancas}
           totalCadu={cadu.criancas}
           unidadeLabel="crianças"
+          destacarRecorte={destacarRecorte}
         />
         <HeatmapTerritorialMap
           mapa={painel}
           metric="idosos"
           titulo="Idosos (60 anos ou mais)"
-          subtitulo="Intensidade relativa por bairro (centroide geo)"
+          subtitulo="Densidade por coordenada familiar (60+ anos)"
           totalGeo={geo.idosos}
           totalCadu={cadu.idosos}
           unidadeLabel="idosos"
+          destacarRecorte={destacarRecorte}
         />
         <HeatmapTerritorialMap
           mapa={painel}
           metric="familias_pbf"
           titulo="Famílias com Bolsa Família"
-          subtitulo="Famílias na folha PBF (marc_pbf) por bairro georreferenciado"
+          subtitulo="Famílias na folha PBF (marc_pbf) por coordenada"
           totalGeo={geo.familias_pbf}
           totalCadu={cadu.familias_pbf}
           unidadeLabel="famílias PBF"
+          destacarRecorte={destacarRecorte}
         />
         <HeatmapTerritorialMap
           mapa={painel}
           metric="adultos_sem_medio"
           titulo="18–59 anos sem ensino médio completo"
-          subtitulo="Pessoas na faixa etária adulta sem grau 5 ou superior no CADU"
+          subtitulo="Pessoas adultas sem grau 5 ou superior no CADU"
           totalGeo={geo.adultos_sem_medio}
           totalCadu={cadu.adultos_sem_medio}
           unidadeLabel="pessoas"
+          destacarRecorte={destacarRecorte}
         />
       </div>
     </div>

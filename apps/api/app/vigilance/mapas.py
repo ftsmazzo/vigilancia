@@ -1,4 +1,4 @@
-"""Mapas de calor territorial — indicadores por bairro (geo × CEP)."""
+"""Mapas de calor territorial — indicadores por família georreferenciada (geo × CEP)."""
 
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ _SEM_MEDIO_COMPLETO = (
 )
 _CRIANCAS = "pes.idade IS NOT NULL AND pes.idade < 12"
 _IDOSOS = "pes.idade >= 60"
+
+
 def _familias_pbf_expr(alias: str) -> str:
     return f"COALESCE({alias}.marc_pbf, FALSE)"
 
@@ -82,7 +84,7 @@ def mapas_heatmap_from_views(
     cras_cod: str | None = None,
     bairro: str | None = None,
 ) -> dict:
-    """Agrega indicadores por bairro territorial com coordenadas médias (centroide)."""
+    """Pontos por família (coordenada real) com pesos por indicador — base para heatmap contínuo."""
     _require_views(conn)
 
     cras_sel = (cras_cod or "").strip() or "__todos__"
@@ -92,7 +94,13 @@ def mapas_heatmap_from_views(
         text(
             f"""
             WITH fam AS (
-              SELECT f.*
+              SELECT
+                f.codigo_familiar,
+                btrim(f.bairro::text) AS bairro,
+                btrim(f.num_cras::text) AS num_cras,
+                COALESCE(f.marc_pbf, FALSE) AS marc_pbf,
+                {_lat_sql()} AS lat,
+                {_lng_sql()} AS lng
               FROM vig.mvw_familia f
               WHERE COALESCE(f.tem_geo, FALSE)
                 AND btrim(COALESCE(f.bairro::text, '')) <> ''
@@ -105,28 +113,33 @@ def mapas_heatmap_from_views(
               FROM vig.mvw_pessoas p
               INNER JOIN fam ON fam.codigo_familiar = p.codigo_familiar
             ),
-            por_bairro AS (
+            por_familia AS (
               SELECT
-                btrim(f.bairro::text) AS bairro,
-                btrim(f.num_cras::text) AS num_cras,
-                AVG({_lat_sql()}) AS lat,
-                AVG({_lng_sql()}) AS lng,
-                COUNT(DISTINCT f.codigo_familiar)::bigint AS familias,
+                fam.codigo_familiar,
+                fam.bairro,
+                fam.num_cras,
+                fam.marc_pbf,
+                fam.lat,
+                fam.lng,
                 COUNT(pes.cadu_row_id)::bigint AS pessoas,
                 COUNT(pes.cadu_row_id) FILTER (WHERE {_CRIANCAS})::bigint AS criancas,
                 COUNT(pes.cadu_row_id) FILTER (WHERE {_IDOSOS})::bigint AS idosos,
-                COUNT(DISTINCT f.codigo_familiar) FILTER (WHERE {_familias_pbf_expr("f")})::bigint AS familias_pbf,
                 COUNT(pes.cadu_row_id) FILTER (
                   WHERE {_ADULTO_18_59} AND {_SEM_MEDIO_COMPLETO}
                 )::bigint AS adultos_sem_medio
-              FROM fam f
-              LEFT JOIN pes ON pes.codigo_familiar = f.codigo_familiar
-              GROUP BY 1, 2
+              FROM fam
+              LEFT JOIN pes ON pes.codigo_familiar = fam.codigo_familiar
+              GROUP BY
+                fam.codigo_familiar,
+                fam.bairro,
+                fam.num_cras,
+                fam.marc_pbf,
+                fam.lat,
+                fam.lng
             )
             SELECT *
-            FROM por_bairro
+            FROM por_familia
             WHERE lat IS NOT NULL AND lng IS NOT NULL
-            ORDER BY pessoas DESC
             """
         ),
         params,
@@ -138,24 +151,25 @@ def mapas_heatmap_from_views(
             "num_cras": str(r["num_cras"] or ""),
             "lat": round(float(r["lat"]), 5),
             "lng": round(float(r["lng"]), 5),
-            "familias": int(r["familias"] or 0),
             "pessoas": int(r["pessoas"] or 0),
             "criancas": int(r["criancas"] or 0),
             "idosos": int(r["idosos"] or 0),
-            "familias_pbf": int(r["familias_pbf"] or 0),
             "adultos_sem_medio": int(r["adultos_sem_medio"] or 0),
+            "na_folha_pbf": 1 if r["marc_pbf"] else 0,
         }
         for r in rows
     ]
 
+    bairros_distintos = len({p["bairro"] for p in pontos if p["bairro"]})
+
     totais_geo = {
         "criancas": sum(p["criancas"] for p in pontos),
         "idosos": sum(p["idosos"] for p in pontos),
-        "familias_pbf": sum(p["familias_pbf"] for p in pontos),
+        "familias_pbf": sum(p["na_folha_pbf"] for p in pontos),
         "adultos_sem_medio": sum(p["adultos_sem_medio"] for p in pontos),
         "pessoas": sum(p["pessoas"] for p in pontos),
-        "familias": sum(p["familias"] for p in pontos),
-        "bairros": len(pontos),
+        "familias": len(pontos),
+        "bairros": bairros_distintos,
     }
     totais_cadu = _totais_cadu_referencia(conn, where_extra, params)
 
@@ -173,10 +187,10 @@ def mapas_heatmap_from_views(
     return {
         "disponivel": len(pontos) > 0,
         "mensagem": (
-            "Intensidade por bairro (centroide geo). Totais no cabeçalho: georreferenciados "
-            "vs. CADU completo do recorte."
+            "Calor contínuo a partir das coordenadas das famílias georreferenciadas. "
+            "Totais no cabeçalho: mapa vs. CADU completo do recorte."
             if pontos
-            else "Sem bairros georreferenciados para o recorte. Ajuste filtros ou atualize a geo."
+            else "Sem famílias georreferenciadas para o recorte. Ajuste filtros ou atualize a geo."
         ),
         "recorte": {"cras_cod": cras_label, "bairro": bairro_sel},
         "centro": centro,
