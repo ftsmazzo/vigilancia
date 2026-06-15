@@ -10,6 +10,8 @@ import {
   LabelList,
 } from "recharts";
 import { rotuloExibicao } from "../../lib/caduLabels";
+import { useIsMobile } from "../../hooks/useMediaQuery";
+import ChartTooltip from "./ChartTooltip";
 
 export type BarItem = {
   rotulo: string;
@@ -45,15 +47,13 @@ const CustomTooltip = ({
   if (active && payload && payload.length) {
     const data = payload[0].payload;
     return (
-      <div className="fx-card chart-tooltip">
-        <p className="chart-tooltip-title">{rotuloExibicao(data.rotulo, uppercaseLabels)}</p>
-        <p className="chart-tooltip-line">
-          Total: <strong>{data.total.toLocaleString("pt-BR")}</strong>
-        </p>
-        <p className="chart-tooltip-line">
-          Representa: <strong>{data.pct.toLocaleString("pt-BR")}%</strong>
-        </p>
-      </div>
+      <ChartTooltip
+        title={rotuloExibicao(data.rotulo, uppercaseLabels)}
+        lines={[
+          { label: "Total", value: data.total.toLocaleString("pt-BR") },
+          { label: "Representa", value: `${data.pct.toLocaleString("pt-BR")}%` },
+        ]}
+      />
     );
   }
   return null;
@@ -73,9 +73,12 @@ export default function BarChartPanel({
   accent = "default",
   uppercaseLabels = false,
 }: Props) {
+  const isMobile = useIsMobile();
   const slice = items.filter((i) => i.total > 0).slice(0, maxBars);
   const colors = PALETTES[accent] || PALETTES.default;
-  const chartHeight = Math.max(220, slice.length * 44);
+  const chartHeight = Math.max(isMobile ? 200 : 220, slice.length * (isMobile ? 40 : 44));
+  const labelMax = isMobile ? 14 : 22;
+  const yAxisWidth = isMobile ? 100 : uppercaseLabels ? 148 : 128;
 
   return (
     <div className={`chart-panel fx-card bar-chart-panel bar-chart-panel--${accent}`}>
@@ -90,7 +93,12 @@ export default function BarChartPanel({
             <BarChart
               layout="vertical"
               data={slice}
-              margin={{ top: 8, right: 56, left: 4, bottom: 8 }}
+              margin={{
+                top: 8,
+                right: isMobile ? 8 : 56,
+                left: 4,
+                bottom: 8,
+              }}
             >
               <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--fx-border-subtle)" />
               <XAxis type="number" hide />
@@ -99,31 +107,38 @@ export default function BarChartPanel({
                 dataKey="rotulo"
                 tickFormatter={(val) => {
                   const label = rotuloExibicao(String(val), uppercaseLabels);
-                  return label.length > 22 ? `${label.substring(0, 22)}…` : label;
+                  return label.length > labelMax ? `${label.substring(0, labelMax)}…` : label;
                 }}
                 axisLine={false}
                 tickLine={false}
-                tick={{ fill: "var(--fx-muted)", fontSize: 11, fontWeight: 600 }}
-                width={uppercaseLabels ? 148 : 128}
+                tick={{ fill: "var(--fx-muted)", fontSize: isMobile ? 10 : 11, fontWeight: 600 }}
+                width={yAxisWidth}
               />
               <Tooltip
+                trigger={isMobile ? "click" : "hover"}
                 cursor={{ fill: "var(--fx-border-subtle)" }}
                 content={<CustomTooltip uppercaseLabels={uppercaseLabels} />}
+                wrapperStyle={{ zIndex: 1000, outline: "none" }}
               />
-              <Bar dataKey="total" radius={[0, 4, 4, 0]} barSize={22}>
+              <Bar dataKey="total" radius={[0, 4, 4, 0]} barSize={isMobile ? 18 : 22}>
                 {slice.map((entry, index) => (
                   <Cell key={entry.rotulo} fill={colors[index % colors.length]} />
                 ))}
-                <LabelList
-                  dataKey="total"
-                  position="right"
-                  formatter={fmtBarLabel}
-                  style={{ fill: "var(--fx-text-secondary)", fontSize: 11, fontWeight: 600 }}
-                />
+                {!isMobile && (
+                  <LabelList
+                    dataKey="total"
+                    position="right"
+                    formatter={fmtBarLabel}
+                    style={{ fill: "var(--fx-text-secondary)", fontSize: 11, fontWeight: 600 }}
+                  />
+                )}
               </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>
+      )}
+      {isMobile && slice.length > 0 && (
+        <p className="chart-panel-touch-hint">Toque na barra para ver o valor</p>
       )}
     </div>
   );

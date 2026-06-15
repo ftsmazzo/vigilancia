@@ -3,6 +3,12 @@ import { Bot, RotateCcw, Send, Sparkles, User } from "lucide-react";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
+const SUGGESTIONS = [
+  "Quantas famílias temos no município?",
+  "Quantas famílias no bairro Campos Elíseos?",
+  "Quantas famílias recebem Bolsa Família?",
+];
+
 type Props = {
   token: string;
 };
@@ -116,6 +122,8 @@ export default function AssistPage({ token }: Props) {
     inputRef.current?.focus();
   }
 
+  const isEmpty = messages.length === 0 && !loading;
+
   return (
     <div className="assist-page">
       <div className="assist-shell">
@@ -135,6 +143,7 @@ export default function AssistPage({ token }: Props) {
             onClick={novaConversa}
             disabled={loading}
             title="Nova conversa"
+            aria-label="Nova conversa"
           >
             <RotateCcw size={16} />
             <span>Nova conversa</span>
@@ -142,6 +151,31 @@ export default function AssistPage({ token }: Props) {
         </header>
 
         <div className="assist-thread" role="log" aria-label="Mensagens">
+          {isEmpty && (
+            <div className="assist-welcome">
+              <div className="assist-welcome-icon" aria-hidden>
+                <Sparkles size={28} />
+              </div>
+              <h2 className="assist-welcome-title">Como posso ajudar?</h2>
+              <p className="assist-welcome-sub">
+                Consulte famílias, Bolsa Família, CRAS, bairros e convivência com dados do município.
+              </p>
+              <div className="assist-chips" role="list">
+                {SUGGESTIONS.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    className="assist-chip"
+                    disabled={loading}
+                    onClick={() => void sendMessage(s)}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {messages.map((msg, i) => (
             <div
               key={`${i}-${msg.role}`}
@@ -193,7 +227,7 @@ export default function AssistPage({ token }: Props) {
               rows={1}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Pergunte sobre famílias, PBF, CRAS ou convivência…"
+              placeholder="Pergunte sobre famílias, PBF, CRAS…"
               disabled={loading}
               aria-label="Sua mensagem"
               onKeyDown={(e) => {
@@ -213,6 +247,7 @@ export default function AssistPage({ token }: Props) {
             </button>
           </div>
           <p className="assist-composer-hint">Enter para enviar · Shift+Enter para nova linha</p>
+          <p className="assist-composer-hint assist-composer-hint--mobile">Toque em enviar ou use Enter</p>
         </form>
       </div>
     </div>

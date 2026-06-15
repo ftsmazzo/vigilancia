@@ -14,6 +14,7 @@ import {
   Gauge,
   BarChart3,
   Map,
+  X,
 } from "lucide-react";
 import IngestaoPage from "./pages/IngestaoPage";
 import PainelIndicadoresInicio from "./pages/PainelIndicadoresInicio";
@@ -67,6 +68,23 @@ function AppShell({
 }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
+  useEffect(() => {
+    if (isSidebarOpen) {
+      document.body.classList.add("sidebar-open");
+    } else {
+      document.body.classList.remove("sidebar-open");
+    }
+    return () => document.body.classList.remove("sidebar-open");
+  }, [isSidebarOpen]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsSidebarOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   return (
     <div className="shell">
       {/* Mobile Sidebar Overlay */}
@@ -84,6 +102,14 @@ function AppShell({
             <strong className="shell-title">VigSocial</strong>
             <span className="shell-tagline">Vigilância socioassistencial</span>
           </div>
+          <button
+            type="button"
+            className="shell-sidebar-close btn-icon"
+            onClick={() => setIsSidebarOpen(false)}
+            aria-label="Fechar menu"
+          >
+            <X size={18} />
+          </button>
         </div>
 
         <nav className="shell-nav" aria-label="Principal" onClick={() => setIsSidebarOpen(false)}>

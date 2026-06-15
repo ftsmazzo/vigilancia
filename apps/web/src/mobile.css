@@ -1,0 +1,503 @@
+/*
+ * VigSocial — layout mobile (≤768px) e telas estreitas (≤480px)
+ * Safe areas, tipografia legível, touch targets 44px+, gráficos e chat fluidos.
+ */
+
+:root {
+  --shell-topbar-h: 3.25rem;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+.fx-glass {
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  padding: 0.5rem;
+  border: none;
+  border-radius: var(--fx-radius-sm);
+  background: transparent;
+  color: var(--fx-text);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn-icon:active {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.btn-sm {
+  font-size: 0.82rem;
+  padding: 0.45rem 0.75rem;
+  min-height: 2.5rem;
+}
+
+body.sidebar-open {
+  overflow: hidden;
+  touch-action: none;
+}
+
+/* —— Shell —— */
+@media (max-width: 900px) {
+  .shell-sidebar {
+    top: 0;
+    left: 0;
+    bottom: 0;
+    height: 100%;
+    height: 100dvh;
+    padding-top: var(--safe-top);
+    padding-bottom: var(--safe-bottom);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.35);
+  }
+
+  .shell-topbar {
+    padding: 0.5rem 0.75rem;
+    padding-left: max(0.75rem, var(--safe-left));
+    padding-right: max(0.75rem, var(--safe-right));
+    min-height: var(--shell-topbar-h);
+    gap: 0.5rem;
+  }
+
+  .shell-user {
+    gap: 0.5rem;
+    min-width: 0;
+  }
+
+  .shell-session {
+    align-items: flex-end;
+    min-width: 0;
+    max-width: 9rem;
+  }
+
+  .user-name {
+    font-size: 0.8rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+
+  .user-role {
+    font-size: 0.62rem;
+  }
+
+  .logout-btn span {
+    display: none;
+  }
+
+  .logout-btn {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    padding: 0.5rem;
+    justify-content: center;
+  }
+
+  .shell-main {
+    padding: 0.75rem;
+    padding-left: max(0.75rem, var(--safe-left));
+    padding-right: max(0.75rem, var(--safe-right));
+    padding-bottom: max(0.75rem, var(--safe-bottom));
+  }
+
+  .shell-sidebar-close {
+    display: flex;
+    margin-left: auto;
+  }
+
+  .shell-brand {
+    width: 100%;
+  }
+}
+
+.shell-sidebar-close {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: none;
+  border-radius: var(--fx-radius-sm);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--fx-muted);
+  cursor: pointer;
+}
+
+.shell-brand {
+  flex: 1;
+  min-width: 0;
+}
+
+.nav-link {
+  min-height: 2.75rem;
+  padding-top: 0.55rem;
+  padding-bottom: 0.55rem;
+}
+
+/* —— Botões globais —— */
+@media (max-width: 768px) {
+  .btn {
+    font-size: 0.88rem;
+    min-height: 2.75rem;
+    padding: 0.55rem 1rem;
+  }
+
+  .vig-actions .btn,
+  .vig-actions button {
+    min-width: 0;
+    flex: 1 1 100%;
+  }
+
+  .ivs-hero-actions,
+  .mapas-hero-actions,
+  .home-obs-actions {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .ivs-hero-actions .btn,
+  .mapas-hero-actions .btn,
+  .home-obs-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+/* —— KPIs e grids —— */
+@media (max-width: 480px) {
+  .kpi-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .home-obs-kpis {
+    grid-template-columns: 1fr;
+  }
+
+  .obs-mds-kpis {
+    grid-template-columns: 1fr;
+  }
+
+  .chart-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .chart-grid {
+    grid-template-columns: 1fr;
+    gap: 0.85rem;
+  }
+
+  .chart-panel {
+    padding: 0.85rem 0.9rem;
+  }
+
+  .chart-panel-title {
+    font-size: 0.9rem;
+  }
+
+  .chart-panel-sub {
+    font-size: 0.75rem;
+  }
+}
+
+/* —— Gráficos Recharts —— */
+.chart-tooltip--touch {
+  max-width: min(280px, calc(100vw - 2.5rem));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+@media (max-width: 768px) {
+  .chart-tooltip {
+    padding: 0.65rem 0.85rem;
+    min-width: 0;
+    font-size: 0.88rem;
+  }
+
+  .chart-tooltip-title {
+    font-size: 0.88rem;
+    line-height: 1.35;
+    word-break: break-word;
+  }
+
+  .chart-tooltip-line {
+    font-size: 0.82rem;
+  }
+
+  .donut-chart .recharts-legend-wrapper {
+    font-size: 0.75rem !important;
+  }
+
+  .donut-legend-label {
+    font-size: 0.75rem;
+  }
+
+  .bar-chart-panel-wrap {
+    touch-action: pan-y;
+  }
+
+  .recharts-wrapper {
+    touch-action: pan-y;
+  }
+}
+
+.donut-chart--mobile .donut-chart-inner {
+  height: 200px !important;
+}
+
+.donut-chart--mobile .donut-center-label {
+  width: 90px !important;
+}
+
+/* —— Barras CSS (home / observatório) —— */
+@media (max-width: 480px) {
+  .home-hbar-row {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+    font-size: 0.78rem;
+  }
+
+  .home-hbar-val {
+    text-align: left;
+    min-width: 0;
+  }
+
+  .home-obs-chart:has(.home-hbar-fill--renda_0_218) .home-hbar-row {
+    grid-template-columns: 1fr;
+    font-size: 0.72rem;
+  }
+
+  .obs-mds-hbar .home-hbar-label {
+    min-width: 0;
+  }
+}
+
+/* —— Mapas —— */
+@media (max-width: 768px) {
+  .mapas-heatmap-canvas {
+    height: min(52vh, 300px);
+  }
+
+  .home-map {
+    height: min(50vh, 260px);
+  }
+}
+
+/* —— Assistente VigIA (chat mobile) —— */
+@media (max-width: 768px) {
+  .shell-main:has(.assist-page) {
+    padding: 0;
+    padding-bottom: var(--safe-bottom);
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - var(--shell-topbar-h) - var(--safe-top));
+    max-height: calc(100dvh - var(--shell-topbar-h) - var(--safe-top));
+    overflow: hidden;
+  }
+
+  .assist-page {
+    flex: 1;
+    padding: 0;
+    max-width: none;
+    min-height: 0;
+    height: 100%;
+  }
+
+  .assist-shell {
+    flex: 1;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    min-height: 0;
+    box-shadow: none;
+  }
+
+  .assist-header {
+    padding: 0.65rem 0.85rem;
+    padding-left: max(0.85rem, var(--safe-left));
+    padding-right: max(0.85rem, var(--safe-right));
+    gap: 0.5rem;
+  }
+
+  .assist-header-title {
+    font-size: 0.95rem;
+  }
+
+  .assist-header-sub {
+    font-size: 0.7rem;
+  }
+
+  .assist-new-btn {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    padding: 0.5rem;
+    justify-content: center;
+  }
+
+  .assist-thread {
+    padding: 0.75rem 0.65rem;
+    padding-left: max(0.65rem, var(--safe-left));
+    padding-right: max(0.65rem, var(--safe-right));
+    gap: 0.75rem;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .assist-row--user,
+  .assist-row--bot {
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  .assist-bubble {
+    max-width: 92%;
+    font-size: 0.9rem;
+    padding: 0.65rem 0.85rem;
+    line-height: 1.5;
+  }
+
+  .assist-welcome {
+    min-height: auto;
+    padding: 1.25rem 0.75rem 0.5rem;
+  }
+
+  .assist-welcome-title {
+    font-size: 1.1rem;
+  }
+
+  .assist-welcome-sub {
+    font-size: 0.85rem;
+    margin-bottom: 1rem;
+  }
+
+  .assist-chips {
+    flex-direction: column;
+    align-items: stretch;
+    max-width: 100%;
+    gap: 0.45rem;
+  }
+
+  .assist-chip {
+    width: 100%;
+    font-size: 0.85rem;
+    padding: 0.65rem 0.9rem;
+    min-height: 2.75rem;
+    border-radius: var(--fx-radius);
+    text-align: left;
+  }
+
+  .assist-composer {
+    padding: 0.5rem 0.65rem;
+    padding-left: max(0.65rem, var(--safe-left));
+    padding-right: max(0.65rem, var(--safe-right));
+    padding-bottom: max(0.65rem, var(--safe-bottom));
+    background: rgba(15, 23, 42, 0.6);
+    border-top: 1px solid var(--fx-border-subtle);
+    flex-shrink: 0;
+  }
+
+  .assist-composer-inner {
+    gap: 0.45rem;
+    align-items: flex-end;
+  }
+
+  .assist-input {
+    font-size: 1rem;
+    min-height: 2.75rem;
+    max-height: 6rem;
+    line-height: 1.4;
+  }
+
+  .assist-send-btn {
+    width: 2.75rem;
+    height: 2.75rem;
+    flex-shrink: 0;
+  }
+
+  .assist-composer-hint {
+    display: none;
+  }
+
+  .assist-composer-hint--mobile {
+    display: block;
+    font-size: 0.72rem;
+    color: var(--fx-caption);
+    text-align: center;
+    margin: 0.35rem 0 0;
+  }
+
+  .assist-sql-details summary {
+    font-size: 0.78rem;
+    min-height: 2.25rem;
+    display: flex;
+    align-items: center;
+  }
+
+  .assist-sql-pre {
+    font-size: 0.68rem;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+.assist-composer-hint--mobile {
+  display: none;
+}
+
+/* —— Páginas painel (hero / filtros) —— */
+@media (max-width: 768px) {
+  .ivs-hero,
+  .mapas-hero,
+  .caract-hero,
+  .home-obs-hero {
+    padding: 1rem;
+  }
+
+  .ivs-hero h1,
+  .mapas-hero h1 {
+    font-size: 1.15rem;
+  }
+
+  .ivs-filtros-grid,
+  .mapas-filtros-grid,
+  .caract-filtros-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ivs-filtros select,
+  .mapas-filtros select,
+  .caract-filtros select {
+    font-size: 1rem;
+    min-height: 2.75rem;
+  }
+
+  .kpi-table-wrap,
+  .cras-table-wrap {
+    margin-left: calc(-1 * max(0.75rem, var(--safe-left)));
+    margin-right: calc(-1 * max(0.75rem, var(--safe-right)));
+    padding-left: max(0.75rem, var(--safe-left));
+    padding-right: max(0.75rem, var(--safe-right));
+    border-radius: 0;
+  }
+}
+
+/* —— Ingestão / formulários —— */
+@media (max-width: 480px) {
+  .ingestao-nav-item {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .page {
+    padding: 1rem;
+  }
+}

@@ -1,5 +1,7 @@
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { rotuloExibicao } from "../../lib/caduLabels";
+import { useIsMobile } from "../../hooks/useMediaQuery";
+import ChartTooltip from "./ChartTooltip";
 
 export type DonutSlice = {
   rotulo: string;
@@ -8,14 +10,14 @@ export type DonutSlice = {
 };
 
 const PALETTE = [
-  "#10b981", // emerald-500
-  "#8b5cf6", // violet-500
-  "#3b82f6", // blue-500
-  "#f59e0b", // amber-500
-  "#ec4899", // pink-500
-  "#06b6d4", // teal-500
-  "#6366f1", // indigo-500
-  "#f43f5e", // rose-500
+  "#10b981",
+  "#8b5cf6",
+  "#3b82f6",
+  "#f59e0b",
+  "#ec4899",
+  "#06b6d4",
+  "#6366f1",
+  "#f43f5e",
 ];
 
 type Props = {
@@ -39,15 +41,13 @@ const CustomTooltip = ({
   if (active && payload && payload.length) {
     const data = payload[0].payload;
     return (
-      <div className="fx-card chart-tooltip">
-        <p className="chart-tooltip-title">{rotuloExibicao(data.rotulo, uppercaseLabels)}</p>
-        <p className="chart-tooltip-line">
-          Total: <strong>{data.total.toLocaleString("pt-BR")}</strong>
-        </p>
-        <p className="chart-tooltip-line">
-          Representa: <strong>{data.pct.toLocaleString("pt-BR")}%</strong>
-        </p>
-      </div>
+      <ChartTooltip
+        title={rotuloExibicao(data.rotulo, uppercaseLabels)}
+        lines={[
+          { label: "Total", value: data.total.toLocaleString("pt-BR") },
+          { label: "Representa", value: `${data.pct.toLocaleString("pt-BR")}%` },
+        ]}
+      />
     );
   }
   return null;
@@ -61,26 +61,33 @@ export default function DonutChart({
   centerValue,
   uppercaseLabels = false,
 }: Props) {
+  const isMobile = useIsMobile();
   const total = items.reduce((s, i) => s + i.total, 0);
   const slices = items.filter((i) => i.total > 0);
+  const chartHeight = isMobile ? 300 : 260;
 
   return (
-    <div className="chart-panel fx-card donut-chart">
+    <div className={`chart-panel fx-card donut-chart${isMobile ? " donut-chart--mobile" : ""}`}>
       <h3 className="chart-panel-title">{title}</h3>
       {subtitle && <p className="chart-panel-sub">{subtitle}</p>}
-      
+
       {slices.length === 0 ? (
-        <p className="ingestao-desc" style={{ marginTop: "2rem", marginBottom: "2rem" }}>Sem dados.</p>
+        <p className="ingestao-desc" style={{ marginTop: "2rem", marginBottom: "2rem" }}>
+          Sem dados.
+        </p>
       ) : (
-        <div style={{ width: "100%", height: 260, position: "relative" }}>
+        <div
+          className="donut-chart-inner"
+          style={{ width: "100%", height: chartHeight, position: "relative" }}
+        >
           <ResponsiveContainer>
             <PieChart>
               <Pie
                 data={slices}
                 cx="50%"
-                cy="50%"
-                innerRadius={65}
-                outerRadius={95}
+                cy={isMobile ? "42%" : "50%"}
+                innerRadius={isMobile ? 52 : 65}
+                outerRadius={isMobile ? 80 : 95}
                 paddingAngle={2}
                 dataKey="total"
                 stroke="none"
@@ -89,41 +96,75 @@ export default function DonutChart({
                   <Cell key={`cell-${index}`} fill={PALETTE[index % PALETTE.length]} />
                 ))}
               </Pie>
-              <Tooltip content={<CustomTooltip uppercaseLabels={uppercaseLabels} />} />
-              <Legend 
-                layout="vertical" 
-                verticalAlign="middle" 
-                align="right"
+              <Tooltip
+                trigger={isMobile ? "click" : "hover"}
+                content={<CustomTooltip uppercaseLabels={uppercaseLabels} />}
+                wrapperStyle={{ zIndex: 1000, outline: "none" }}
+              />
+              <Legend
+                layout={isMobile ? "horizontal" : "vertical"}
+                verticalAlign={isMobile ? "bottom" : "middle"}
+                align={isMobile ? "center" : "right"}
+                wrapperStyle={
+                  isMobile
+                    ? { paddingTop: "0.5rem", fontSize: "0.75rem" }
+                    : undefined
+                }
                 formatter={(value, entry: { payload?: DonutSlice }) => {
                   const data = entry.payload;
                   if (!data) return value;
+                  const label = rotuloExibicao(data.rotulo, uppercaseLabels);
+                  if (isMobile && label.length > 18) {
+                    return (
+                      <span className="donut-legend-label">
+                        {label.substring(0, 18)}… ({data.pct}%)
+                      </span>
+                    );
+                  }
                   return (
                     <span className="donut-legend-label">
-                      {rotuloExibicao(data.rotulo, uppercaseLabels)} ({data.pct}%)
+                      {label} ({data.pct}%)
                     </span>
                   );
                 }}
               />
             </PieChart>
           </ResponsiveContainer>
-          
+
           {(centerValue || centerLabel) && (
-            <div style={{
-              position: "absolute",
-              top: "50%",
-              left: "50%",
-              transform: "translate(-50%, -50%)",
-              textAlign: "center",
-              pointerEvents: "none",
-              width: "120px"
-            }}>
+            <div
+              className="donut-center-label"
+              style={{
+                position: "absolute",
+                top: isMobile ? "42%" : "50%",
+                left: "50%",
+                transform: "translate(-50%, -50%)",
+                textAlign: "center",
+                pointerEvents: "none",
+                width: "120px",
+              }}
+            >
               {centerValue && (
-                <div style={{ fontSize: "1.2rem", fontWeight: 700, color: "var(--fx-text)", lineHeight: 1.2 }}>
+                <div
+                  style={{
+                    fontSize: isMobile ? "1.05rem" : "1.2rem",
+                    fontWeight: 700,
+                    color: "var(--fx-text)",
+                    lineHeight: 1.2,
+                  }}
+                >
                   {centerValue}
                 </div>
               )}
               {centerLabel && (
-                <div style={{ fontSize: "0.7rem", textTransform: "uppercase", color: "var(--fx-subtle)", marginTop: "0.1rem" }}>
+                <div
+                  style={{
+                    fontSize: "0.7rem",
+                    textTransform: "uppercase",
+                    color: "var(--fx-subtle)",
+                    marginTop: "0.1rem",
+                  }}
+                >
                   {centerLabel}
                 </div>
               )}
@@ -132,9 +173,15 @@ export default function DonutChart({
         </div>
       )}
       {total > 0 && !centerValue && (
-        <p className="donut-foot" style={{ margin: "0", fontSize: "0.8rem", color: "var(--fx-subtle)", textAlign: "center" }}>
+        <p
+          className="donut-foot"
+          style={{ margin: "0", fontSize: "0.8rem", color: "var(--fx-subtle)", textAlign: "center" }}
+        >
           Total: {total.toLocaleString("pt-BR")} pessoas
         </p>
+      )}
+      {isMobile && slices.length > 0 && (
+        <p className="chart-panel-touch-hint">Toque na fatia para ver detalhes</p>
       )}
     </div>
   );

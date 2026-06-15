@@ -1,5 +1,7 @@
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, Tooltip } from "recharts";
 import { rotuloAmigavel } from "../../lib/caduLabels";
+import { useIsMobile } from "../../hooks/useMediaQuery";
+import ChartTooltip from "./ChartTooltip";
 
 export type RadarItem = {
   name: string;
@@ -15,24 +17,21 @@ type Props = {
   stroke?: string;
 };
 
-const CustomTooltip = ({ active, payload }: any) => {
+const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ payload: RadarItem; value: number; stroke?: string }> }) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
     return (
-      <div className="fx-card" style={{ padding: "0.75rem", minWidth: "150px" }}>
-        <p style={{ margin: "0 0 0.5rem", fontWeight: 600, color: "var(--fx-text)", textAlign: "center" }}>
-          {rotuloAmigavel(data.name)}
-        </p>
-        <p style={{ margin: 0, fontSize: "1.1rem", color: payload[0].stroke, textAlign: "center", fontWeight: "bold" }}>
-          {payload[0].value.toLocaleString("pt-BR")}
-        </p>
-      </div>
+      <ChartTooltip
+        title={rotuloAmigavel(data.name)}
+        lines={[{ label: "Valor", value: payload[0].value.toLocaleString("pt-BR") }]}
+      />
     );
   }
   return null;
 };
 
 export default function RadarChartPanel({ title, subtitle, data, dataKey, fill = "rgba(16, 185, 129, 0.4)", stroke = "#10b981" }: Props) {
+  const isMobile = useIsMobile();
   return (
     <div className="chart-panel fx-card">
       <h3 className="chart-panel-title">{title}</h3>
@@ -54,7 +53,11 @@ export default function RadarChartPanel({ title, subtitle, data, dataKey, fill =
                 tick={{ fill: "var(--fx-muted)", fontSize: 11 }}
               />
               <PolarRadiusAxis angle={30} domain={[0, 'auto']} tick={{ fill: "var(--fx-subtle)", fontSize: 10 }} />
-              <Tooltip content={<CustomTooltip />} />
+              <Tooltip
+                trigger={isMobile ? "click" : "hover"}
+                content={<CustomTooltip />}
+                wrapperStyle={{ zIndex: 1000, outline: "none" }}
+              />
               <Radar name={title} dataKey={dataKey} stroke={stroke} fill={fill} fillOpacity={0.6} />
             </RadarChart>
           </ResponsiveContainer>

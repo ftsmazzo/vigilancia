@@ -1456,6 +1456,19 @@ button:not([class*="btn"]):disabled {
   margin-top: 0.25rem;
 }
 
+.chart-panel-touch-hint {
+  margin: 0.5rem 0 0;
+  font-size: 0.72rem;
+  color: var(--fx-caption);
+  text-align: center;
+}
+
+@media (min-width: 769px) {
+  .chart-panel-touch-hint {
+    display: none;
+  }
+}
+
 .donut-legend-label {
   color: var(--fx-text-secondary);
   font-size: 0.82rem;
