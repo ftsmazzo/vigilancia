@@ -1,5 +1,5 @@
 import { useEffect, useState, type Dispatch, type FormEvent, type ReactNode, type SetStateAction } from "react";
-import { BrowserRouter, Navigate, NavLink, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { 
   LayoutDashboard, 
   Database, 
@@ -27,9 +27,13 @@ import CaracterizacaoPage from "./pages/CaracterizacaoPage";
 import VigilanciaPage from "./pages/VigilanciaPage";
 import IvsPage from "./pages/IvsPage";
 import MapasPage from "./pages/MapasPage";
+import MobileBottomNav from "./components/MobileBottomNav";
+import { useIsMobile } from "./hooks/useMediaQuery";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const TOKEN_KEY = "vigsocial_token";
+
+const ADMIN_ROUTES = ["/mapas", "/ingestao", "/vigilancia", "/municipio", "/convivencia", "/usuarios"];
 
 type HealthResponse = {
   status: string;
@@ -67,6 +71,13 @@ function AppShell({
   children: ReactNode;
 }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const isMobile = useIsMobile();
+  const location = useLocation();
+  const moreActive = ADMIN_ROUTES.some((path) => location.pathname.startsWith(path));
+
+  useEffect(() => {
+    setIsSidebarOpen(false);
+  }, [location.pathname]);
 
   useEffect(() => {
     if (isSidebarOpen) {
@@ -93,7 +104,10 @@ function AppShell({
       )}
 
       {/* Sidebar */}
-      <aside className={`shell-sidebar fx-glass ${isSidebarOpen ? "open" : ""}`}>
+      <aside
+        className={`shell-sidebar fx-glass ${isSidebarOpen ? "open" : ""}${isMobile ? " shell-sidebar--drawer" : ""}`}
+        aria-label={isMobile ? "Menu Mais" : "Menu principal"}
+      >
         <div className="shell-brand">
           <span className="shell-logo" aria-hidden>
             VS
@@ -113,6 +127,7 @@ function AppShell({
         </div>
 
         <nav className="shell-nav" aria-label="Principal" onClick={() => setIsSidebarOpen(false)}>
+          {!isMobile && (
           <div className="shell-nav-group">
             <span className="shell-nav-group-label">Painéis</span>
             <NavLink to="/" end className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
@@ -140,6 +155,17 @@ function AppShell({
               <span>Assistente</span>
             </NavLink>
           </div>
+          )}
+
+          {isMobile && (
+          <div className="shell-nav-group">
+            <span className="shell-nav-group-label">Explorar</span>
+            <NavLink to="/mapas" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+              <Map className="nav-icon" size={18} />
+              <span>Mapas</span>
+            </NavLink>
+          </div>
+          )}
 
           <div className="shell-nav-group shell-nav-group--admin">
             <span className="shell-nav-group-label">Administração</span>
@@ -174,6 +200,7 @@ function AppShell({
       {/* Main Content Area */}
       <div className="shell-content">
         <header className="shell-topbar fx-glass">
+          {!isMobile && (
           <button 
             type="button" 
             className="btn-icon mobile-menu-btn" 
@@ -182,6 +209,14 @@ function AppShell({
           >
             <Menu size={20} />
           </button>
+          )}
+
+          {isMobile && (
+            <div className="shell-topbar-brand">
+              <span className="shell-logo shell-logo--sm" aria-hidden>VS</span>
+              <strong className="shell-topbar-title">VigSocial</strong>
+            </div>
+          )}
 
           <div className="shell-user">
             <div className="shell-session">
@@ -196,6 +231,10 @@ function AppShell({
         </header>
 
         <main className="shell-main">{children}</main>
+
+        {isMobile && (
+          <MobileBottomNav onMore={() => setIsSidebarOpen(true)} moreActive={moreActive} />
+        )}
       </div>
     </div>
   );

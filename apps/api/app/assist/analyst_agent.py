@@ -6,6 +6,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
 from .analyst_context import AnalystContext, build_analyst_context
+from .answer_trim import trim_answer_boilerplate
 from .evidence import EvidencePack
 from .llm import chat_completion
 from .response_mode import response_mode_hint
@@ -81,6 +82,7 @@ def interpret_evidence(
         },
     ]
     raw = chat_completion(messages, temperature=0.2, role="analyst").strip()
+    raw = trim_answer_boilerplate(raw)
     if user_first_name and raw and not raw.lower().startswith(user_first_name.lower()):
         return f"{user_first_name}, {raw[0].lower()}{raw[1:]}"
     return raw

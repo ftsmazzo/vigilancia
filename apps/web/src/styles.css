@@ -285,6 +285,14 @@ body::before {
   box-shadow: var(--fx-shadow-glow);
 }
 
+.shell-logo--sm {
+  width: 1.85rem;
+  height: 1.85rem;
+  font-size: 0.55rem;
+  border-radius: 8px;
+  box-shadow: none;
+}
+
 .shell-brand-text {
   display: flex;
   flex-direction: column;

@@ -23,6 +23,7 @@ from .bairro_resolver import (
     should_resolve_bairro,
     try_pessoas_bairro_metric,
 )
+from .answer_trim import trim_answer_boilerplate
 from .analyst_agent import interpret_evidence
 from .canonical_metrics import try_canonical_metric
 from .conversation_intent import (
@@ -83,26 +84,6 @@ ORCHESTRATOR_FINALIZE_SYSTEM = """Você é VigIA. Transforme o resultado numéri
 - Se o resultado for desdobramento por CRAS pedido explicitamente: liste na ordem numérica
 """
 
-_BOILERPLATE_TRAILERS = (
-    re.compile(
-        r"(?:\n\n|\.\s+)Esse número representa[^.!?]*[.!?]?\s*$",
-        re.I | re.S,
-    ),
-    re.compile(
-        r"(?:\n\n|\.\s+)Esse indicador (?:representa|mostra|reflete)[^.!?]*[.!?]?\s*$",
-        re.I | re.S,
-    ),
-    re.compile(
-        r"(?:\n\n|\.\s+)Isso (?:representa|corresponde|indica)[^.!?]*transferência de renda[^.!?]*[.!?]?\s*$",
-        re.I | re.S,
-    ),
-    re.compile(
-        r"(?:\n\n|\.\s+)Isso significa que[^.!?]*[.!?]?\s*$",
-        re.I | re.S,
-    ),
-)
-
-
 def _municipio_nome(municipio_block: str) -> str:
     m = re.search(r"Município:\s*\*\*([^*]+)\*\*", municipio_block)
     return m.group(1).strip() if m else ""
@@ -127,14 +108,7 @@ def _first_name(full_name: str | None) -> str:
 
 
 def _trim_answer_boilerplate(answer: str) -> str:
-    text = answer.strip()
-    for _ in range(4):
-        prev = text
-        for pat in _BOILERPLATE_TRAILERS:
-            text = pat.sub("", text).strip()
-        if text == prev:
-            break
-    return re.sub(r"\n{3,}", "\n\n", text).strip()
+    return trim_answer_boilerplate(answer)
 
 
 def _user_context_block(user: User, municipio_block: str) -> str:
