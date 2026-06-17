@@ -264,6 +264,8 @@ def _try_bairro_municipio_planning(
             num_cras=num_cras or None,
             demanda=total,
             sisc=sisc,
+            use_ivs_lens=True,
+            message=message,
         )
         reflex = attach_territorial_ranking(
             reflex,
@@ -418,6 +420,8 @@ def try_pbf_desbloqueio_acao_metric(
             faixa_label="Bolsa Família — manutenção SIBEC (bloqueio)",
             sibec_focus="bloqueio",
             sibec_competencia=competencia,
+            use_ivs_lens=True,
+            message=message,
         )
         reflex = attach_territorial_ranking(
             reflex,
@@ -529,6 +533,8 @@ def try_cadu_territorial_acao_metric(
             sisc=None,
             demanda_label=f"Famílias desatualizadas (≥24 meses TAC) — {bairro}",
             faixa_label="atualização cadastral territorial",
+            use_ivs_lens=True,
+            message=message,
         )
         reflex = attach_territorial_ranking(
             reflex,
@@ -720,6 +726,8 @@ def try_planning_coverage_metric(
             num_cras=num_cras,
             demanda=demanda,
             sisc=sisc,
+            use_ivs_lens=True,
+            message=message,
         )
         return {
             "answer": "",
@@ -850,6 +858,8 @@ def try_planning_demand_metric(
                 num_cras=num_cras,
                 demanda=total,
                 sisc=sisc,
+                use_ivs_lens=True,
+                message=message,
             )
             return {
                 "answer": "",

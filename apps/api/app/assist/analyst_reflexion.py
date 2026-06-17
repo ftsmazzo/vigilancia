@@ -25,6 +25,11 @@ from .cras_registry import (
 from ..vigilance.familia_mview import _table_exists
 from ..vigilance.sibec_manut_mview import latest_manut_competencia
 from .evidence import EvidencePack
+from .ivs_context_lens import (
+    build_ivs_lens_playbook_snippet,
+    collect_contextual_ivs_indicator_facts,
+    resolve_planning_ivs_lens,
+)
 
 REFLEXION_VERSION = "2.0"
 
@@ -177,6 +182,8 @@ não para **despejar** dados.
 | A↑ demanda + B↑ carência + D↓ IVS | Prioridade operacional (**atender quem não está**); IVS baixo modera, não veta |
 | A↑ + B↓ cobertura SISC (>70%) | Foco em **ampliação/qualidade**, não implantação do zero |
 | C↑ bloqueios SIBEC (teve_bloqueio) | Prioridade para **ação de desbloqueio PBF** — cite número e competência |
+| D: indicador IVS saliente + C/SIBEC alinhados | Reforço estrutural — ex.: DR3 alto + bloqueio revisão cadastral |
+| D: dimensão IVS baixa + B↑ carência SISC | Urgência **operacional** (atender quem falta), não só vulnerabilidade estrutural |
 | C↑ pobreza + E↑ riscos domiciliares | Reforço de proteção social; SCFV pode ser insuficiente sozinho — sinalize |
 | F↑ trabalho infantil / fora da escola | Adiciona urgência de proteção além da contagem etária |
 | G: SISC em CRAS ≠ CRAS territorial | Articulação territorial — **CRAS Centro = CRAS 1 (Central)**; não tratar como unidades distintas |
@@ -353,6 +360,8 @@ def collect_territorial_reflexion(
     faixa_label: str | None = None,
     sibec_focus: str | None = None,
     sibec_competencia: str | None = None,
+    use_ivs_lens: bool = False,
+    message: str = "",
 ) -> TerritorialReflexion:
     """Coleta fatos multi-eixo para o Especialista — máximo disponível nas views."""
     faixa = faixa_label or f"{age_min} a {age_max} anos"
@@ -876,6 +885,18 @@ def collect_territorial_reflexion(
                 )
             )
 
+        if use_ivs_lens:
+            lens = resolve_planning_ivs_lens(
+                sibec_focus=sibec_focus,
+                faixa_label=faixa_label,
+                age_min=age_min,
+                age_max=age_max,
+                message=message,
+            )
+            for row in collect_contextual_ivs_indicator_facts(conn, bairro=b, lens=lens):
+                facts.append(row)
+                axes_present.add("D")
+
     # --- E — moradia / riscos ---
     if _table_exists(conn, "vig", "mvw_familia_domicilio"):
         dom = conn.execute(
@@ -978,6 +999,17 @@ def collect_territorial_reflexion(
             axes_present.add("F")
 
     guide = build_synthesis_guide(facts, bairro=b, faixa=faixa)
+    if use_ivs_lens:
+        lens = resolve_planning_ivs_lens(
+            sibec_focus=sibec_focus,
+            faixa_label=faixa_label,
+            age_min=age_min,
+            age_max=age_max,
+            message=message,
+        )
+        snippet = build_ivs_lens_playbook_snippet(lens)
+        if snippet:
+            guide = f"{guide}\n\n{snippet}"
     return TerritorialReflexion(
         bairro=b,
         faixa_etaria=faixa,
@@ -1026,6 +1058,8 @@ def collect_reflexion_result(
     faixa_label: str | None = None,
     sibec_focus: str | None = None,
     sibec_competencia: str | None = None,
+    use_ivs_lens: bool = False,
+    message: str = "",
 ) -> dict[str, Any]:
     """Pacote completo para o orquestrador (fatos + guia + metadados)."""
     reflexion = collect_territorial_reflexion(
@@ -1041,6 +1075,8 @@ def collect_reflexion_result(
         faixa_label=faixa_label,
         sibec_focus=sibec_focus,
         sibec_competencia=sibec_competencia,
+        use_ivs_lens=use_ivs_lens,
+        message=message,
     )
     return {
         "preview": reflexion.facts,
