@@ -7,7 +7,7 @@ type Props = {
   token: string;
 };
 
-type VigilanciaTab = "familia" | "domicilio" | "pessoas" | "sisc" | "ivs";
+type VigilanciaTab = "familia" | "domicilio" | "pessoas" | "sisc" | "ivs" | "sibec";
 
 type SiscQualificacaoResponse = {
   status: string;
@@ -66,6 +66,16 @@ type IvsRefreshResponse = {
   warnings: string[];
 };
 
+type SibecManutRefreshResponse = {
+  status: string;
+  view_schema: string;
+  view_name: string;
+  row_count: number;
+  competencias: string[];
+  elapsed_ms: number;
+  warnings: string[];
+};
+
 type RefreshAllResponse = {
   status: string;
   elapsed_ms: number;
@@ -87,6 +97,7 @@ export default function VigilanciaPage({ token }: Props) {
   const [domicilioResult, setDomicilioResult] = useState<DomicilioRefreshResponse | null>(null);
   const [pessoasResult, setPessoasResult] = useState<PessoasRefreshResponse | null>(null);
   const [ivsResult, setIvsResult] = useState<IvsRefreshResponse | null>(null);
+  const [sibecResult, setSibecResult] = useState<SibecManutRefreshResponse | null>(null);
   const [refreshAllResult, setRefreshAllResult] = useState<RefreshAllResponse | null>(null);
   const [siscResult, setSiscResult] = useState<SiscQualificacaoResponse | null>(null);
   const [siscKpis, setSiscKpis] = useState<SiscKpisResumo | null>(null);
@@ -289,6 +300,36 @@ export default function VigilanciaPage({ token }: Props) {
     }
   }
 
+  async function refreshSibecManut() {
+    setError("");
+    setSibecResult(null);
+    setBusy(true);
+    startProgressAnimation();
+    try {
+      const response = await fetch(`${API_URL}/api/v1/vigilance/materialized-views/sibec-manut/refresh`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = (await response.json().catch(() => ({}))) as SibecManutRefreshResponse & { detail?: unknown };
+      if (!response.ok) {
+        const msg =
+          typeof data.detail === "string"
+            ? data.detail
+            : Array.isArray(data.detail)
+              ? JSON.stringify(data.detail)
+              : "Falha ao gerar MV SIBEC Manutenções.";
+        throw new Error(msg);
+      }
+      stopProgressAnimation(100);
+      setSibecResult(data);
+    } catch (e) {
+      stopProgressAnimation(0);
+      setError(e instanceof Error ? e.message : "Erro inesperado.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function refreshAllViews() {
     setError("");
     setRefreshAllResult(null);
@@ -386,6 +427,17 @@ export default function VigilanciaPage({ token }: Props) {
           >
             <span className="ingestao-nav-label">IVS</span>
             <span className="ingestao-nav-hint">Índice de Vulnerabilidade Social</span>
+          </button>
+          <button
+            type="button"
+            className={`ingestao-nav-item ${tab === "sibec" ? "active" : ""}`}
+            onClick={() => {
+              setError("");
+              setTab("sibec");
+            }}
+          >
+            <span className="ingestao-nav-label">SIBEC Manutenções</span>
+            <span className="ingestao-nav-hint">Eventos PBF × CRAS (nível família)</span>
           </button>
           <button
             type="button"
@@ -674,6 +726,80 @@ export default function VigilanciaPage({ token }: Props) {
                   {refreshAllResult.warnings.length > 0 && (
                     <ul className="vig-warnings">
                       {refreshAllResult.warnings.map((w) => (
+                        <li key={w}>{w}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </section>
+          )}
+
+          {tab === "sibec" && (
+            <section className="ingestao-panel">
+              <h1>SIBEC — Manutenções PBF</h1>
+              <p className="ingestao-desc">
+                Consolida <code className="inline-code">raw.sibec__manutencoes</code> em{" "}
+                <strong>1 linha por família × competência</strong> (nível <code className="inline-code">NIVEL_ACAO=00</code>
+                ), com ação principal = última do mês e território via <strong>vig.mvw_familia</strong>. Requer ingestão
+                dos analíticos e visão Família atualizada. Tabela:{" "}
+                <code className="inline-code">vig.mvw_sibec_manut_familia_mes</code>.
+              </p>
+
+              <ol className="vig-steps" style={{ margin: "0 0 1rem", paddingLeft: "1.25rem", color: "var(--fx-muted)" }}>
+                <li>
+                  <Link to="/ingestao">Ingestão</Link> → SIBEC Manutenções (competência AAAAMM)
+                </li>
+                <li>
+                  Aba <button type="button" className="link-button" onClick={() => setTab("familia")}>Família</button> →
+                  Gerar / atualizar visão
+                </li>
+                <li>Botão abaixo → gerar MV e abrir painel em <Link to="/sibec">SIBEC</Link></li>
+              </ol>
+
+              <div className="vig-actions" style={{ flexWrap: "wrap", gap: "0.5rem" }}>
+                <button type="button" className="btn btn-primary" onClick={() => void refreshSibecManut()} disabled={busy}>
+                  {busy ? "Gerando visão…" : "Gerar / atualizar MV SIBEC Manutenções"}
+                </button>
+                <Link to="/sibec" className="btn btn-secondary" style={{ textDecoration: "none" }}>
+                  Abrir painel SIBEC
+                </Link>
+              </div>
+
+              <div className="progress-wrap" aria-live="polite">
+                <div className="progress-track">
+                  <div className="progress-fill" style={{ width: `${progress}%` }} />
+                </div>
+                <small>
+                  {busy
+                    ? "Consolidando eventos SIBEC no PostgreSQL…"
+                    : progress === 100
+                      ? "Concluído."
+                      : "Aguardando comando."}
+                </small>
+              </div>
+
+              {error && <p className="error">{error}</p>}
+
+              {sibecResult && (
+                <div className="vig-result">
+                  <p className="status-ok" style={{ marginTop: "0.75rem" }}>
+                    Visão <code className="inline-code">vig.{sibecResult.view_name}</code> atualizada:{" "}
+                    <strong>{sibecResult.row_count.toLocaleString("pt-BR")}</strong> família×mês em{" "}
+                    {(sibecResult.elapsed_ms / 1000).toLocaleString("pt-BR", {
+                      minimumFractionDigits: 1,
+                      maximumFractionDigits: 1,
+                    })}
+                    s.
+                  </p>
+                  {sibecResult.competencias.length > 0 && (
+                    <p className="ingestao-desc">
+                      Competências: {sibecResult.competencias.join(", ")}
+                    </p>
+                  )}
+                  {sibecResult.warnings.length > 0 && (
+                    <ul className="vig-warnings">
+                      {sibecResult.warnings.map((w) => (
                         <li key={w}>{w}</li>
                       ))}
                     </ul>

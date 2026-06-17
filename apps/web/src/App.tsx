@@ -14,6 +14,7 @@ import {
   Gauge,
   BarChart3,
   Map,
+  ShieldAlert,
   X,
 } from "lucide-react";
 import IngestaoPage from "./pages/IngestaoPage";
@@ -27,6 +28,7 @@ import CaracterizacaoPage from "./pages/CaracterizacaoPage";
 import VigilanciaPage from "./pages/VigilanciaPage";
 import IvsPage from "./pages/IvsPage";
 import MapasPage from "./pages/MapasPage";
+import SibecPage from "./pages/SibecPage";
 import MobileBottomNav from "./components/MobileBottomNav";
 import { useIsMobile } from "./hooks/useMediaQuery";
 
@@ -141,6 +143,10 @@ function AppShell({
             <NavLink to="/caracterizacao" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
               <BarChart3 className="nav-icon" size={18} />
               <span>Caracterização</span>
+            </NavLink>
+            <NavLink to="/sibec" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+              <ShieldAlert className="nav-icon" size={18} />
+              <span>SIBEC</span>
             </NavLink>
             <NavLink to="/ivs" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
               <Gauge className="nav-icon" size={18} />
@@ -512,6 +518,18 @@ export default function App() {
               token ? (
                 <AppShell loadingMe={loadingMe} me={me} onLogout={handleLogout}>
                   <IvsPage token={token} />
+                </AppShell>
+              ) : (
+                <Navigate to="/" replace />
+              )
+            }
+          />
+          <Route
+            path="/sibec"
+            element={
+              token ? (
+                <AppShell loadingMe={loadingMe} me={me} onLogout={handleLogout}>
+                  <SibecPage token={token} />
                 </AppShell>
               ) : (
                 <Navigate to="/" replace />

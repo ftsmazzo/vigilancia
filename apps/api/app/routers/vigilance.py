@@ -21,6 +21,13 @@ from ..vigilance.home_painel import home_painel_from_views, mapa_territorial_fro
 from ..vigilance.mapas import bairros_geo_catalog_from_views, mapas_heatmap_from_views
 from ..vigilance.observatorio_painel import observatorio_painel_from_views
 from ..vigilance.pessoas_mview import refresh_pessoas_mview
+from ..vigilance.sibec_manut_mview import latest_manut_competencia, refresh_sibec_manut_mview
+from ..vigilance.sibec_manut_painel import (
+    fetch_sibec_painel,
+    fetch_sibec_serie,
+    list_sibec_competencias,
+    manut_kpis_from_mview,
+)
 
 router = APIRouter(prefix="/vigilance", tags=["vigilance"])
 
@@ -52,11 +59,28 @@ def _ivs_resumo_sql(*, num_cras: str | None, bairro: str | None) -> tuple[str, d
     """
     return sql, params
 
-# Painel: manutenções SIBEC — março/2026 (competência AAAAMM da ingestão).
-MANUT_KPI_COMPETENCIA = "202603"
-
-# Ordem fixa das colunas no painel (tabela por CRAS).
+# Ordem fixa das colunas no painel legado (tabela por CRAS).
 CRAS_MANUT_GRUPOS: tuple[str, ...] = ("Cancelar", "Bloquear", "Suspender", "Encerrar", "Excluir")
+
+
+def _manutencoes_kpis(conn, competencia: str | None = None) -> dict:
+    """KPIs de manutenção: MV família×mês quando disponível; senão RAW com nível 00."""
+    comp = (competencia or "").strip()
+    if not comp:
+        comp = latest_manut_competencia(conn) or ""
+    if not comp:
+        return {
+            "competencia": None,
+            "total_acoes": 0,
+            "familias_distintas": 0,
+            "por_acao": [],
+            "por_cras": [],
+        }
+
+    mv_kpis = manut_kpis_from_mview(conn, comp)
+    if mv_kpis:
+        return mv_kpis
+    return _manutencoes_kpis_from_raw(conn, comp)
 
 
 def _qi(ident: str) -> str:
@@ -115,6 +139,7 @@ def _manutencoes_kpis_from_raw(conn, competencia: str) -> dict:
     )
     acao_col = _pick_column(cols, ("acao",))
     ref_col = _pick_column(cols, ("ref_folha", "ref_folha_pbf", "competencia"))
+    nivel_col = _pick_column(cols, ("nivel_acao", "nivel"))
 
     if not fam_col or not acao_col:
         return {
@@ -140,6 +165,9 @@ def _manutencoes_kpis_from_raw(conn, competencia: str) -> dict:
 
     # Código familiar: ::text força varchar; norm_familia_cod remove não-dígitos e zeros à esquerda.
     fam_expr = f"vig.norm_familia_cod(COALESCE({_qi(fam_col)}::text, ''))"
+    nivel_filter = ""
+    if nivel_col:
+        nivel_filter = f"AND btrim(COALESCE({_qi(nivel_col)}::text, '')) = '00'"
     base_cte = f"""
     WITH m AS (
       SELECT
@@ -147,6 +175,7 @@ def _manutencoes_kpis_from_raw(conn, competencia: str) -> dict:
         NULLIF(upper(btrim(COALESCE({_qi(acao_col)}::text, ''))), '') AS acao_txt
       FROM raw.{_qi(table_name)} m
       WHERE {filtro_mes}
+        {nivel_filter}
     )
     """
     row_tot = conn.execute(
@@ -484,7 +513,7 @@ def get_vigilance_kpis(
         total_bolsa_familia = bolsa.total_familias_folha
         total_pago_bf = bolsa.total_pago
         total_bpc, total_bpc_idoso, total_bpc_deficiente = _bpc_kpis_from_raw(conn)
-        manutencoes = _manutencoes_kpis_from_raw(conn, MANUT_KPI_COMPETENCIA)
+        manutencoes = _manutencoes_kpis(conn)
 
         total_pessoas = int(conn.execute(text("SELECT COUNT(*) FROM vig.mvw_pessoas")).scalar() or 0)
 
@@ -640,6 +669,73 @@ def get_mapas_heatmap(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Falha nos mapas de calor: {exc}",
         ) from exc
+
+
+@router.get("/sibec/competencias")
+def get_sibec_competencias(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Lista competências disponíveis na MV SIBEC Manutenções."""
+    with db.bind.begin() as conn:
+        return {"items": list_sibec_competencias(conn)}
+
+
+@router.get("/sibec/painel")
+def get_sibec_painel(
+    competencia: str | None = Query(None, description="AAAAMM; padrão = última competência"),
+    cras_cod: str | None = Query(None, description="Código CRAS, __todos__ ou __sem_cras__"),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Painel SIBEC Manutenções — KPIs por família×competência com territorialização."""
+    with db.bind.begin() as conn:
+        return fetch_sibec_painel(conn, competencia=competencia, cras_cod=cras_cod)
+
+
+@router.get("/sibec/serie")
+def get_sibec_serie(
+    de: str | None = Query(None, description="Competência inicial AAAAMM"),
+    ate: str | None = Query(None, description="Competência final AAAAMM"),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Série temporal de manutenções (famílias distintas por competência)."""
+    with db.bind.begin() as conn:
+        return fetch_sibec_serie(conn, de=de, ate=ate)
+
+
+@router.post("/materialized-views/sibec-manut/refresh")
+def refresh_sibec_manut(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """
+    Recria vig.mvw_sibec_manut_familia_mes (1 linha por família × competência, nível 00).
+    Requer raw.sibec__manutencoes e vig.mvw_familia.
+    """
+    t0 = time.perf_counter()
+    try:
+        with db.bind.begin() as conn:
+            result = refresh_sibec_manut_mview(conn)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Falha ao gerar MV SIBEC Manutenções: {exc}",
+        ) from exc
+
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+    return {
+        "status": "success",
+        "view_schema": "vig",
+        "view_name": "mvw_sibec_manut_familia_mes",
+        "row_count": result.row_count,
+        "competencias": result.competencias,
+        "elapsed_ms": elapsed_ms,
+        "warnings": result.warnings,
+    }
 
 
 @router.post("/materialized-views/familia/refresh")
