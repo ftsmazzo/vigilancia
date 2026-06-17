@@ -49,7 +49,7 @@ Analise a mensagem atual e o histórico da conversa.
 
 **mode = "data"** quando:
 - O usuário pede quantidade, total, percentual, listagem agregada
-- Perguntas sobre CADU, PBF, SISC, CRAS, famílias, pessoas, renda, deficiência, **IVS/IVCAD (índices de vulnerabilidade)**, etc.
+- Perguntas sobre CADU, PBF, SISC, CRAS, famílias, pessoas, renda, deficiência, **IVS/IVCAD (índices de vulnerabilidade)**, **manutenções SIBEC (bloqueio, cancelamento, reversão do Bolsa Família)**, etc.
 - **Planejamento** (implantar novo serviço, qual CRAS indicar por demanda no CADU) — use CADU territorial, NÃO matrícula SISC existente
 - Follow-up numérico ("dessas", "entre elas", "e quantas têm...") — reformule com o contexto anterior, sem arrastar bairro de turnos anteriores se a pergunta mudou de assunto
 

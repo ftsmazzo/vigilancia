@@ -72,6 +72,13 @@ Conversas em sequência ("dessas crianças… depois por CRAS"): mantenha filtro
 - classificacao_faixa_idade, classificacao_deficiencia, tem_deficiencia (bool)
 - renda_per_capita (da família CADU quando vinculado)
 
+### vig.mvw_sibec_manut_familia_mes — manutenções PBF (bloqueio, cancelamento, reversão)
+- Uma linha por família × competência (AAAAMM); não confundir com folha de pagamento.
+- competencia, codigo_familiar, acao_grupo, sit_resultante, cod_motivo, motivo_txt
+- teve_bloqueio, teve_cancelamento, teve_reversao, teve_suspensao (boolean no mês)
+- num_cras, nom_cras, bairro — território via vig.mvw_familia
+- Perguntas VigIA: use COUNT(*) com filtros por competencia, CRAS e flags teve_*.
+
 ## Métricas oficiais (alinhar com o painel Início)
 - **Famílias na folha PBF**: contagem na base SIBEC (`raw.sibec__programa_bolsa_familia`, última competência) — pode ser maior que `marc_pbf` no CADU.
 - **% sobre CADU**: folha PBF ÷ total `vig.mvw_familia`.
