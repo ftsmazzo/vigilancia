@@ -30,6 +30,7 @@ from .bairro_resolver import (
     should_resolve_bairro,
     try_pessoas_bairro_metric,
 )
+from .cadu_pessoas_metrics import try_cadu_pessoas_recorte_metric
 from .answer_trim import trim_answer_boilerplate
 from .analyst_agent import interpret_evidence
 from .canonical_metrics import try_canonical_metric
