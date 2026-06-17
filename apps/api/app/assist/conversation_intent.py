@@ -8,14 +8,34 @@ from .session_context import SessionContext
 
 _PLANNING = re.compile(
     r"implantar|implementar|novo\s+serv|abrir|criar|expandir|"
-    r"suger|indic|recomend|onde\s+(?:abrir|implantar|criar)|"
+    r"suger|indic|recomend|onde\s+(?:abrir|implantar|criar|ir|priorizar)|"
     r"maior\s+demanda|potencial\s+(?:de\s+)?demanda|"
     r"preciso\s+(?:de\s+)?(?:um|uma)\s+(?:novo|nova)|"
-    r"scfv|servi[cç]o\s+de\s+conviv",
+    r"scfv|servi[cç]o\s+de\s+conviv|"
+    r"repasse|recurso\s+(?:estadual|federa|extra)|"
+    r"pol[ií]tica\s+p[uú]blica|executar\s+pol",
     re.I,
 )
 _SCFV = re.compile(r"\bscfv\b|servi[cç]o\s+de\s+conviv", re.I)
 _FAIXA = re.compile(r"crianç|crianc|adolesc|menor|\d{1,2}\s*(?:a|-|á)\s*\d{1,2}", re.I)
+_IDOSO = re.compile(
+    r"idos|terceira\s+idade|melhor\s+idade|pessoa\s+idosa|"
+    r"60\s*\+|65\s*\+|\b60\s*a\s*\d",
+    re.I,
+)
+_BAIRRO_SUGGEST = re.compile(
+    r"qual\s+bairro|bairro\s+(?:suger|indic|prioriz|deveria|recomend)|"
+    r"onde\s+(?:devo|deveria|priorizar|ir|atuar)",
+    re.I,
+)
+_CADU_ACAO = re.compile(
+    r"atualiza[cç][ãa]o\s+cadastral|atualizar\s+(?:o\s+)?cadu|"
+    r"a[cç][ãa]o.*cadu|cadu.*a[cç][ãa]o|"
+    r"cadastro\s+[úu]nico.*territ[oó]rio|territ[oó]rio.*cadastro|"
+    r"recadastramento|busca\s+ativa|"
+    r"atualiza[cç][ãa]o.*territ[oó]rio|territ[oó]rio.*atualiza",
+    re.I,
+)
 _BAIRRO_FOLLOWUP = re.compile(
     r"\bbairro\b.*(?:desse|nesse|deste|dese)\s+cras|"
     r"(?:desse|nesse|deste|dese)\s+cras.*\bbairro\b|"
@@ -63,7 +83,16 @@ def planning_thread_active(transcript: list[dict[str, str]] | None) -> bool:
         content = msg.get("content", "")
         if role == "assistant" and _PLANNING_ANSWER.search(content):
             return True
-        if role == "user" and (_PLANNING.search(content) or _SCFV.search(content)) and _FAIXA.search(content):
+        if role == "user" and (
+            _PLANNING.search(content)
+            or _SCFV.search(content)
+            or _CADU_ACAO.search(content)
+        ) and (
+            _FAIXA.search(content)
+            or _IDOSO.search(content)
+            or _BAIRRO_SUGGEST.search(content)
+            or _CADU_ACAO.search(content)
+        ):
             return True
     return False
 
@@ -77,16 +106,35 @@ def is_planning_followup(message: str, transcript: list[dict[str, str]] | None) 
     return bool(_BAIRRO_FOLLOWUP.search(text_msg))
 
 
+def is_cadu_acao_turn(message: str, transcript: list[dict[str, str]] | None) -> bool:
+    """Ação de atualização cadastral / busca ativa no território."""
+    text_msg = message.strip()
+    if not text_msg:
+        return False
+    if _CADU_ACAO.search(text_msg):
+        return True
+    blob = user_messages_blob(transcript, text_msg)
+    return bool(_CADU_ACAO.search(blob) and _BAIRRO_SUGGEST.search(text_msg))
+
+
 def is_planning_turn(message: str, transcript: list[dict[str, str]] | None) -> bool:
     text_msg = message.strip()
     if not text_msg:
         return False
     if is_planning_followup(text_msg, transcript):
         return True
+    if is_cadu_acao_turn(text_msg, transcript):
+        return True
     if not _PLANNING.search(text_msg):
         return False
     blob = user_messages_blob(transcript, text_msg)
-    return bool(_FAIXA.search(text_msg) or _FAIXA.search(blob))
+    return bool(
+        _FAIXA.search(text_msg)
+        or _FAIXA.search(blob)
+        or _IDOSO.search(text_msg)
+        or _IDOSO.search(blob)
+        or _BAIRRO_SUGGEST.search(text_msg)
+    )
 
 
 def user_asks_sisc_existing(message: str, transcript: list[dict[str, str]] | None) -> bool:
@@ -174,8 +222,15 @@ def build_thread_brief(
         if brief:
             lines.append(brief)
     if is_planning_turn(message, transcript):
-        lines.append("- Assunto: planejamento de **novo SCFV** (demanda potencial no CADU territorial).")
+        if is_cadu_acao_turn(message, transcript):
+            lines.append(
+                "- Assunto: **ação de atualização cadastral** no território "
+                "(priorizar bairros com CADU desatualizado — eixo C/TAC)."
+            )
+        else:
+            lines.append("- Assunto: planejamento territorial / **SCFV** (demanda potencial no CADU).")
         lines.append("- **NÃO** usar vig.mvw_sisc_qualificado salvo pedido explícito de matrícula existente.")
+        lines.append("- Cruze demanda (A), carência SISC (B), IVS/NC (D) e TAC (C) na síntese.")
     if is_planning_followup(message, transcript):
         lines.append("- Follow-up: detalhar **bairro dentro do CRAS** indicado na resposta anterior.")
     if is_planning_coverage_followup(message, transcript):

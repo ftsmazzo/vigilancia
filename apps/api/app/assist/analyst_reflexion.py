@@ -112,7 +112,8 @@ def is_planning_decision_context(pack: EvidencePack, message: str = "") -> bool:
     return bool(
         re.search(
             r"implantar|scfv|car[eê]ncia|demanda|qual\s+cras|qual\s+bairro|"
-            r"servi[cç]o\s+de\s+conviv|planej|diagn[oó]stic|prioriz",
+            r"atualiza[cç][ãa]o\s+cadastral|a[cç][ãa]o.*cadu|repasse|"
+            r"servi[cç]o\s+de\s+conviv|planej|diagn[oó]stic|prioriz|idos",
             blob,
         )
     )
@@ -138,6 +139,7 @@ IVS é **um eixo (D)**, não a resposta inteira, salvo quando a pergunta for esp
 
 #### Eixo D — IVS sem reducionismo
 Dimensões disponíveis: {ivs_dims}. Escala **0 a 1** (maior = mais vulnerável na dimensão).
+- **SCFV idosos / melhor idade:** cruze **A** (demanda 60+) + **B** (carência) + **D.NC** (cuidados) + **C** (TAC se cadastro desatualizado).
 - **SCFV infância/adolescência:** cruze **A** (demanda faixa) + **B** (carência) + **D.DCA/NC** + **F** (escola, trabalho infantil).
 - **SCFV primeira infância:** **D.DPI/NC** + **E** (moradia/alimentação).
 - IVS **baixo** modera urgência estrutural; **não anula** carência (**B**) nem pobreza (**C**).
@@ -325,9 +327,11 @@ def collect_territorial_reflexion(
     num_cras: str | None = None,
     demanda: int | None = None,
     sisc: int | None = None,
+    demanda_label: str | None = None,
+    faixa_label: str | None = None,
 ) -> TerritorialReflexion:
     """Coleta fatos multi-eixo para o Especialista — máximo disponível nas views."""
-    faixa = f"{age_min} a {age_max} anos"
+    faixa = faixa_label or f"{age_min} a {age_max} anos"
     b = bairro.strip()
     facts: list[dict[str, Any]] = []
     axes_present: set[str] = set()
@@ -409,10 +413,11 @@ def collect_territorial_reflexion(
 
     dem = demanda or 0
     sig_a = "reforça_prioridade" if dem >= 100 else ("neutro" if dem >= 30 else "modera")
+    label_a = demanda_label or f"Demanda CADU ({faixa}) — {b}"
     facts.append(
         _fact(
             "A",
-            f"Demanda CADU ({faixa}) — {b}",
+            label_a,
             str(dem),
             "vig.mvw_pessoas × vig.mvw_familia",
             "público potencial com residência territorial no bairro",
@@ -879,6 +884,8 @@ def collect_reflexion_result(
     num_cras: str | None = None,
     demanda: int | None = None,
     sisc: int | None = None,
+    demanda_label: str | None = None,
+    faixa_label: str | None = None,
 ) -> dict[str, Any]:
     """Pacote completo para o orquestrador (fatos + guia + metadados)."""
     reflexion = collect_territorial_reflexion(
@@ -890,6 +897,8 @@ def collect_reflexion_result(
         num_cras=num_cras,
         demanda=demanda,
         sisc=sisc,
+        demanda_label=demanda_label,
+        faixa_label=faixa_label,
     )
     return {
         "preview": reflexion.facts,

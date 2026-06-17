@@ -12,11 +12,14 @@ from sqlalchemy.orm import Session
 from ..vigilance.familia_mview import _table_exists
 from .bairro_resolver import _pick_variant, _prefix_name
 from .conversation_intent import (
+    is_cadu_acao_turn,
     is_planning_coverage_followup,
     is_planning_followup,
     is_planning_turn,
     user_messages_blob,
     wants_planning_ranking,
+    _BAIRRO_SUGGEST,
+    _IDOSO,
 )
 from .planning_diagnostico import collect_reflexion_result
 
@@ -56,11 +59,29 @@ def parse_age_range(message: str, transcript: list[dict[str, str]] | None) -> tu
         if lo > hi:
             lo, hi = hi, lo
         return lo, hi
+    if _IDOSO.search(message) or _IDOSO.search(blob):
+        if re.search(r"80|85", blob, re.I):
+            return 80, 120
+        return 60, 120
     if re.search(r"12\s*15|12\s*a\s*15", blob, re.I):
         return 12, 15
     if re.search(r"adolesc|12\s*17", blob, re.I):
         return 12, 17
+    if re.search(r"primeira\s+inf|0\s*a\s*6|at[eé]\s*6", blob, re.I):
+        return 0, 6
     return 6, 17
+
+
+def population_label(message: str, transcript: list[dict[str, str]] | None) -> str:
+    age_min, age_max = parse_age_range(message, transcript)
+    blob = user_messages_blob(transcript, message)
+    if _IDOSO.search(blob):
+        return f"idosos ({age_min}+ anos)"
+    if age_min <= 6 and age_max <= 6:
+        return "crianças de 0 a 6 anos"
+    if age_min >= 12 and age_max <= 17:
+        return f"jovens de {age_min} a {age_max} anos"
+    return f"público de {age_min} a {age_max} anos"
 
 
 def _extract_recommended_cras(transcript: list[dict[str, str]] | None) -> str | None:
@@ -123,6 +144,167 @@ def _rank_cras_by_demand(
         {"age_min": age_min, "age_max": age_max},
     ).mappings().all()
     return [dict(r) for r in rows]
+
+
+def _rank_bairros_by_demand_municipio(
+    conn: Connection,
+    age_min: int,
+    age_max: int,
+    *,
+    limit: int = 8,
+) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        text(
+            """
+            SELECT
+              btrim(f.bairro::text) AS bairro,
+              MAX(btrim(f.num_cras::text)) AS num_cras,
+              MAX(btrim(f.nom_cras::text)) AS nom_cras,
+              COUNT(p.cadu_row_id)::bigint AS total
+            FROM vig.mvw_pessoas p
+            INNER JOIN vig.mvw_familia f ON f.codigo_familiar = p.codigo_familiar
+            WHERE p.idade IS NOT NULL
+              AND p.idade >= :age_min
+              AND p.idade <= :age_max
+              AND btrim(COALESCE(f.bairro::text, '')) <> ''
+            GROUP BY btrim(f.bairro::text)
+            ORDER BY total DESC, bairro ASC
+            LIMIT :lim
+            """
+        ),
+        {"age_min": age_min, "age_max": age_max, "lim": limit},
+    ).mappings().all()
+    return [dict(r) for r in rows]
+
+
+def _rank_bairros_cadu_desatualizado(
+    conn: Connection,
+    *,
+    tac_meses: int = 24,
+    limit: int = 8,
+) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        text(
+            """
+            SELECT
+              btrim(f.bairro::text) AS bairro,
+              MAX(btrim(f.num_cras::text)) AS num_cras,
+              MAX(btrim(f.nom_cras::text)) AS nom_cras,
+              COUNT(DISTINCT f.codigo_familiar)::bigint AS total_familias,
+              COUNT(DISTINCT f.codigo_familiar) FILTER (
+                WHERE f.meses_desatualizado IS NOT NULL
+                  AND f.meses_desatualizado >= :tac_meses
+              )::bigint AS fam_desatualizadas,
+              ROUND(AVG(f.meses_desatualizado) FILTER (
+                WHERE f.meses_desatualizado IS NOT NULL
+              )::numeric, 1) AS tac_medio
+            FROM vig.mvw_familia f
+            WHERE btrim(COALESCE(f.bairro::text, '')) <> ''
+            GROUP BY btrim(f.bairro::text)
+            HAVING COUNT(DISTINCT f.codigo_familiar) FILTER (
+              WHERE f.meses_desatualizado IS NOT NULL
+                AND f.meses_desatualizado >= :tac_meses
+            ) > 0
+            ORDER BY fam_desatualizadas DESC, tac_medio DESC NULLS LAST
+            LIMIT :lim
+            """
+        ),
+        {"tac_meses": tac_meses, "lim": limit},
+    ).mappings().all()
+    return [dict(r) for r in rows]
+
+
+def try_cadu_territorial_acao_metric(
+    conn: Connection,
+    message: str,
+    transcript: list[dict[str, str]] | None = None,
+    *,
+    db: Session | None = None,
+    user_first_name: str = "",
+) -> dict[str, Any] | None:
+    """Prioriza bairros para ação de atualização cadastral (TAC / meses desatualização)."""
+    if not is_cadu_acao_turn(message, transcript):
+        return None
+    if not _table_exists(conn, "vig", "mvw_familia"):
+        return None
+
+    rows = _rank_bairros_cadu_desatualizado(conn)
+    if not rows:
+        answer = (
+            "Não encontrei bairros com famílias desatualizadas no CADU "
+            "(≥ 24 meses sem atualização) com territorialização geo."
+        )
+        return {
+            "answer": _prefix_name(user_first_name, answer),
+            "sql": None,
+            "row_count": 0,
+            "preview": [],
+            "mode": "canonical",
+            "metric": "planning_cadu_acao_vazio",
+        }
+
+    top = rows[0]
+    bairro = str(top["bairro"])
+    num_cras = str(top.get("num_cras") or "")
+    fam_desat = int(top.get("fam_desatualizadas") or 0)
+    tac = top.get("tac_medio")
+    tac_txt = f"{float(tac):.1f}".replace(".", ",") if tac is not None else "—"
+
+    sql = (
+        "SELECT bairro, fam_desatualizadas, tac_medio FROM ("
+        "SELECT btrim(f.bairro::text) AS bairro, "
+        "COUNT(DISTINCT f.codigo_familiar) FILTER (WHERE meses_desatualizado >= 24) AS fam_desatualizadas, "
+        "ROUND(AVG(meses_desatualizado)::numeric,1) AS tac_medio "
+        "FROM vig.mvw_familia f GROUP BY 1) x ORDER BY 2 DESC LIMIT 8"
+    )
+
+    if db:
+        reflex = collect_reflexion_result(
+            conn,
+            db,
+            bairro=bairro,
+            age_min=0,
+            age_max=120,
+            num_cras=num_cras or None,
+            demanda=fam_desat,
+            sisc=None,
+            demanda_label=f"Famílias desatualizadas (≥24 meses TAC) — {bairro}",
+            faixa_label="atualização cadastral territorial",
+        )
+        return {
+            "answer": "",
+            "sql": sql,
+            "row_count": len(reflex["preview"]),
+            "preview": reflex["preview"],
+            "reflexion_guide": reflex["reflexion_guide"],
+            "reflexion_axes": reflex["reflexion_axes"],
+            "mode": "canonical",
+            "metric": "planning_cadu_acao",
+            "use_analyst": True,
+        }
+
+    cras_txt = f" (CRAS {num_cras})" if num_cras else ""
+    answer = (
+        f"Para **ação de atualização cadastral** no território, eu priorizaria o bairro "
+        f"**{bairro}**{cras_txt}: **{_fmt_int(fam_desat)}** famílias com **≥ 24 meses** "
+        f"sem atualização (TAC médio **{tac_txt} meses**)."
+    )
+    if wants_planning_ranking(message) and len(rows) > 1:
+        others = [
+            f"- **{r['bairro']}**: {_fmt_int(int(r.get('fam_desatualizadas') or 0))} fam. desatualizadas"
+            for r in rows[1:6]
+        ]
+        answer += "\n\n**Demais bairros:**\n" + "\n".join(others)
+
+    return {
+        "answer": _prefix_name(user_first_name, answer),
+        "sql": sql,
+        "row_count": len(rows),
+        "preview": rows[:8],
+        "mode": "canonical",
+        "metric": "planning_cadu_acao",
+        "use_analyst": True,
+    }
 
 
 def _top_bairro_in_cras(
@@ -311,7 +493,13 @@ def try_planning_demand_metric(
     db: Session | None = None,
     user_first_name: str = "",
 ) -> dict[str, Any] | None:
-    """Demanda potencial no CADU para planejar novo SCFV (não matrícula SISC)."""
+    """Demanda potencial no CADU para planejar SCFV ou ação territorial (≠ matrícula SISC)."""
+    cadu_acao = try_cadu_territorial_acao_metric(
+        conn, message, transcript, db=db, user_first_name=user_first_name
+    )
+    if cadu_acao:
+        return cadu_acao
+
     coverage = try_planning_coverage_metric(
         conn, message, transcript, db=db, user_first_name=user_first_name
     )
@@ -324,6 +512,68 @@ def try_planning_demand_metric(
         return None
 
     age_min, age_max = parse_age_range(message, transcript)
+    pub = population_label(message, transcript)
+
+    if _BAIRRO_SUGGEST.search(message) and not is_planning_followup(message, transcript):
+        rows = _rank_bairros_by_demand_municipio(conn, age_min, age_max)
+        if not rows:
+            answer = f"Não encontrei **{pub}** com bairro territorializado no CADU."
+            return {
+                "answer": _prefix_name(user_first_name, answer),
+                "sql": None,
+                "row_count": 0,
+                "preview": [],
+                "mode": "canonical",
+                "metric": "planning_bairro_vazio",
+            }
+        top = rows[0]
+        bairro = str(top["bairro"])
+        total = int(top.get("total") or 0)
+        num_cras = str(top.get("num_cras") or "")
+        sisc = _count_sisc_bairro(conn, bairro, age_min, age_max)
+        sql = (
+            "SELECT btrim(f.bairro), COUNT(p.cadu_row_id) FROM vig.mvw_pessoas p "
+            f"JOIN vig.mvw_familia f ON f.codigo_familiar = p.codigo_familiar "
+            f"WHERE p.idade BETWEEN {age_min} AND {age_max} "
+            "AND btrim(COALESCE(f.bairro::text,'')) <> '' GROUP BY 1 ORDER BY 2 DESC LIMIT 8"
+        )
+        if db:
+            reflex = collect_reflexion_result(
+                conn,
+                db,
+                bairro=bairro,
+                age_min=age_min,
+                age_max=age_max,
+                num_cras=num_cras or None,
+                demanda=total,
+                sisc=sisc,
+            )
+            return {
+                "answer": "",
+                "sql": sql,
+                "row_count": len(reflex["preview"]),
+                "preview": reflex["preview"],
+                "reflexion_guide": reflex["reflexion_guide"],
+                "reflexion_axes": reflex["reflexion_axes"],
+                "mode": "canonical",
+                "metric": "planning_bairro_municipio",
+                "use_analyst": True,
+            }
+        cras_txt = f" (CRAS {num_cras})" if num_cras else ""
+        answer = (
+            f"Para implantar **SCFV** voltado a **{pub}**, eu sugeriria priorizar o bairro "
+            f"**{bairro}**{cras_txt}: **{_fmt_int(total)}** pessoas nesse recorte no CADU."
+        )
+        return {
+            "answer": _prefix_name(user_first_name, answer),
+            "sql": sql,
+            "row_count": len(rows),
+            "preview": rows[:8],
+            "mode": "canonical",
+            "metric": "planning_bairro_municipio",
+            "use_analyst": True,
+        }
+
     faixa = f"{age_min} a {age_max} anos"
 
     if is_planning_followup(message, transcript) or _BAIRRO_IN_CRAS.search(message):
@@ -345,7 +595,7 @@ def try_planning_demand_metric(
         top = _top_bairro_in_cras(conn, num_cras, age_min, age_max)
         if not top:
             answer = (
-                f"No território do **CRAS {num_cras}**, não encontrei crianças de **{faixa}** "
+                f"No território do **CRAS {num_cras}**, não encontrei **{pub}** "
                 "com bairro territorializado no CADU."
             )
             return {
@@ -390,9 +640,9 @@ def try_planning_demand_metric(
             }
         templates = [
             f"No **CRAS {num_cras}**, o bairro **{bairro}** concentra a maior demanda "
-            f"(**{_fmt_int(total)}** crianças de **{faixa}** no CADU).",
+            f"(**{_fmt_int(total)}** — **{pub}** no CADU).",
             f"Dentro do **CRAS {num_cras}**, eu olharia o bairro **{bairro}** "
-            f"— **{_fmt_int(total)}** nessa faixa etária no cadastro.",
+            f"— **{_fmt_int(total)}** nesse recorte no cadastro.",
         ]
         return {
             "answer": _prefix_name(user_first_name, _pick_variant(message, templates)),
@@ -408,7 +658,7 @@ def try_planning_demand_metric(
 
     rows = _rank_cras_by_demand(conn, age_min, age_max)
     if not rows:
-        answer = f"Não encontrei crianças de **{faixa}** territorializadas por CRAS no CADU."
+        answer = f"Não encontrei **{pub}** territorializados por CRAS no CADU."
         return {
             "answer": _prefix_name(user_first_name, answer),
             "sql": None,
@@ -425,10 +675,10 @@ def try_planning_demand_metric(
     rotulo = _cras_label(num, nome)
 
     templates = [
-        f"Para um **SCFV** de **{faixa}**, eu indicaria o **{rotulo}**: "
-        f"**{_fmt_int(total)}** crianças nessa faixa no território (CADU).",
+        f"Para um **SCFV** voltado a **{pub}**, eu indicaria o **{rotulo}**: "
+        f"**{_fmt_int(total)}** pessoas nesse recorte no território (CADU).",
         f"Pelo CADU, o **{rotulo}** reúne a maior demanda — "
-        f"**{_fmt_int(total)}** crianças de **{faixa}** no território.",
+        f"**{_fmt_int(total)}** (**{pub}**) no território.",
     ]
     answer = _prefix_name(user_first_name, _pick_variant(message, templates))
 

@@ -320,12 +320,21 @@ def run_orchestrator_turn(
     data_message = route.effective_message or effective_message
 
     if route.primary == "planning":
+        policy_rag = query_knowledge_base(
+            f"{data_message} SCFV SUAS tipificação serviço convivência PAIF atualização cadastral"
+        )
+        if policy_rag:
+            rag_block = (
+                f"{rag_block}\n\n---\n\n{policy_rag[:4000]}"
+                if rag_block
+                else policy_rag[:6000]
+            )
         planning = try_planning_demand_metric(
-            conn, message, transcript, db=db, user_first_name=first_name
+            conn, data_message, transcript, db=db, user_first_name=first_name
         )
         if planning:
             answer = _answer_via_analyst(
-                message,
+                data_message,
                 planning,
                 conn=conn,
                 db=db,
@@ -338,12 +347,13 @@ def run_orchestrator_turn(
             return {
                 **planning,
                 "answer": _trim_answer_boilerplate(answer),
+                "effective_message": effective_message,
             }
         sql_result = run_sql_agent(
             conn, db, data_message, thread_brief=route.thread_brief
         )
         if sql_result.ok:
-            pack = pack_from_sql(message, sql_result, thread_brief=route.thread_brief)
+            pack = pack_from_sql(data_message, sql_result, thread_brief=route.thread_brief)
             answer = interpret_evidence(
                 pack,
                 user_first_name=first_name,

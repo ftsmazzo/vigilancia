@@ -36,6 +36,9 @@ def infer_response_mode(question: str, metric: str = "") -> str:
     if m.startswith("sibec_manut_compare") or m == "sibec_manut_compare_pair":
         return "decision"
 
+    if m.startswith("planning_"):
+        return "interpret"
+
     if _INTERPRET.search(q) or m in ("planning_carencia",):
         return "interpret"
 
