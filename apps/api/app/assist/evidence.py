@@ -105,6 +105,20 @@ def pack_from_canonical(question: str, result: dict[str, Any], *, thread_brief: 
                         signal=str(row.get("signal", "")),
                     )
                 )
+    elif metric.startswith("cadu_pessoas_") or metric.startswith("cadu_familias_") or metric == "cadu_pcd_por_tipo":
+        for row in preview[:6]:
+            if not isinstance(row, dict):
+                continue
+            label = row.get("label") or row.get("recorte") or "CADU"
+            val = row.get("total") or row.get("total_pcd") or ""
+            facts.append(
+                EvidenceFact(
+                    label=str(label),
+                    value=str(val),
+                    source="vig.mvw_pessoas × vig.mvw_familia",
+                    detail=str(row.get("dictionary") or row.get("granularidade") or ""),
+                )
+            )
     elif metric.startswith("planning_"):
         for row in preview[:3]:
             if not isinstance(row, dict):

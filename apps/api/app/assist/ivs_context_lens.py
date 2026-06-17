@@ -85,6 +85,13 @@ PLANNING_IVS_LENSES: dict[str, IvsPlanningLens] = {
         primary_dims=("DCA", "NC", "DPI"),
         rationale="Demanda convivência geral: crianças/adolescentes e cuidados.",
     ),
+    "paif_pcd": IvsPlanningLens(
+        key="paif_pcd",
+        label="PAIF / atenção à pessoa com deficiência",
+        indicator_cols=("nc4", "nc5", "nc6", "nc7", "dca1", "dca3", "ch1", "dr2", "dr3"),
+        primary_dims=("NC", "DCA", "CH", "DR"),
+        rationale="PAIF/PCD: necessidade de cuidados, escola, moradia e pobreza.",
+    ),
 }
 
 
@@ -100,6 +107,8 @@ def resolve_planning_ivs_lens(
     blob = f"{message} {faixa_label or ''}".lower()
     if sibec_focus == "bloqueio" or re.search(r"desbloque|bloqueio.*pbf|pbf.*bloque", blob):
         return PLANNING_IVS_LENSES["pbf_desbloqueio"]
+    if re.search(r"\bpaif\b|pessoa\s+com\s+defici|pcd|atenc[aã]o\s+(?:a\s+)?pessoa", blob):
+        return PLANNING_IVS_LENSES["paif_pcd"]
     if re.search(r"atualiza[cç][ãa]o\s+cadastral|tac|recadastramento", blob):
         return PLANNING_IVS_LENSES["cadu_acao"]
     if age_min >= 60 or re.search(r"idos|60\s*\+|melhor\s+idade|terceira\s+idade", blob):
