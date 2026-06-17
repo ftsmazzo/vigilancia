@@ -43,6 +43,12 @@ _CRAS_BREAKDOWN = re.compile(
     re.I,
 )
 
+_FOLLOWUP = re.compile(
+    r"^(?:e\s+|e,|e\s+no\s+|e\s+na\s+|e\s+em\s+)|"
+    r"\b(?:dessas?|destas?|essas?|delas?|nesse|neste|nesse\s+cras)\b",
+    re.I,
+)
+
 _COMP_AAAAMM = re.compile(r"\b(20\d{4})\b")
 
 _MESES: dict[str, str] = {
@@ -111,23 +117,39 @@ def _fmt_competencia(comp: str) -> str:
     return f"{nome}/{ano}"
 
 
-def _parse_competencia(message: str, transcript: list[dict[str, str]] | None, conn: Connection) -> str | None:
-    blob = _conversation_blob(message, transcript)
-    m = _COMP_AAAAMM.search(blob)
+def _cras_from_text(text: str) -> str | None:
+    """Extrai número do CRAS só do texto informado (não do histórico)."""
+    if not text or not text.strip():
+        return None
+    m = _CRAS_NUM.search(text)
+    if m:
+        raw = m.group(1)
+        return raw.lstrip("0") or raw
+    m2 = re.search(r"\bcras\s*(\d{1,2})\b", text, re.I)
+    if m2:
+        raw = m2.group(1)
+        return raw.lstrip("0") or raw
+    return None
+
+
+def _competencia_from_text(text: str) -> str | None:
+    if not text or not text.strip():
+        return None
+    m = _COMP_AAAAMM.search(text)
     if m:
         return m.group(1)
-    blob_low = blob.lower()
+    low = text.lower()
     for nome, mm in _MESES.items():
-        if nome not in blob_low:
+        if nome not in low:
             continue
-        ym = re.search(rf"(20\d{{4}})", blob)
+        ym = re.search(r"(20\d{4})", text)
         if ym:
             return f"{ym.group(1)}{mm}"
-    return latest_manut_competencia(conn)
+    return None
 
 
-def _parse_action(message: str) -> tuple[str | None, str]:
-    msg = message.lower()
+def _action_from_text(text: str) -> tuple[str | None, str]:
+    msg = text.lower()
     if re.search(r"cancel", msg):
         return "teve_cancelamento", "cancelamento"
     if re.search(r"bloque", msg):
@@ -141,14 +163,37 @@ def _parse_action(message: str) -> tuple[str | None, str]:
     return None, "manutenção"
 
 
+def _parse_competencia(message: str, transcript: list[dict[str, str]] | None, conn: Connection) -> str | None:
+    hit = _competencia_from_text(message)
+    if hit:
+        return hit
+    for msg in reversed(transcript or []):
+        if msg.get("role") != "user":
+            continue
+        hit = _competencia_from_text(msg.get("content", ""))
+        if hit:
+            return hit
+    return latest_manut_competencia(conn)
+
+
+def _parse_action(message: str, transcript: list[dict[str, str]] | None = None) -> tuple[str | None, str]:
+    flag, label = _action_from_text(message)
+    if flag:
+        return flag, label
+    if _FOLLOWUP.search(message.strip()):
+        for msg in reversed(transcript or []):
+            content = msg.get("content", "")
+            flag, label = _action_from_text(content)
+            if flag:
+                return flag, label
+    return None, "manutenção"
+
+
 def _parse_cras_num(message: str, transcript: list[dict[str, str]] | None) -> str | None:
-    blob = _conversation_blob(message, transcript)
-    m = _CRAS_NUM.search(blob)
-    if m:
-        return m.group(1).lstrip("0") or m.group(1)
-    m2 = re.search(r"\bcras\s*(\d{1,2})\b", blob, re.I)
-    if m2:
-        return m2.group(1)
+    """CRAS citado na pergunta atual; não reutiliza CRAS de turnos anteriores."""
+    hit = _cras_from_text(message)
+    if hit is not None:
+        return hit
     return None
 
 
@@ -172,7 +217,11 @@ def _motivo_filter(message: str) -> tuple[str, dict]:
 def _cras_sql_filter(num_cras: str | None) -> tuple[str, dict]:
     if not num_cras:
         return "TRUE", {}
-    return "btrim(COALESCE(num_cras::text, '')) = btrim(:num_cras)", {"num_cras": num_cras}
+    return (
+        "NULLIF(regexp_replace(btrim(COALESCE(num_cras::text, '')), '[^0-9]', '', 'g'), '')"
+        "::int = :num_cras_int",
+        {"num_cras_int": int(num_cras)},
+    )
 
 
 def _format_cras_list(rows: list[dict[str, Any]], *, acao_label: str, comp_label: str) -> str:
@@ -210,7 +259,13 @@ def try_sibec_manut_metric(
 ) -> dict | None:
     if not is_sibec_manut_context(message, transcript):
         return None
-    if not _QUANT.search(message) and not _CRAS_BREAKDOWN.search(message):
+    is_followup = bool(_FOLLOWUP.search(message.strip()))
+    if (
+        not _QUANT.search(message)
+        and not _CRAS_BREAKDOWN.search(message)
+        and not is_followup
+        and _cras_from_text(message) is None
+    ):
         return None
 
     if not _table_exists(conn, "vig", "mvw_sibec_manut_familia_mes"):
@@ -240,7 +295,7 @@ def try_sibec_manut_metric(
             "metric": "sibec_manut_sem_competencia",
         }
 
-    flag_col, acao_label = _parse_action(message)
+    flag_col, acao_label = _parse_action(message, transcript)
     cras_num = _parse_cras_num(message, transcript)
     motivo_sql, motivo_params = _motivo_filter(message)
     cras_sql, cras_params = _cras_sql_filter(cras_num)
