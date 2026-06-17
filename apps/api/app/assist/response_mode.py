@@ -24,19 +24,23 @@ _RANKING = re.compile(
 
 def infer_response_mode(question: str, metric: str = "") -> str:
     """
-    data        — 1–2 frases, só o número/resposta pedida.
-    ranking     — lista objetiva pedida, sem comentário extra.
-    interpret   — síntese breve (2–4 frases), só eixos pertinentes.
-    balanced    — padrão: curto, sem enrolação.
+    data        — número direto, recorte mínimo.
+    decision    — comparativo/variação: fato + leitura técnica breve para decisão.
+    ranking     — lista ou ranking objetivo.
+    interpret   — síntese para planejamento/carência.
+    balanced    — padrão objetivo com valor agregado quando couber.
     """
     q = (question or "").strip()
     m = metric or ""
+
+    if m.startswith("sibec_manut_compare") or m == "sibec_manut_compare_pair":
+        return "decision"
 
     if _INTERPRET.search(q) or m in ("planning_carencia",):
         return "interpret"
 
     if _RANKING.search(q) or m in ("ivs_cras_compare", "planning_cras_demanda"):
-        return "ranking"
+        return "decision" if m.startswith("sibec") else "ranking"
 
     if _DATA.search(q) or re.search(
         r"\b(?:índice|indice|ivs|nc|total|n[uú]mero)\b", q, re.I
@@ -53,22 +57,24 @@ def infer_response_mode(question: str, metric: str = "") -> str:
 
 RESPONSE_MODE_HINTS: dict[str, str] = {
     "data": (
-        "**Modo DADO** — Responda em **1–2 frases** apenas o que foi perguntado. "
-        "Número principal + recorte mínimo (bairro/CRAS/faixa). "
-        "Sem metodologia, sem outros eixos, sem conclusão extra."
+        "**Modo DADO** — Resposta direta em 1–2 frases: número + recorte (CRAS/bairro/competência). "
+        "Tom técnico e cordial; sem jargão de banco."
+    ),
+    "decision": (
+        "**Modo DECISÃO** — Apresente os números verificados e, em seguida, **1 frase** de leitura "
+        "técnica útil (ex.: magnitude da variação, possível eixo de acompanhamento no território). "
+        "Cruze com RAG/rede só se agregar valor. Não seja seco nem prolixo."
     ),
     "ranking": (
-        "**Modo LISTA/RANKING** — Entregue o ranking ou comparativo pedido de forma objetiva. "
-        "Uma frase introdutória no máximo; depois os itens. Sem interpretação não solicitada."
+        "**Modo LISTA/RANKING** — Entregue o ranking pedido de forma objetiva. "
+        "Intro mínima; depois os itens."
     ),
     "interpret": (
-        "**Modo INTERPRETAÇÃO** — Sintetize em **2–4 frases** só os eixos **pertinentes** "
-        "à pergunta (ex.: carência → A+B; renda → C). Não percorra todos os eixos coletados. "
-        "Conclusão clara em uma frase."
+        "**Modo INTERPRETAÇÃO** — Sintetize em 2–4 frases os eixos pertinentes à pergunta. "
+        "Conclusão clara orientada à decisão."
     ),
     "balanced": (
-        "**Modo OBJETIVO** — Resposta **curta**: 1–3 frases. "
-        "Responda ao que foi pedido; reflexão só se agregar valor direto."
+        "**Modo OBJETIVO** — 1–3 frases: resposta + leitura breve se agregar valor."
     ),
 }
 

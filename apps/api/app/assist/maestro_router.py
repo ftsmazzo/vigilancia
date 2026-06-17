@@ -10,21 +10,29 @@ from .conversation_intent import (
     is_planning_followup,
     is_planning_turn,
 )
+from .municipio_agent import is_municipio_turn
+from .policy_agent import is_policy_turn
+from .session_context import SessionContext
 
 
 @dataclass(frozen=True)
 class TurnRoute:
-    primary: str  # planning | ivs | sisc | canonical | sql | chat
+    primary: str  # planning | policy | municipio | data | chat
     skip_bairro_preprocess: bool
     block_sisc: bool
     thread_brief: str
+    effective_message: str = ""
 
 
 def resolve_turn_route(
     message: str,
     transcript: list[dict[str, str]] | None,
+    *,
+    session_context: SessionContext | None = None,
+    effective_message: str = "",
 ) -> TurnRoute:
-    brief = build_thread_brief(message, transcript)
+    eff = (effective_message or message).strip()
+    brief = build_thread_brief(eff, transcript, session_context=session_context)
     coverage = is_planning_coverage_followup(message, transcript)
     planning = is_planning_turn(message, transcript) or coverage
     followup = is_planning_followup(message, transcript)
@@ -35,11 +43,31 @@ def resolve_turn_route(
             skip_bairro_preprocess=True,
             block_sisc=True,
             thread_brief=brief,
+            effective_message=eff,
+        )
+
+    if is_policy_turn(message):
+        return TurnRoute(
+            primary="policy",
+            skip_bairro_preprocess=True,
+            block_sisc=False,
+            thread_brief=brief,
+            effective_message=eff,
+        )
+
+    if is_municipio_turn(message):
+        return TurnRoute(
+            primary="municipio",
+            skip_bairro_preprocess=True,
+            block_sisc=False,
+            thread_brief=brief,
+            effective_message=eff,
         )
 
     return TurnRoute(
-        primary="sql",
+        primary="data",
         skip_bairro_preprocess=False,
         block_sisc=False,
         thread_brief=brief,
+        effective_message=eff,
     )

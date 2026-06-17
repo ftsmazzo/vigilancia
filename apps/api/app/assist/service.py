@@ -7,8 +7,15 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from ..models import User
-from .memory import append_message, get_or_create_session, load_history
+from .memory import (
+    append_message,
+    get_or_create_session,
+    load_history,
+    load_session_context,
+    save_session_context,
+)
 from .orchestrator import run_orchestrator_turn
+from .session_context import SessionContext, context_after_turn, resolve_effective_question
 
 
 def chat_turn(
@@ -23,11 +30,29 @@ def chat_turn(
 
     session = get_or_create_session(db, user, session_id)
     history = load_history(db, session.id)
+    stored_ctx = SessionContext.from_dict(load_session_context(session.id))
     append_message(db, session.id, "user", message)
     transcript = history + [{"role": "user", "content": message}]
 
     with db.bind.connect() as conn:
-        result = run_orchestrator_turn(conn, db, user, message, transcript)
+        result = run_orchestrator_turn(
+            conn,
+            db,
+            user,
+            message,
+            transcript,
+            session_id=session.id,
+            session_context=stored_ctx,
+        )
+
+    new_ctx = context_after_turn(
+        message,
+        result.get("effective_message") or message,
+        result["answer"],
+        stored_ctx,
+        mode=str(result.get("mode") or ""),
+    )
+    save_session_context(session.id, new_ctx.to_dict())
 
     append_message(
         db,

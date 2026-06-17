@@ -18,8 +18,43 @@ logger = logging.getLogger(__name__)
 
 MAX_HISTORY_MESSAGES = 20
 REDIS_KEY_PREFIX = "vigsocial:assist:session:"
+REDIS_CTX_SUFFIX = ":context"
 _redis_client: Any | None = None
 _redis_unavailable = False
+
+
+def _session_context_key(session_id: str) -> str:
+    return f"{REDIS_KEY_PREFIX}{session_id}{REDIS_CTX_SUFFIX}"
+
+
+def load_session_context(session_id: str) -> dict[str, Any]:
+    """Slots estruturados da sessão (follow-up CRAS, filtros, assunto)."""
+    client = _redis()
+    if not client:
+        return {}
+    try:
+        raw = client.get(_session_context_key(session_id))
+        if not raw:
+            return {}
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else {}
+    except Exception as exc:
+        logger.warning("Falha ao ler contexto Redis (sessão %s): %s", session_id, exc)
+        return {}
+
+
+def save_session_context(session_id: str, context: dict[str, Any]) -> None:
+    client = _redis()
+    if not client:
+        return
+    try:
+        client.set(
+            _session_context_key(session_id),
+            json.dumps(context, ensure_ascii=False),
+            ex=_ttl_seconds(),
+        )
+    except Exception as exc:
+        logger.warning("Falha ao gravar contexto Redis (sessão %s): %s", session_id, exc)
 
 
 def _session_messages_key(session_id: str) -> str:

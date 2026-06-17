@@ -27,6 +27,10 @@ _PLANNING_TOPIC = re.compile(
     re.I,
 )
 _SISC_TOPIC = re.compile(r"\b(?:sisc|matriculad|atendid)\b", re.I)
+_SIBEC_TOPIC = re.compile(
+    r"\b(?:sibec|bloqueio|cancelamento|revers[aã]o|manuten[cç][ãa]o|folha\s+pbf)\b",
+    re.I,
+)
 
 
 @dataclass
@@ -191,6 +195,7 @@ def _view_availability_block(conn: Connection) -> str:
         ("vig", "mvw_familia"),
         ("vig", "mvw_pessoas"),
         ("vig", "mvw_sisc_qualificado"),
+        ("vig", "mvw_sibec_manut_familia_mes"),
         ("core", "mvw_ivs_familia"),
     ):
         ok = _table_exists(conn, schema, view)
@@ -213,6 +218,10 @@ def enrich_kb_query(message: str, pack: EvidencePack) -> str:
         )
     if _SISC_TOPIC.search(blob) or "sisc" in pack.metric:
         parts.append("SISC matrícula serviço de convivência cruzamento CADU")
+    if _SIBEC_TOPIC.search(blob) or pack.metric.startswith("sibec"):
+        parts.append(
+            "SIBEC manutenção Bolsa Família bloqueio cancelamento revisão cadastral PAIF"
+        )
     if "carência" in message.lower() or pack.metric == "planning_carencia":
         parts.append(
             "carência socioassistencial demanda potencial matrícula existente "

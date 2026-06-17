@@ -1,4 +1,11 @@
-"""VigIA — orquestrador conversacional (RAG + AgenteSQL + resposta humanizada)."""
+"""VigIA — orquestrador multi-especialista.
+
+Arquitetura (4 especialistas + síntese):
+  1. Políticas e Normativas — SUAS, regras de programas (RAG)
+  2. Dados do Município — rede local, caracterização territorial cadastrada
+  3. Dados de Vigilância — tronco CADU + camadas (SISC, IVS, SIBEC, geo…) via SQL e métricas canônicas
+  4. Síntese analítica — cruza fatos verificados com conhecimento para apoiar decisão (não é agente de dados)
+"""
 
 from __future__ import annotations
 
@@ -35,10 +42,17 @@ from .evidence import pack_from_canonical, pack_from_sql
 from .kb_client import query_knowledge_base
 from .llm import chat_completion
 from .maestro_router import resolve_turn_route
+from .municipio_agent import run_municipio_agent
 from .planning_metrics import try_planning_demand_metric
+from .policy_agent import run_policy_agent
 from .sql_agent import SqlAgentResult, run_sql_agent
 
 ORCHESTRATOR_PLAN_SYSTEM = """Você é VigIA, orquestrador do assistente de vigilância socioassistencial municipal.
+
+Especialistas (você roteia; SIBEC/IVS/SISC são camadas de Vigilância no tronco CADU, não agentes):
+- **Políticas e Normativas** — conceitos SUAS, regras de programas, legislação
+- **Dados do Município** — rede local cadastrada, caracterização institucional
+- **Dados de Vigilância** — números do CADU e camadas por codigo_familiar/CPF/NIS (SISC, IVS, SIBEC, geo)
 
 Analise a mensagem atual e o histórico da conversa.
 
@@ -49,8 +63,9 @@ Analise a mensagem atual e o histórico da conversa.
 
 **mode = "data"** quando:
 - O usuário pede quantidade, total, percentual, listagem agregada
-- Perguntas sobre CADU, PBF, SISC, CRAS, famílias, pessoas, renda, deficiência, **IVS/IVCAD (índices de vulnerabilidade)**, **manutenções SIBEC (bloqueio, cancelamento, reversão do Bolsa Família)**, etc.
-- **Planejamento** (implantar novo serviço, qual CRAS indicar por demanda no CADU) — use CADU territorial, NÃO matrícula SISC existente
+- Perguntas sobre CADU, PBF, SISC, CRAS, famílias, pessoas, renda, deficiência, **IVS/IVCAD**, **manutenções SIBEC**, etc.
+- **Follow-up curto** ("e no 5?", "e no CRAS 3") — use o histórico: mantenha assunto e filtros (ex.: mulheres) e troque só CRAS/bairro
+- **Planejamento** (implantar novo serviço) — use CADU territorial, NÃO matrícula SISC existente
 - Follow-up numérico ("dessas", "entre elas", "e quantas têm...") — reformule com o contexto anterior, sem arrastar bairro de turnos anteriores se a pergunta mudou de assunto
 
 Quando mode = "data", preencha sql_question com UM pedido claro para o AgenteSQL:
@@ -279,16 +294,30 @@ def run_orchestrator_turn(
     user: User,
     message: str,
     transcript: list[dict[str, str]],
+    *,
+    session_id: str | None = None,
+    session_context: SessionContext | None = None,
 ) -> dict[str, Any]:
     """
-    Pipeline VigIA nativo:
-    RAG → plano → (chat | canonical | AgenteSQL) → humanização
+    Pipeline VigIA:
+    Maestro → Políticas | Município | Vigilância (CADU + camadas) → Síntese analítica
     """
+    effective_message, merged_ctx = resolve_effective_question(
+        message,
+        transcript,
+        session_context,
+    )
     municipio_block = load_context_prompt(db)
     user_block = _user_context_block(user, municipio_block)
-    rag_block = query_knowledge_base(message)
+    rag_block = query_knowledge_base(effective_message)
     first_name = _first_name(user.name)
-    route = resolve_turn_route(message, transcript)
+    route = resolve_turn_route(
+        message,
+        transcript,
+        session_context=merged_ctx,
+        effective_message=effective_message,
+    )
+    data_message = route.effective_message or effective_message
 
     if route.primary == "planning":
         planning = try_planning_demand_metric(
@@ -311,7 +340,7 @@ def run_orchestrator_turn(
                 "answer": _trim_answer_boilerplate(answer),
             }
         sql_result = run_sql_agent(
-            conn, db, message, thread_brief=route.thread_brief
+            conn, db, data_message, thread_brief=route.thread_brief
         )
         if sql_result.ok:
             pack = pack_from_sql(message, sql_result, thread_brief=route.thread_brief)
@@ -343,17 +372,50 @@ def run_orchestrator_turn(
     message = bairro_pre.message
     bairro_resolution = bairro_pre.resolution
 
-    pessoas_bairro = try_pessoas_bairro_metric(conn, message, first_name)
+    pessoas_bairro = try_pessoas_bairro_metric(conn, data_message, first_name)
     if pessoas_bairro:
         return {
             **pessoas_bairro,
             "answer": _trim_answer_boilerplate(pessoas_bairro["answer"]),
         }
 
+    if route.primary == "policy":
+        policy = run_policy_agent(
+            message,
+            transcript,
+            user_first_name=first_name,
+            municipio_block=municipio_block,
+        )
+        return {
+            "answer": _trim_answer_boilerplate(policy.answer),
+            "sql": None,
+            "row_count": 0,
+            "preview": [],
+            "mode": "policy",
+            "agent": "policy",
+        }
+
+    if route.primary == "municipio":
+        municipio = run_municipio_agent(
+            conn,
+            db,
+            message,
+            transcript,
+            user_first_name=first_name,
+        )
+        return {
+            "answer": _trim_answer_boilerplate(municipio.answer),
+            "sql": None,
+            "row_count": 0,
+            "preview": [],
+            "mode": "municipio",
+            "agent": "municipio",
+        }
+
     # Métricas canônicas (SISC×CADU, CRAS, PBF) têm prioridade — sempre com SQL explícito
     canonical = try_canonical_metric(
         conn,
-        message,
+        data_message,
         transcript,
         db=db,
         user_first_name=first_name,
@@ -401,17 +463,18 @@ def run_orchestrator_turn(
             "row_count": canonical.get("row_count", 0),
             "preview": canonical.get("preview") or [],
             "mode": canonical.get("mode", "canonical"),
+            "effective_message": effective_message,
         }
 
-    plan = _plan_turn(message, transcript, rag_block, user_block)
+    plan = _plan_turn(data_message, transcript, rag_block, user_block)
 
     if plan["mode"] == "chat" and (
         planning_thread_active(transcript)
-        or is_planning_coverage_followup(message, transcript)
+        or is_planning_coverage_followup(data_message, transcript)
     ):
         retry = try_canonical_metric(
             conn,
-            message,
+            data_message,
             transcript,
             db=db,
             user_first_name=first_name,
@@ -447,7 +510,7 @@ def run_orchestrator_turn(
             "mode": "chat",
         }
 
-    sql_question = plan.get("sql_question") or message.strip()
+    sql_question = plan.get("sql_question") or data_message.strip()
     if (
         bairro_resolution
         and bairro_resolution.canonical
@@ -517,4 +580,5 @@ def run_orchestrator_turn(
         "preview": sql_result.preview,
         "mode": "data",
         "error": sql_result.error if not sql_result.ok else None,
+        "effective_message": effective_message,
     }

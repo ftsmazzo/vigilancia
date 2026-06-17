@@ -13,15 +13,16 @@ from .geo_territorial import build_geo_territorial_hint
 from .ivs_metrics import build_ivs_assist_hint
 
 CATALOG_STATIC = """
-## Fonte verdade e medidas (modelo VigSocial)
+## Tronco CADU + camadas de Vigilância
 
-**Fonte verdade = CADU** (`vig.mvw_familia`, `vig.mvw_pessoas`, `vig.mvw_familia_domicilio`):
-universo de famílias e pessoas do município. Toda pergunta parte daqui.
+**Tronco:** `vig.mvw_familia` (família, codigo_familiar, território) e `vig.mvw_pessoas` (pessoa, codigo_familiar, num_cpf, num_nis).
+**Tudo que é ingerido no sistema** (SISC, SIBEC, IVS, geo) **é Vigilância** e se liga ao CADU — não são fontes paralelas.
 
-**Medidas e cruzamentos** (sempre ligados ao CADU por `codigo_familiar` ou `num_nis` / `nis_norm`):
+**Medidas e cruzamentos** (join por codigo_familiar; pessoa via p.num_cpf / p.num_nis):
 - **Folha PBF** (SIBEC): quem recebe pagamento — KPI folha pode incluir famílias fora do CADU local; no CADU use `marc_pbf`.
-- **SISC (Convivência)**: matrícula no serviço — `vig.mvw_sisc_qualificado`; divisão territorial do atendimento: `s.cras_codigo`, `s.cras_nome`.
-- **Território (bairro, endereço, CRAS, lat/long)**: `f.bairro`, `f.endereco`, `f.num_cras`, `f.nom_cras`, `f.lat_num`, `f.long_num` vêm de **raw.geo__tbl_geo** via `f.cep` = `cep_norm` (coluna `f.tem_geo`). Texto original do CADU: `f.bairro_cadu`, `f.num_cras_cadu`.
+- **Manutenções PBF** (SIBEC): bloqueio/cancelamento/reversão — `vig.mvw_sibec_manut_familia_mes` (≠ folha).
+- **SISC (Convivência)**: matrícula — `vig.mvw_sisc_qualificado`; CRAS da matrícula: `s.cras_codigo`.
+- **Território**: `f.bairro`, `f.num_cras` via geo/CEP (coluna `f.tem_geo`).
 
 Conversas em sequência ("dessas crianças… depois por CRAS"): mantenha filtros anteriores e acrescente `GROUP BY s.cras_nome, s.cras_codigo`.
 

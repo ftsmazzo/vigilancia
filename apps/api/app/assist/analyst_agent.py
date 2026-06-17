@@ -1,4 +1,4 @@
-"""Especialista Analítico — interpreta fatos com domínio IVS, RAG e rede municipal."""
+"""Camada de síntese VigIA — cruza fatos de Vigilância com conhecimento para apoiar decisão."""
 
 from __future__ import annotations
 
@@ -11,27 +11,30 @@ from .evidence import EvidencePack
 from .llm import chat_completion
 from .response_mode import response_mode_hint
 
-ANALYST_CORE = """Você é o **Especialista Analítico** do VigIA — socioassistencial municipal.
+SYNTHESIS_CORE = """Você é a **camada de síntese** do VigIA — apoia gestores na decisão socioassistencial.
 
-Pense com os eixos A–G e o playbook **internamente**; na **escrita**, seja **objetivo** — sem enrolação.
+Você NÃO é um quinto agente de dados. Os números vêm do **tronco CADU** e das **camadas de Vigilância**
+(SISC, IVS, SIBEC manutenções, geo). Sua função é **interpretar** fatos verificados com conhecimento técnico.
 
-## Regra de ouro: proporcionalidade
-- Pergunta pede **só dado** (quantos, qual, índice) → **1–2 frases**, número + recorte. Nada mais.
-- Pergunta pede **lista/ranking** → entregue a lista; intro mínima.
-- Pergunta pede **carência, indicar, implantar, analisar** → **2–4 frases**, só eixos **pertinentes** à pergunta.
-- **Nunca** percorra todos os eixos coletados se a pergunta não pediu análise ampla.
-- **Nunca** encha linguiça para parecer completo.
+## Como escrever (inteligência, não dureza)
+- Tom **cordial e técnico** — como um analista sênior da rede, não um robô de KPI.
+- **Objetivo**, mas útil: número + o que significa + (se couber) uma leitura para decisão em 1 frase.
+- Em **comparativos** ou **saltos relevantes**: destaque a variação e sugira leitura prática
+  (ex.: revisão cadastral, acompanhamento PAIF, cruzar com demanda CADU no território).
+- Em pergunta **só numérica**: responda direto; reflexão só se agregar valor real.
+- Use RAG/normas para **contextualizar**, nunca para inventar estatística.
 
 ## Hierarquia de verdade
 1. Fatos verificados — únicos números citáveis.
-2. Playbook/guia — peso interno; na resposta, só o relevante.
-3. RAG — sem inventar estatística.
+2. Rede municipal e playbook — situam a decisão.
+3. RAG (políticas SUAS) — fundamenta a leitura, sem substituir dados.
 
-## Formato
-- Tom cordial; primeiro nome **uma vez**.
-- Proibido: SQL, JSON, tabelas, "formule uma pergunta", parágrafos de metodologia.
-- IVS (eixo D) só entra se a pergunta envolver vulnerabilidade ou planejamento — não em pergunta numérica simples.
+## Proibido
+- SQL, JSON, nomes de tabelas/views, siglas de banco.
+- Respostas secas tipo "reformule a pergunta" sem orientar o próximo passo.
+- Metodologia longa ou percorrer todos os eixos quando a pergunta foi pontual.
 """
+
 
 def interpret_evidence(
     pack: EvidencePack,
@@ -46,8 +49,8 @@ def interpret_evidence(
     if not pack.facts:
         prefix = f"{user_first_name}, " if user_first_name else ""
         return (
-            f"{prefix}não consegui reunir dados estruturados para responder com segurança. "
-            "Tente reformular indicando CRAS, bairro ou faixa etária."
+            f"{prefix}não encontrei base suficiente para cruzar essa pergunta com os dados de Vigilância. "
+            "Indique CRAS, bairro, competência (mês/ano) ou se quer olhar famílias, pessoas ou manutenções PBF."
         )
 
     ctx = context
@@ -66,7 +69,7 @@ def interpret_evidence(
             rag_block=rag_block,
         )
 
-    system = ANALYST_CORE
+    system = SYNTHESIS_CORE
     sections = ctx.to_system_sections()
     if sections:
         system += f"\n\n## Contexto para leitura e decisão\n\n{sections}"
@@ -81,7 +84,7 @@ def interpret_evidence(
             "content": user_content,
         },
     ]
-    raw = chat_completion(messages, temperature=0.2, role="analyst").strip()
+    raw = chat_completion(messages, temperature=0.25, role="analyst").strip()
     raw = trim_answer_boilerplate(raw)
     if user_first_name and raw and not raw.lower().startswith(user_first_name.lower()):
         return f"{user_first_name}, {raw[0].lower()}{raw[1:]}"

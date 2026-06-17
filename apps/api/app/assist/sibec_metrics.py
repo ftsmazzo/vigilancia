@@ -57,6 +57,14 @@ _COMPARE = re.compile(
     re.I,
 )
 
+_EXPLICIT_COMPARE = re.compile(
+    r"comparativ|comparar|entre\s+(?:os\s+)?meses|"
+    r"(?:maio|abril|janeiro|fevereiro|mar[cç]o|junho|julho|agosto|setembro|outubro|novembro|dezembro)"
+    r"\s+e\s+"
+    r"(?:maio|abril|janeiro|fevereiro|mar[cç]o|junho|julho|agosto|setembro|outubro|novembro|dezembro)",
+    re.I,
+)
+
 _COMP_FROM_ANSWER = re.compile(r"\*\*([a-z]{3,9}/20\d{4})\*\*", re.I)
 
 _COMP_AAAAMM = re.compile(r"\b(20\d{4})\b")
@@ -218,6 +226,139 @@ def _count_manut(
     return int(conn.execute(text(sql), params).scalar() or 0)
 
 
+def _year_from_text(text: str) -> str | None:
+    m = _COMP_AAAAMM.search(text) or _YEAR.search(text)
+    if not m:
+        return None
+    return m.group(1)[:4]
+
+
+def _competencias_from_text(text: str, *, default_year: str | None = None) -> list[str]:
+    """Extrai todas as competências citadas na ordem do texto."""
+    if not text or not text.strip():
+        return []
+    year = _year_from_text(text) or default_year
+    low = text.lower().replace("ç", "c")
+    found: list[tuple[int, str]] = []
+    for nome, mm in sorted(_MESES.items(), key=lambda x: -len(x[0])):
+        token = nome.replace("ç", "c")
+        for m in re.finditer(rf"\b{re.escape(token)}\b", low):
+            if year:
+                found.append((m.start(), f"{year}{mm}"))
+    found.sort(key=lambda x: x[0])
+    comps: list[str] = []
+    seen: set[str] = set()
+    for _, comp in found:
+        if comp not in seen:
+            seen.add(comp)
+            comps.append(comp)
+    return comps
+
+
+def _format_sibec_pair_compare(
+    comp_a: str,
+    comp_b: str,
+    n_a: int,
+    n_b: int,
+    *,
+    acao_label: str,
+    cras_num: str | None,
+    who: str = "",
+) -> str:
+    label_a = _fmt_competencia(comp_a)
+    label_b = _fmt_competencia(comp_b)
+    cras_txt = f" no **CRAS {cras_num}**" if cras_num else ""
+    diff = n_a - n_b
+    if diff > 0:
+        tail = f"**{_fmt_int(diff)} a mais** em **{label_a}**."
+    elif diff < 0:
+        tail = f"**{_fmt_int(abs(diff))} a mais** em **{label_b}**."
+    else:
+        tail = "o total foi **igual** nos dois meses."
+    return (
+        f"{who}comparativo de **{acao_label}**{cras_txt}: "
+        f"**{_fmt_int(n_a)}** em **{label_a}** e **{_fmt_int(n_b)}** em **{label_b}** — {tail}"
+    )
+
+
+def _try_sibec_explicit_compare(
+    conn: Connection,
+    message: str,
+    transcript: list[dict[str, str]] | None,
+    *,
+    user_first_name: str = "",
+) -> dict | None:
+    """Comparativo direto quando o usuário cita dois meses na mesma pergunta."""
+    blob = _conversation_blob(message, transcript)
+    if not (_EXPLICIT_COMPARE.search(message) or len(_competencias_from_text(message)) >= 2):
+        return None
+    if not _MANUT.search(message) and not _MANUT.search(blob):
+        return None
+
+    year = _year_from_text(message) or _year_from_text(blob)
+    comps = _competencias_from_text(message, default_year=year)
+    if len(comps) < 2:
+        return None
+
+    comp_a, comp_b = sorted(comps[:2])
+    flag_col, acao_label = _parse_action(message, transcript)
+    cras_num = _parse_cras_session(message, transcript)
+    motivo_sql, motivo_params = _motivo_filter(message)
+    who = f"{user_first_name}, " if user_first_name else ""
+
+    for comp in (comp_a, comp_b):
+        if not _competencia_disponivel(conn, comp):
+            label = _fmt_competencia(comp)
+            return {
+                "answer": (
+                    f"{who}não há dados de manutenção para **{label}** na base. "
+                    f"Ingeste essa competência em **Ingestão** e atualize a visão SIBEC em **Vigilância**."
+                ),
+                "sql": None,
+                "row_count": 0,
+                "preview": [],
+                "mode": "canonical",
+                "metric": "sibec_manut_compare_sem_mes",
+            }
+
+    n_a = _count_manut(
+        conn,
+        competencia=comp_a,
+        flag_col=flag_col,
+        cras_num=cras_num,
+        motivo_sql=motivo_sql,
+        motivo_params=motivo_params,
+    )
+    n_b = _count_manut(
+        conn,
+        competencia=comp_b,
+        flag_col=flag_col,
+        cras_num=cras_num,
+        motivo_sql=motivo_sql,
+        motivo_params=motivo_params,
+    )
+    return {
+        "answer": _format_sibec_pair_compare(
+            comp_a,
+            comp_b,
+            n_a,
+            n_b,
+            acao_label=acao_label,
+            cras_num=cras_num,
+            who=who,
+        ),
+        "sql": None,
+        "row_count": 2,
+        "preview": [
+            {"competencia": comp_a, "familias": n_a, "acao": acao_label, "cras": cras_num},
+            {"competencia": comp_b, "familias": n_b, "acao": acao_label, "cras": cras_num},
+        ],
+        "mode": "canonical",
+        "metric": "sibec_manut_compare_pair",
+        "use_analyst": True,
+    }
+
+
 def _try_sibec_compare(
     conn: Connection,
     message: str,
@@ -297,11 +438,12 @@ def _try_sibec_compare(
         "sql": None,
         "row_count": 2,
         "preview": [
-            {"competencia": comp_a, "familias": n_a},
-            {"competencia": comp_b, "familias": n_b},
+            {"competencia": comp_a, "familias": n_a, "acao": acao_label, "cras": cras_num},
+            {"competencia": comp_b, "familias": n_b, "acao": acao_label, "cras": cras_num},
         ],
         "mode": "canonical",
         "metric": "sibec_manut_compare",
+        "use_analyst": True,
     }
 
 
@@ -471,6 +613,12 @@ def try_sibec_manut_metric(
             "mode": "canonical",
             "metric": "sibec_manut_indisponivel",
         }
+
+    compare = _try_sibec_explicit_compare(
+        conn, message, transcript, user_first_name=user_first_name
+    )
+    if compare:
+        return compare
 
     compare = _try_sibec_compare(conn, message, transcript, user_first_name=user_first_name)
     if compare:

@@ -119,6 +119,30 @@ def pack_from_canonical(question: str, result: dict[str, Any], *, thread_brief: 
                         detail="demanda territorial CADU",
                     )
                 )
+    elif metric.startswith("sibec_manut"):
+        acao = ""
+        cras = ""
+        for row in preview:
+            if not isinstance(row, dict):
+                continue
+            if row.get("acao"):
+                acao = str(row["acao"])
+            if row.get("cras"):
+                cras = str(row["cras"])
+            comp = row.get("competencia")
+            fam = row.get("familias")
+            if comp is not None and fam is not None:
+                loc = f"CRAS {cras}" if cras else "município"
+                act = f" ({acao})" if acao else ""
+                facts.append(
+                    EvidenceFact(
+                        label=f"Manutenção PBF {comp}{act} — {loc}",
+                        value=str(fam),
+                        source="vig.mvw_sibec_manut_familia_mes",
+                        detail="famílias distintas no mês; território via CADU",
+                        signal="comparativo" if len(preview) >= 2 else "",
+                    )
+                )
     elif metric == "ivs_cras_compare":
         threshold = None
         dim = "NC"

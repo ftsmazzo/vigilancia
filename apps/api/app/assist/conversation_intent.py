@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from .session_context import SessionContext
+
 _PLANNING = re.compile(
     r"implantar|implementar|novo\s+serv|abrir|criar|expandir|"
     r"suger|indic|recomend|onde\s+(?:abrir|implantar|criar)|"
@@ -159,9 +161,18 @@ def is_planning_coverage_followup(
     return False
 
 
-def build_thread_brief(message: str, transcript: list[dict[str, str]] | None) -> str:
+def build_thread_brief(
+    message: str,
+    transcript: list[dict[str, str]] | None,
+    *,
+    session_context: SessionContext | None = None,
+) -> str:
     """Resumo estruturado para o AgenteSQL — evita perder o fio da conversa."""
     lines: list[str] = []
+    if session_context and session_context.has_data_thread():
+        brief = session_context.to_brief()
+        if brief:
+            lines.append(brief)
     if is_planning_turn(message, transcript):
         lines.append("- Assunto: planejamento de **novo SCFV** (demanda potencial no CADU territorial).")
         lines.append("- **NÃO** usar vig.mvw_sisc_qualificado salvo pedido explícito de matrícula existente.")
