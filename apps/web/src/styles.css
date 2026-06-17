@@ -1412,6 +1412,25 @@ button:not([class*="btn"]):disabled {
   line-height: 1.35;
 }
 
+.kpi-card .kpi-variacao {
+  display: block;
+  margin-top: 0.35rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--fx-border);
+  font-size: 0.78rem;
+  color: var(--fx-subtle);
+}
+
+.sibec-page .caract-filtros-grid {
+  grid-template-columns: 1fr 1fr auto;
+}
+
+@media (max-width: 720px) {
+  .sibec-page .caract-filtros-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .chart-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));

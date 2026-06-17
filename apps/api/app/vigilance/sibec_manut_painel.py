@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 
 from sqlalchemy import text
@@ -119,10 +120,7 @@ def fetch_sibec_painel(
     if not _mview_ok(conn):
         return {
             "disponivel": False,
-            "mensagem": (
-                "MV SIBEC Manutenções não gerada. Ingeste os analíticos e execute "
-                "POST /vigilance/materialized-views/sibec-manut/refresh na página Vigilância."
-            ),
+            "mensagem": "Dados de manutenção ainda não disponíveis. Atualize em Vigilância.",
         }
 
     comp = (competencia or latest_manut_competencia(conn) or "").strip()
@@ -244,11 +242,6 @@ def fetch_sibec_painel(
     return {
         "disponivel": True,
         "titulo": "SIBEC — Manutenções PBF",
-        "fonte": "vig.mvw_sibec_manut_familia_mes × vig.mvw_familia",
-        "grao": (
-            "1 família por competência (NIVEL_ACAO=00); ação principal = última do mês; "
-            "território via geo × CEP."
-        ),
         "competencia": comp,
         "cras_selecionado": cras_cod if cras_cod and cras_cod not in ("", "__todos__") else None,
         "resumo": {
@@ -287,6 +280,18 @@ def fetch_sibec_painel(
     }
 
 
+def _cras_ordem(num_cras: str, nom_cras: str) -> tuple[int, int, str]:
+    """Ordena CRAS 1–12 pelo número no código ou no nome."""
+    for raw in (num_cras, nom_cras):
+        s = (raw or "").strip()
+        if s.isdigit():
+            return (0, int(s), s)
+        m = re.search(r"(?:CRAS\s*)?(\d+)", s, re.IGNORECASE)
+        if m:
+            return (0, int(m.group(1)), s)
+    return (1, 999, nom_cras or num_cras or "")
+
+
 def _aggregate_por_cras(rows) -> list[dict]:
     counts: dict[tuple[str, str], dict[str, int]] = defaultdict(dict)
     totals: dict[tuple[str, str], int] = defaultdict(int)
@@ -298,7 +303,7 @@ def _aggregate_por_cras(rows) -> list[dict]:
         totals[key] += n
 
     out: list[dict] = []
-    for key in sorted(counts.keys(), key=lambda k: -totals.get(k, 0)):
+    for key in sorted(counts.keys(), key=lambda k: _cras_ordem(k[0], k[1])):
         num_cras, nom_cras = key
         tot = totals.get(key, 0)
         grupos_list = []
