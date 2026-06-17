@@ -45,6 +45,7 @@ from .maestro_router import resolve_turn_route
 from .municipio_agent import run_municipio_agent
 from .planning_metrics import try_planning_demand_metric
 from .policy_agent import run_policy_agent
+from .session_context import SessionContext, resolve_effective_question
 from .sql_agent import SqlAgentResult, run_sql_agent
 
 ORCHESTRATOR_PLAN_SYSTEM = """Você é VigIA, orquestrador do assistente de vigilância socioassistencial municipal.
