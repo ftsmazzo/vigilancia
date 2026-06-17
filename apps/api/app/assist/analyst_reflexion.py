@@ -23,6 +23,7 @@ from .cras_registry import (
     territorial_cras_matches_sisc,
 )
 from ..vigilance.familia_mview import _table_exists
+from ..vigilance.sibec_manut_mview import latest_manut_competencia
 from .evidence import EvidencePack
 
 REFLEXION_VERSION = "2.0"
@@ -118,7 +119,8 @@ def is_planning_decision_context(pack: EvidencePack, message: str = "") -> bool:
         re.search(
             r"implantar|scfv|car[eê]ncia|demanda|qual\s+cras|qual\s+bairro|"
             r"atualiza[cç][ãa]o\s+cadastral|a[cç][ãa]o.*cadu|repasse|"
-            r"servi[cç]o\s+de\s+conviv|planej|diagn[oó]stic|prioriz|idos",
+            r"servi[cç]o\s+de\s+conviv|planej|diagn[oó]stic|prioriz|idos|"
+            r"desbloque|bloqueio.*bolsa|bolsa.*bloque",
             blob,
         )
     )
@@ -147,6 +149,7 @@ Dimensões disponíveis: {ivs_dims}. Escala **0 a 1** (maior = mais vulnerável 
 - **SCFV idosos / melhor idade:** cruze **A** (demanda 60+) + **B** (carência) + **D.NC** (cuidados) + **C** (TAC se cadastro desatualizado).
 - **SCFV infância/adolescência:** cruze **A** (demanda faixa) + **B** (carência) + **D.DCA/NC** + **F** (escola, trabalho infantil).
 - **SCFV primeira infância:** **D.DPI/NC** + **E** (moradia/alimentação).
+- **Ação desbloqueio PBF:** eixo **C (SIBEC bloqueio)** é o critério de ranking; cruzar TAC/revisão cadastral; carência SISC (**B**) é complemento, não substituto.
 - IVS **baixo** modera urgência estrutural; **não anula** carência (**B**) nem pobreza (**C**).
 
 #### Proporcionalidade da resposta (obrigatório)
@@ -171,6 +174,7 @@ não para **despejar** dados.
 |--------|-------------------|
 | A↑ demanda + B↑ carência + D↓ IVS | Prioridade operacional (**atender quem não está**); IVS baixo modera, não veta |
 | A↑ + B↓ cobertura SISC (>70%) | Foco em **ampliação/qualidade**, não implantação do zero |
+| C↑ bloqueios SIBEC (teve_bloqueio) | Prioridade para **ação de desbloqueio PBF** — cite número e competência |
 | C↑ pobreza + E↑ riscos domiciliares | Reforço de proteção social; SCFV pode ser insuficiente sozinho — sinalize |
 | F↑ trabalho infantil / fora da escola | Adiciona urgência de proteção além da contagem etária |
 | G: SISC em CRAS ≠ CRAS territorial | Articulação territorial — **CRAS Centro = CRAS 1 (Central)**; não tratar como unidades distintas |
@@ -322,6 +326,17 @@ def build_synthesis_guide(facts: list[dict[str, Any]], *, bairro: str, faixa: st
     return " ".join(lines)
 
 
+def _fmt_competencia(comp: str) -> str:
+    if len(comp) != 6:
+        return comp
+    meses = {
+        "01": "janeiro", "02": "fevereiro", "03": "março", "04": "abril",
+        "05": "maio", "06": "junho", "07": "julho", "08": "agosto",
+        "09": "setembro", "10": "outubro", "11": "novembro", "12": "dezembro",
+    }
+    return f"{meses.get(comp[4:6], comp[4:6])}/{comp[0:4]}"
+
+
 def collect_territorial_reflexion(
     conn: Connection,
     db: Session,
@@ -334,6 +349,8 @@ def collect_territorial_reflexion(
     sisc: int | None = None,
     demanda_label: str | None = None,
     faixa_label: str | None = None,
+    sibec_focus: str | None = None,
+    sibec_competencia: str | None = None,
 ) -> TerritorialReflexion:
     """Coleta fatos multi-eixo para o Especialista — máximo disponível nas views."""
     faixa = faixa_label or f"{age_min} a {age_max} anos"
@@ -659,9 +676,105 @@ def collect_territorial_reflexion(
                     f"Famílias na folha PBF — {b}",
                     _fmt_int(int(renda.get("pbf") or 0)),
                     "vig.mvw_familia",
-                    "interseção CADU × folha SIBEC",
+                    "interseção CADU × folha SIBEC (marc_pbf) — ≠ manutenção/bloqueio",
                 )
             )
+            if _table_exists(conn, "vig", "mvw_sibec_manut_familia_mes"):
+                comp = sibec_competencia or latest_manut_competencia(conn)
+                if comp:
+                    sibec_row = conn.execute(
+                        text(
+                            """
+                            SELECT
+                              COUNT(*) FILTER (WHERE m.teve_bloqueio)::bigint AS bloqueios,
+                              COUNT(*) FILTER (WHERE m.teve_reversao)::bigint AS reversoes,
+                              COUNT(*) FILTER (
+                                WHERE m.teve_bloqueio
+                                  AND (
+                                    m.motivo_txt ILIKE '%REVISAO CADASTRAL%'
+                                    OR m.cod_motivo IN ('1052', '1053')
+                                  )
+                              )::bigint AS bloq_revisao
+                            FROM vig.mvw_sibec_manut_familia_mes m
+                            WHERE m.competencia = :comp
+                              AND btrim(COALESCE(m.bairro::text, '')) = :bairro
+                            """
+                        ),
+                        {"comp": comp, "bairro": b},
+                    ).mappings().first() or {}
+                    n_bloq = int(sibec_row.get("bloqueios") or 0)
+                    n_rev = int(sibec_row.get("reversoes") or 0)
+                    n_bloq_rev = int(sibec_row.get("bloq_revisao") or 0)
+                    comp_label = _fmt_competencia(comp)
+                    if n_bloq or sibec_focus == "bloqueio":
+                        sig_bloq = (
+                            "reforça_prioridade"
+                            if n_bloq >= 10 or sibec_focus == "bloqueio"
+                            else "neutro"
+                        )
+                        facts.append(
+                            _fact(
+                                "C",
+                                f"Bloqueios SIBEC — {b} ({comp_label})",
+                                _fmt_int(n_bloq),
+                                "vig.mvw_sibec_manut_familia_mes",
+                                "famílias distintas com teve_bloqueio na competência",
+                                signal=sig_bloq,
+                            )
+                        )
+                        if n_bloq_rev:
+                            facts.append(
+                                _fact(
+                                    "C",
+                                    f"Bloqueios por revisão cadastral — {b}",
+                                    _fmt_int(n_bloq_rev),
+                                    "vig.mvw_sibec_manut_familia_mes",
+                                    "motivo revisão cadastral no mês",
+                                    signal="reforça_prioridade",
+                                )
+                            )
+                        if n_rev:
+                            facts.append(
+                                _fact(
+                                    "C",
+                                    f"Reversões SIBEC — {b} ({comp_label})",
+                                    _fmt_int(n_rev),
+                                    "vig.mvw_sibec_manut_familia_mes",
+                                    "desbloqueios/reversões já registrados no mês",
+                                    signal="modera",
+                                )
+                            )
+                        top_motivos = conn.execute(
+                            text(
+                                """
+                                SELECT
+                                  COALESCE(NULLIF(btrim(m.motivo_txt::text), ''), '(sem motivo)') AS motivo,
+                                  COUNT(*)::bigint AS n
+                                FROM vig.mvw_sibec_manut_familia_mes m
+                                WHERE m.competencia = :comp
+                                  AND m.teve_bloqueio
+                                  AND btrim(COALESCE(m.bairro::text, '')) = :bairro
+                                GROUP BY 1
+                                ORDER BY n DESC
+                                LIMIT 3
+                                """
+                            ),
+                            {"comp": comp, "bairro": b},
+                        ).mappings().all()
+                        if top_motivos:
+                            motivos_txt = "; ".join(
+                                f"{r['motivo']} ({int(r['n'])})" for r in top_motivos
+                            )
+                            facts.append(
+                                _fact(
+                                    "C",
+                                    f"Principais motivos de bloqueio — {b}",
+                                    motivos_txt,
+                                    "vig.mvw_sibec_manut_familia_mes",
+                                    "eventos de manutenção PBF no mês",
+                                    signal="reforça_prioridade" if sibec_focus == "bloqueio" else "neutro",
+                                )
+                            )
             tac = renda.get("tac_medio")
             if tac is not None:
                 tac_f = float(tac)
@@ -909,6 +1022,8 @@ def collect_reflexion_result(
     sisc: int | None = None,
     demanda_label: str | None = None,
     faixa_label: str | None = None,
+    sibec_focus: str | None = None,
+    sibec_competencia: str | None = None,
 ) -> dict[str, Any]:
     """Pacote completo para o orquestrador (fatos + guia + metadados)."""
     reflexion = collect_territorial_reflexion(
@@ -922,6 +1037,8 @@ def collect_reflexion_result(
         sisc=sisc,
         demanda_label=demanda_label,
         faixa_label=faixa_label,
+        sibec_focus=sibec_focus,
+        sibec_competencia=sibec_competencia,
     )
     return {
         "preview": reflexion.facts,

@@ -42,6 +42,14 @@ _CADU_ACAO = re.compile(
     r"atualiza[cç][ãa]o.*territ[oó]rio|territ[oó]rio.*atualiza",
     re.I,
 )
+_PBF_DESBLOQUEIO = re.compile(
+    r"desbloque|"
+    r"a[cç][ãa]o.*(?:bloque|bolsa\s+fam[ií]lia|pbf)|"
+    r"(?:bloque|bolsa\s+fam[ií]lia|pbf).*(?:a[cç][ãa]o|territ[oó]rio|bairro|prioriz)|"
+    r"benef[ií]cio\s+bloquead|"
+    r"manuten[cç][ãa]o.*bolsa|bolsa.*manuten[cç]",
+    re.I,
+)
 _BAIRRO_FOLLOWUP = re.compile(
     r"\bbairro\b.*(?:desse|nesse|deste|dese|do)\s+cras|"
     r"(?:desse|nesse|deste|dese|do)\s+cras.*\bbairro\b|"
@@ -93,11 +101,13 @@ def planning_thread_active(transcript: list[dict[str, str]] | None) -> bool:
             _PLANNING.search(content)
             or _SCFV.search(content)
             or _CADU_ACAO.search(content)
+            or _PBF_DESBLOQUEIO.search(content)
         ) and (
             _FAIXA.search(content)
             or _IDOSO.search(content)
             or _BAIRRO_SUGGEST.search(content)
             or _CADU_ACAO.search(content)
+            or _PBF_DESBLOQUEIO.search(content)
         ):
             return True
     return False
@@ -123,6 +133,17 @@ def is_cadu_acao_turn(message: str, transcript: list[dict[str, str]] | None) -> 
     return bool(_CADU_ACAO.search(blob) and _BAIRRO_SUGGEST.search(text_msg))
 
 
+def is_pbf_desbloqueio_acao_turn(message: str, transcript: list[dict[str, str]] | None) -> bool:
+    """Ação territorial de desbloqueio / manutenção PBF (SIBEC bloqueios)."""
+    text_msg = message.strip()
+    if not text_msg:
+        return False
+    if _PBF_DESBLOQUEIO.search(text_msg):
+        return True
+    blob = user_messages_blob(transcript, text_msg)
+    return bool(_PBF_DESBLOQUEIO.search(blob) and _BAIRRO_SUGGEST.search(text_msg))
+
+
 def is_planning_turn(message: str, transcript: list[dict[str, str]] | None) -> bool:
     text_msg = message.strip()
     if not text_msg:
@@ -130,6 +151,8 @@ def is_planning_turn(message: str, transcript: list[dict[str, str]] | None) -> b
     if is_planning_followup(text_msg, transcript):
         return True
     if is_cadu_acao_turn(text_msg, transcript):
+        return True
+    if is_pbf_desbloqueio_acao_turn(text_msg, transcript):
         return True
     if not _PLANNING.search(text_msg):
         return False
@@ -232,6 +255,18 @@ def build_thread_brief(
             lines.append(
                 "- Assunto: **ação de atualização cadastral** no território "
                 "(priorizar bairros com CADU desatualizado — eixo C/TAC)."
+            )
+        elif is_pbf_desbloqueio_acao_turn(message, transcript):
+            lines.append(
+                "- Assunto: **ação de desbloqueio Bolsa Família** no território "
+                "(priorizar bairros com **bloqueios SIBEC** — vig.mvw_sibec_manut_familia_mes; "
+                "≠ folha PBF marc_pbf)."
+            )
+            lines.append(
+                "- Ranking territorial: famílias distintas com **teve_bloqueio** na última competência."
+            )
+            lines.append(
+                "- Na síntese: **obrigatório** citar bloqueios SIBEC do bairro; carência SISC é complemento."
             )
         else:
             lines.append("- Assunto: planejamento territorial / **SCFV** (demanda potencial no CADU).")

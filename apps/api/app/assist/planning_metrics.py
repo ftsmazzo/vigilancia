@@ -10,10 +10,12 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
 from ..vigilance.familia_mview import _table_exists
+from ..vigilance.sibec_manut_mview import latest_manut_competencia
 from .bairro_resolver import _pick_variant, _prefix_name
 from .conversation_intent import (
     asks_bairro_direct,
     is_cadu_acao_turn,
+    is_pbf_desbloqueio_acao_turn,
     is_planning_coverage_followup,
     is_planning_followup,
     is_planning_turn,
@@ -285,6 +287,164 @@ def _try_bairro_municipio_planning(
         "preview": rows[:8],
         "mode": "canonical",
         "metric": "planning_bairro_municipio",
+        "use_analyst": True,
+    }
+
+
+def _fmt_competencia(comp: str) -> str:
+    if len(comp) != 6:
+        return comp
+    meses = {
+        "01": "janeiro", "02": "fevereiro", "03": "março", "04": "abril",
+        "05": "maio", "06": "junho", "07": "julho", "08": "agosto",
+        "09": "setembro", "10": "outubro", "11": "novembro", "12": "dezembro",
+    }
+    return f"{meses.get(comp[4:6], comp[4:6])}/{comp[0:4]}"
+
+
+def _rank_bairros_sibec_bloqueio(
+    conn: Connection,
+    competencia: str,
+    *,
+    limit: int = 8,
+) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        text(
+            """
+            SELECT
+              btrim(m.bairro::text) AS bairro,
+              MAX(btrim(m.num_cras::text)) AS num_cras,
+              MAX(btrim(m.nom_cras::text)) AS nom_cras,
+              COUNT(*)::bigint AS bloqueios,
+              COUNT(*) FILTER (
+                WHERE m.motivo_txt ILIKE '%REVISAO CADASTRAL%'
+                  OR m.cod_motivo IN ('1052', '1053')
+              )::bigint AS bloq_revisao_cadastral
+            FROM vig.mvw_sibec_manut_familia_mes m
+            WHERE m.competencia = :comp
+              AND m.teve_bloqueio
+              AND btrim(COALESCE(m.bairro::text, '')) <> ''
+            GROUP BY btrim(m.bairro::text)
+            ORDER BY bloqueios DESC, bairro ASC
+            LIMIT :lim
+            """
+        ),
+        {"comp": competencia, "lim": limit},
+    ).mappings().all()
+    return [dict(r) for r in rows]
+
+
+def try_pbf_desbloqueio_acao_metric(
+    conn: Connection,
+    message: str,
+    transcript: list[dict[str, str]] | None = None,
+    *,
+    db: Session | None = None,
+    user_first_name: str = "",
+) -> dict[str, Any] | None:
+    """Prioriza bairros para ação de desbloqueio PBF (SIBEC manutenções — bloqueio)."""
+    if not is_pbf_desbloqueio_acao_turn(message, transcript):
+        return None
+    if not _table_exists(conn, "vig", "mvw_sibec_manut_familia_mes"):
+        return None
+
+    competencia = latest_manut_competencia(conn)
+    if not competencia:
+        answer = (
+            "Para indicar bairro na **ação de desbloqueio**, preciso da visão SIBEC Manutenções. "
+            "Importe o analítico e atualize em **Vigilância** → **SIBEC Manutenções**."
+        )
+        return {
+            "answer": _prefix_name(user_first_name, answer),
+            "sql": None,
+            "row_count": 0,
+            "preview": [],
+            "mode": "canonical",
+            "metric": "planning_pbf_desbloqueio_vazio",
+        }
+
+    rows = _rank_bairros_sibec_bloqueio(conn, competencia)
+    if not rows:
+        comp_label = _fmt_competencia(competencia)
+        answer = (
+            f"Não encontrei famílias com **bloqueio** SIBEC territorializadas por bairro "
+            f"em **{comp_label}**."
+        )
+        return {
+            "answer": _prefix_name(user_first_name, answer),
+            "sql": None,
+            "row_count": 0,
+            "preview": [],
+            "mode": "canonical",
+            "metric": "planning_pbf_desbloqueio_vazio",
+        }
+
+    top = rows[0]
+    bairro = str(top["bairro"])
+    num_cras = str(top.get("num_cras") or "")
+    bloqueios = int(top.get("bloqueios") or 0)
+    bloq_rev = int(top.get("bloq_revisao_cadastral") or 0)
+    comp_label = _fmt_competencia(competencia)
+
+    sql = (
+        "SELECT btrim(m.bairro::text) AS bairro, COUNT(*) AS bloqueios "
+        "FROM vig.mvw_sibec_manut_familia_mes m "
+        f"WHERE m.competencia = '{competencia}' AND m.teve_bloqueio "
+        "AND btrim(COALESCE(m.bairro::text,'')) <> '' "
+        "GROUP BY 1 ORDER BY 2 DESC LIMIT 8"
+    )
+
+    if db:
+        reflex = collect_reflexion_result(
+            conn,
+            db,
+            bairro=bairro,
+            age_min=0,
+            age_max=120,
+            num_cras=num_cras or None,
+            demanda=bloqueios,
+            sisc=None,
+            demanda_label=f"Famílias com bloqueio SIBEC — {bairro} ({comp_label})",
+            faixa_label="Bolsa Família — manutenção SIBEC (bloqueio)",
+            sibec_focus="bloqueio",
+            sibec_competencia=competencia,
+        )
+        return {
+            "answer": "",
+            "sql": sql,
+            "row_count": len(reflex["preview"]),
+            "preview": reflex["preview"],
+            "reflexion_guide": reflex["reflexion_guide"],
+            "reflexion_axes": reflex["reflexion_axes"],
+            "mode": "canonical",
+            "metric": "planning_pbf_desbloqueio",
+            "use_analyst": True,
+        }
+
+    cras_label = format_territorial_cras(num_cras, top.get("nom_cras"))
+    answer = (
+        f"Para **ação de desbloqueio do Bolsa Família**, eu priorizaria o bairro "
+        f"**{bairro}** — território do **{cras_label}**: **{_fmt_int(bloqueios)}** famílias "
+        f"com **bloqueio SIBEC** em **{comp_label}**."
+    )
+    if bloq_rev:
+        answer += (
+            f" Destas, **{_fmt_int(bloq_rev)}** têm motivo ligado a **revisão cadastral**."
+        )
+    if wants_planning_ranking(message) and len(rows) > 1:
+        others = [
+            f"- **{r['bairro']}**: {_fmt_int(int(r.get('bloqueios') or 0))} bloqueios"
+            for r in rows[1:6]
+        ]
+        answer += "\n\n**Demais bairros (SIBEC bloqueio):**\n" + "\n".join(others)
+
+    return {
+        "answer": _prefix_name(user_first_name, answer),
+        "sql": sql,
+        "row_count": len(rows),
+        "preview": rows[:8],
+        "mode": "canonical",
+        "metric": "planning_pbf_desbloqueio",
         "use_analyst": True,
     }
 
@@ -574,6 +734,12 @@ def try_planning_demand_metric(
     )
     if cadu_acao:
         return cadu_acao
+
+    pbf_desbloqueio = try_pbf_desbloqueio_acao_metric(
+        conn, message, transcript, db=db, user_first_name=user_first_name
+    )
+    if pbf_desbloqueio:
+        return pbf_desbloqueio
 
     coverage = try_planning_coverage_metric(
         conn, message, transcript, db=db, user_first_name=user_first_name

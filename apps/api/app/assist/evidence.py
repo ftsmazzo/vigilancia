@@ -84,7 +84,15 @@ def pack_from_canonical(question: str, result: dict[str, Any], *, thread_brief: 
                             source="core.mvw_ivs_familia",
                         )
                     )
-    elif metric in ("planning_carencia", "planning_bairro_em_cras", "planning_diagnostico_bairro", "planning_reflexion"):
+    elif metric in (
+        "planning_carencia",
+        "planning_bairro_em_cras",
+        "planning_diagnostico_bairro",
+        "planning_reflexion",
+        "planning_pbf_desbloqueio",
+        "planning_cadu_acao",
+        "planning_bairro_municipio",
+    ):
         for row in preview:
             if isinstance(row, dict) and row.get("label"):
                 facts.append(

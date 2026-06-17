@@ -110,6 +110,7 @@ ORDER BY atendidos DESC
 
 ## Regras de roteamento de dados
 - **Planejar novo SCFV / implantar serviço / qual CRAS indicar** → receita CADU (p×f), NUNCA mvw_sisc_qualificado
+- **Ação desbloqueio PBF / bloqueio Bolsa Família por bairro** → vig.mvw_sibec_manut_familia_mes (teve_bloqueio, competência); ranking territorial por bairro
 - **Quem já está matriculado no SISC** → mvw_sisc_qualificado
 - **IVS / IVCAD** → core.mvw_ivs_familia i JOIN f; filtro i.elegivel_ivs
 - **Manutenções PBF (bloqueio/cancelamento/reversão)** → vig.mvw_sibec_manut_familia_mes; COUNT famílias distintas; competencia AAAAMM
