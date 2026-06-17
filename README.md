@@ -39,6 +39,29 @@ Ao iniciar a API, se esse email ainda nao existir no banco, o usuario `superadmi
 - `frontend/Dockerfile`: imagem de producao do frontend (build estatico + nginx)
 - `DadosBrutos`: fontes iniciais de dados para ingestao
 
+## Git — repositorio canonico
+
+O remote **`origin`** (`github.com/ftsmazzo/vigilanciasuas`) esta **descontinuado**. Nao faca push nele.
+
+| Remote | URL | Uso |
+|--------|-----|-----|
+| **`vigilancia`** | `https://github.com/ftsmazzo/vigilancia.git` | **Producao e desenvolvimento ativos** — unico destino de push |
+| `origin-descontinuado` | `https://github.com/ftsmazzo/vigilanciasuas.git` | Legado; mantido apenas como referencia local |
+
+Clone novo ou configuracao local:
+
+```bash
+git remote add vigilancia https://github.com/ftsmazzo/vigilancia.git
+git fetch vigilancia
+git branch --set-upstream-to=vigilancia/main main
+```
+
+Push padrao:
+
+```bash
+git push vigilancia main
+```
+
 ## EasyPanel (deploy)
 
 Configure **Build Path** como `/` (raiz) e aponte o Dockerfile de cada servico:
