@@ -697,12 +697,13 @@ def get_sibec_painel(
 def get_sibec_serie(
     de: str | None = Query(None, description="Competência inicial AAAAMM"),
     ate: str | None = Query(None, description="Competência final AAAAMM"),
+    cras_cod: str | None = Query(None, description="Código CRAS, __todos__ ou __sem_cras__"),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
     """Série temporal de manutenções (famílias distintas por competência)."""
     with db.bind.begin() as conn:
-        return fetch_sibec_serie(conn, de=de, ate=ate)
+        return fetch_sibec_serie(conn, de=de, ate=ate, cras_cod=cras_cod)
 
 
 @router.post("/materialized-views/sibec-manut/refresh")

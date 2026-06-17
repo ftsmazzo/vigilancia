@@ -332,6 +332,7 @@ def fetch_sibec_serie(
     *,
     de: str | None = None,
     ate: str | None = None,
+    cras_cod: str | None = None,
 ) -> dict:
     if not _mview_ok(conn):
         return {"disponivel": False, "items": []}
@@ -344,6 +345,9 @@ def fetch_sibec_serie(
     if ate:
         where_parts.append("competencia <= :ate")
         params["ate"] = ate.strip()
+    where_cras, cras_params = _cras_filter_clause(cras_cod)
+    where_parts.append(where_cras)
+    params.update(cras_params)
     where_sql = " AND ".join(where_parts)
 
     rows = conn.execute(

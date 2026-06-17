@@ -1425,6 +1425,25 @@ button:not([class*="btn"]):disabled {
   grid-template-columns: 1fr 1fr auto;
 }
 
+.sibec-page .sibec-cras-table th,
+.sibec-page .sibec-cras-table td {
+  text-align: center;
+  vertical-align: middle;
+}
+
+.sibec-charts-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+@media (max-width: 900px) {
+  .sibec-charts-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 720px) {
   .sibec-page .caract-filtros-grid {
     grid-template-columns: 1fr;

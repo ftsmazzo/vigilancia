@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import BarChartPanel, { type BarItem } from "../components/charts/BarChartPanel";
+import LineChartPanel, { type LineChartPoint } from "../components/charts/LineChartPanel";
+import StackedBarChartPanel, { type StackedBarItem } from "../components/charts/StackedBarChart";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -65,6 +67,15 @@ type Painel = {
   por_cras?: CrasManut[];
 };
 
+type SerieItem = {
+  competencia: string;
+  familias_com_evento: number;
+  bloqueios: number;
+  cancelamentos: number;
+  reversoes: number;
+  territorializadas: number;
+};
+
 function fmtCompetencia(comp: string): string {
   if (comp.length !== 6) return comp;
   const mes = comp.slice(4, 6);
@@ -114,6 +125,7 @@ export default function SibecPage({ token }: Props) {
   const [crasCod, setCrasCod] = useState("__todos__");
   const [catalog, setCatalog] = useState<CrasOption[]>([]);
   const [painel, setPainel] = useState<Painel | null>(null);
+  const [serie, setSerie] = useState<SerieItem[]>([]);
 
   useEffect(() => {
     fetch(`${API_URL}/api/v1/cras/catalog`, {
@@ -149,18 +161,36 @@ export default function SibecPage({ token }: Props) {
       if (competencia) params.set("competencia", competencia);
       if (crasCod && crasCod !== "__todos__") params.set("cras_cod", crasCod);
       const qs = params.toString();
-      const response = await fetch(`${API_URL}/api/v1/vigilance/sibec/painel${qs ? `?${qs}` : ""}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const serieParams = new URLSearchParams();
+      if (crasCod && crasCod !== "__todos__") serieParams.set("cras_cod", crasCod);
+      const serieQs = serieParams.toString();
+
+      const [response, serieResponse] = await Promise.all([
+        fetch(`${API_URL}/api/v1/vigilance/sibec/painel${qs ? `?${qs}` : ""}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        fetch(`${API_URL}/api/v1/vigilance/sibec/serie${serieQs ? `?${serieQs}` : ""}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+      ]);
+
       const data = (await response.json().catch(() => ({}))) as Painel & { detail?: unknown };
       if (!response.ok) {
         throw new Error(typeof data.detail === "string" ? data.detail : "Não foi possível carregar o painel.");
       }
       setPainel(data);
       if (data.competencia && !competencia) setCompetencia(data.competencia);
+
+      if (serieResponse.ok) {
+        const serieData = (await serieResponse.json()) as { disponivel?: boolean; items?: SerieItem[] };
+        setSerie(serieData.disponivel ? serieData.items ?? [] : []);
+      } else {
+        setSerie([]);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro inesperado.");
       setPainel(null);
+      setSerie([]);
     } finally {
       setLoading(false);
     }
@@ -178,6 +208,26 @@ export default function SibecPage({ token }: Props) {
         pct: g.pct_sobre_eventos ?? 0,
       })),
     [painel],
+  );
+
+  const serieLinha: LineChartPoint[] = useMemo(
+    () =>
+      serie.map((s) => ({
+        rotulo: fmtCompetencia(s.competencia),
+        valor: Number(s.familias_com_evento) || 0,
+      })),
+    [serie],
+  );
+
+  const serieEmpilhada: StackedBarItem[] = useMemo(
+    () =>
+      serie.map((s) => ({
+        name: fmtCompetencia(s.competencia),
+        Bloqueios: Number(s.bloqueios) || 0,
+        Cancelamentos: Number(s.cancelamentos) || 0,
+        Reversões: Number(s.reversoes) || 0,
+      })),
+    [serie],
   );
 
   const tituloRecorte = useMemo(() => {
@@ -328,6 +378,25 @@ export default function SibecPage({ token }: Props) {
             </article>
           </div>
 
+          {serie.length > 1 && (
+            <div className="sibec-charts-row">
+              <LineChartPanel
+                title="Evolução — famílias com manutenção"
+                items={serieLinha}
+                emptyMessage="Inclua mais de uma competência para ver a evolução."
+              />
+              <StackedBarChartPanel
+                title="Evolução — bloqueios, cancelamentos e reversões"
+                data={serieEmpilhada}
+                keys={[
+                  { key: "Bloqueios", color: "#f59e0b", label: "Bloqueios" },
+                  { key: "Cancelamentos", color: "#dc2626", label: "Cancelamentos" },
+                  { key: "Reversões", color: "#16a34a", label: "Reversões" },
+                ]}
+              />
+            </div>
+          )}
+
           <div className="obs-charts-grid" style={{ marginTop: "1.25rem" }}>
             <BarChartPanel
               title="Por tipo de ação"
@@ -364,16 +433,16 @@ export default function SibecPage({ token }: Props) {
             <section className="fx-card" style={{ marginTop: "1.25rem", padding: "1rem 1.25rem" }}>
               <h2 className="obs-section-title">Por CRAS</h2>
               <div className="cras-table-wrap">
-                <table className="cras-table">
+                <table className="cras-table sibec-cras-table">
                   <thead>
                     <tr>
                       <th>CRAS</th>
-                      <th className="num">Total</th>
-                      <th className="num">Cancelar</th>
-                      <th className="num">Bloquear</th>
-                      <th className="num">Suspender</th>
-                      <th className="num">Encerrar</th>
-                      <th className="num">Excluir</th>
+                      <th>Total</th>
+                      <th>Cancelar</th>
+                      <th>Bloquear</th>
+                      <th>Suspender</th>
+                      <th>Encerrar</th>
+                      <th>Excluir</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -384,12 +453,12 @@ export default function SibecPage({ token }: Props) {
                       return (
                         <tr key={`${c.num_cras}-${c.nom_cras}`}>
                           <td>{rotuloCras(c)}</td>
-                          <td className="num">{c.familias_com_manutencao.toLocaleString("pt-BR")}</td>
-                          <td className="num">{(byGrupo.Cancelar ?? 0).toLocaleString("pt-BR")}</td>
-                          <td className="num">{(byGrupo.Bloquear ?? 0).toLocaleString("pt-BR")}</td>
-                          <td className="num">{(byGrupo.Suspender ?? 0).toLocaleString("pt-BR")}</td>
-                          <td className="num">{(byGrupo.Encerrar ?? 0).toLocaleString("pt-BR")}</td>
-                          <td className="num">{(byGrupo.Excluir ?? 0).toLocaleString("pt-BR")}</td>
+                          <td>{c.familias_com_manutencao.toLocaleString("pt-BR")}</td>
+                          <td>{(byGrupo.Cancelar ?? 0).toLocaleString("pt-BR")}</td>
+                          <td>{(byGrupo.Bloquear ?? 0).toLocaleString("pt-BR")}</td>
+                          <td>{(byGrupo.Suspender ?? 0).toLocaleString("pt-BR")}</td>
+                          <td>{(byGrupo.Encerrar ?? 0).toLocaleString("pt-BR")}</td>
+                          <td>{(byGrupo.Excluir ?? 0).toLocaleString("pt-BR")}</td>
                         </tr>
                       );
                     })}
