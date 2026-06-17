@@ -390,6 +390,13 @@ def run_orchestrator_turn(
             "answer": _trim_answer_boilerplate(pessoas_bairro["answer"]),
         }
 
+    cadu_pessoas = try_cadu_pessoas_recorte_metric(conn, data_message, user_first_name=first_name)
+    if cadu_pessoas:
+        return {
+            **cadu_pessoas,
+            "answer": _trim_answer_boilerplate(cadu_pessoas["answer"]),
+        }
+
     if route.primary == "policy":
         policy = run_policy_agent(
             message,

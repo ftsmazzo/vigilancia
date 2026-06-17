@@ -45,6 +45,7 @@ Conversas em sequência ("dessas crianças… depois por CRAS"): mantenha filtro
 - cod_raca_cor ('1' branca … '5' indígena)
 - grau_instrucao ('1' analfabeto … '7' superior completo)
 - cod_deficiencia, ind_def_* (flags deficiência)
+- **PCD / deficiência (contagem de pessoas)**: use `tem_deficiencia` = cod_deficiencia='1' OU qualquer ind_def_cegueira, ind_def_baixa_visao, ind_def_surdez_profunda, ind_def_surdez_leve, ind_def_fisica, ind_def_mental, ind_def_sindrome_down, ind_def_transtorno_mental = '1'/'01'/'sim'. NUNCA boolean true. Mesma regra do painel Caracterização e IVS NC4.
 - marc_sit_rua, ind_frequenta_escola, ind_atend_cras (texto '1'/'0' — atendido CRAS no CADU, ≠ SISC)
 - ind_trabalho_infantil
 

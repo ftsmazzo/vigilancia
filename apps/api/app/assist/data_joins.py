@@ -6,6 +6,7 @@ from sqlalchemy.engine import Connection
 
 from ..vigilance.familia_mview import _table_exists
 from .ivs_metrics import build_ivs_assist_hint
+from .cadu_pessoas_metrics import build_cadu_pessoas_assist_hint
 
 CADU_TRUNK = """
 ## Tronco CADU (fonte de verdade — tudo parte daqui)
@@ -138,6 +139,7 @@ def build_data_agent_context(conn: Connection, *, thread_brief: str = "") -> str
         availability.append(f"- {schema}.{view}: {'OK' if ok else 'AUSENTE — refresh necessário'}")
     parts.append("## Views disponíveis agora\n" + "\n".join(availability))
     parts.append(build_ivs_assist_hint())
+    parts.append(build_cadu_pessoas_assist_hint())
 
     if thread_brief.strip():
         parts.append("## Contexto desta conversa\n" + thread_brief.strip())

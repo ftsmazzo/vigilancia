@@ -14,6 +14,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.orm import Session
 
 from .cras_breakdown import format_cras_breakdown_answer, format_cras_breakdown_summary, is_cras_breakdown
+from ..vigilance.cadu_classificacao import tem_deficiencia_expr
 from .llm import AssistLlmError, chat_completion
 from .dictionary import build_dictionary_prompt
 from .data_joins import build_data_agent_context
@@ -44,6 +45,7 @@ Regras obrigatórias:
 - Contagem de famílias: COUNT(DISTINCT f.codigo_familiar) ou COUNT(*) em mvw_sibec_manut_familia_mes (já 1 linha/família/mês).
 - Contagem de pessoas: COUNT(p.cadu_row_id) ou COUNT(*).
 - Mulher: p.cod_sexo = '2'. Homem: p.cod_sexo = '1'.
+- **Pessoa com deficiência (PCD)**: {tem_deficiencia_expr("p")} — campos p.cod_deficiencia e p.ind_def_* (texto '1'/'0', ver dicionário p.cod_deficiencia_memb).
 - Criança até 6 anos: p.idade <= 6 AND p.idade IS NOT NULL.
 - Folha PBF (KPI painel): COALESCE(f.marc_pbf, false) = true.
 - Marcador PBF no CADU (≠ folha): btrim(COALESCE(f.marc_pbf_cadu::text,'')) IN ('1','01','sim','s','true').

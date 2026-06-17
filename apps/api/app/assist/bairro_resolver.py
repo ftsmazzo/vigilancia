@@ -52,9 +52,14 @@ _LOCATION_PATTERNS = (
         re.I,
     ),
     re.compile(
-        r"(?:crianças?|crianca|idosos?|pessoas?|fam[ií]lias?|mulheres|homens?)"
-        r".*?\b(?:no|na|em)\s+(?!bairro\b|cras\b|munic[ií]pio\b|conviv|considera|geral|rela|mente\b|"
-        r"funcao|função|servi[cç]o|novo\b|nova\b|contexto\b)([A-Za-zÀ-ú][A-Za-zÀ-ú0-9\s'\-]{3,}?)(?:\?|\.|$)",
+        r"(?:crianças?|crianca|idosos?|pessoas?|fam[ií]lias?|mulheres|homens?|"
+        r"defici[eê]ncia|portador[a]?s?)"
+        r".*?\b(?:nos|no|na|em)\s+(?!bairro\b|cras\b|munic[ií]pio\b|conviv|considera|geral|rela|mente\b|"
+        r"funcao|função|servi[cç]o|novo\b|nova\b|contexto\b)([A-Za-zÀ-ú][A-Za-zÀ-ú0-9\s'\-]{2,}?)(?:\?|\.|$)",
+        re.I,
+    ),
+    re.compile(
+        r"(?:quantas?|quantos?|existem|h[aá]).*?\b(?:nos|no|na|em)\s+(?!bairro\b|cras\b)(.+?)(?:\?|\.|$)",
         re.I,
     ),
 )

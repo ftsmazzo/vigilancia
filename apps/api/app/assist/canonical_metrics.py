@@ -12,6 +12,7 @@ from .cras_breakdown import (
     format_cras_breakdown_answer,
     sort_cras_rows,
 )
+from .cadu_pessoas_metrics import try_cadu_pessoas_recorte_metric
 from .geo_territorial import try_geo_contextual_followup, try_geo_territorial_metric
 from .ivs_metrics import try_ivs_cras_compare, try_ivs_metric
 from .planning_metrics import try_planning_demand_metric
@@ -152,6 +153,12 @@ def try_canonical_metric(
     )
     if planning:
         return planning
+
+    cadu_pessoas = try_cadu_pessoas_recorte_metric(
+        conn, message, user_first_name=user_first_name
+    )
+    if cadu_pessoas:
+        return cadu_pessoas
 
     if not block_sisc:
         sisc = _try_sisc_cross(conn, message, transcript)
