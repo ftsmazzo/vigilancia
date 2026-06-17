@@ -25,9 +25,15 @@ _IDOSO = re.compile(
 )
 _BAIRRO_SUGGEST = re.compile(
     r"qual\s+bairro|bairro\s+(?:suger|indic|prioriz|deveria|recomend)|"
-    r"onde\s+(?:devo|deveria|priorizar|ir|atuar)",
+    r"onde\s+(?:devo|deveria|priorizar|ir|atuar)|"
+    r"qual\s+bairro\s+suger",
     re.I,
 )
+
+
+def asks_bairro_direct(message: str) -> bool:
+    """Pedido explícito de bairro (não follow-up dentro de CRAS já citado)."""
+    return bool(_BAIRRO_SUGGEST.search(message or ""))
 _CADU_ACAO = re.compile(
     r"atualiza[cç][ãa]o\s+cadastral|atualizar\s+(?:o\s+)?cadu|"
     r"a[cç][ãa]o.*cadu|cadu.*a[cç][ãa]o|"
@@ -37,9 +43,9 @@ _CADU_ACAO = re.compile(
     re.I,
 )
 _BAIRRO_FOLLOWUP = re.compile(
-    r"\bbairro\b.*(?:desse|nesse|deste|dese)\s+cras|"
-    r"(?:desse|nesse|deste|dese)\s+cras.*\bbairro\b|"
-    r"qual\s+bairro|em\s+que\s+bairro|bairro\s+(?:mais|indicad)",
+    r"\bbairro\b.*(?:desse|nesse|deste|dese|do)\s+cras|"
+    r"(?:desse|nesse|deste|dese|do)\s+cras.*\bbairro\b|"
+    r"dentro\s+(?:desse|do)\s+cras",
     re.I,
 )
 _PLANNING_ANSWER = re.compile(

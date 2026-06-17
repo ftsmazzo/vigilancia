@@ -17,6 +17,11 @@ from sqlalchemy.orm import Session
 
 from ..ivs.catalog import DIMENSOES
 from ..municipio_context import get_or_create_context
+from .cras_registry import (
+    format_sisc_cras_display,
+    format_territorial_cras,
+    territorial_cras_matches_sisc,
+)
 from ..vigilance.familia_mview import _table_exists
 from .evidence import EvidencePack
 
@@ -168,7 +173,7 @@ não para **despejar** dados.
 | A↑ + B↓ cobertura SISC (>70%) | Foco em **ampliação/qualidade**, não implantação do zero |
 | C↑ pobreza + E↑ riscos domiciliares | Reforço de proteção social; SCFV pode ser insuficiente sozinho — sinalize |
 | F↑ trabalho infantil / fora da escola | Adiciona urgência de proteção além da contagem etária |
-| G: SISC em CRAS ≠ CRAS territorial | Articulação territorial relevante — mencione se constar nos fatos |
+| G: SISC em CRAS ≠ CRAS territorial | Articulação territorial — **CRAS Centro = CRAS 1 (Central)**; não tratar como unidades distintas |
 | C: CADU desatualizado (TAC alto) | Ressalva: demanda pode estar subestimada — mencione se fato presente |
 | Eixo sem fato | Não invente; diga que aquele eixo ficou indeterminado |
 
@@ -554,14 +559,32 @@ def collect_territorial_reflexion(
             if cras_sisc:
                 top = cras_sisc[0]
                 cras_ter = num_cras or (terr.get("num_cras_geo") if _table_exists(conn, "vig", "mvw_familia") else None)
-                mismatch = cras_ter and str(top["cod"]) != str(cras_ter)
+                mismatch = bool(
+                    cras_ter
+                    and not territorial_cras_matches_sisc(
+                        cras_ter,
+                        sisc_codigo=top["cod"],
+                        sisc_nome=top["nome"],
+                    )
+                )
+                sisc_display = format_sisc_cras_display(top["cod"], top["nome"])
+                terr_label = format_territorial_cras(cras_ter) if cras_ter else ""
+                detail = (
+                    f"matrícula SISC ({sisc_display}) ≠ territorial ({terr_label})"
+                    if mismatch
+                    else (
+                        f"matrícula SISC alinhada ao territorial ({terr_label})"
+                        if cras_ter
+                        else "coincide ou sem CRAS territorial"
+                    )
+                )
                 facts.append(
                     _fact(
                         "G",
                         "CRAS da matrícula SISC (principal)",
-                        f"{top['nome']} (cód. {top['cod']}) — {_fmt_int(int(top['n']))} NIS",
+                        f"{sisc_display} — {_fmt_int(int(top['n']))} NIS",
                         "vig.mvw_sisc_qualificado",
-                        "CRAS da matrícula ≠ CRAS territorial" if mismatch else "coincide ou sem CRAS territorial",
+                        detail,
                         signal="alerta" if mismatch else "neutro",
                     )
                 )

@@ -56,6 +56,7 @@ Regras obrigatórias:
 - Filtro por bairro: btrim(f.bairro::text) ILIKE '%termo%' (parcial, case-insensitive).
 - Filtro por CRAS territorial: btrim(f.num_cras::text) = '1' (texto '1' a '12').
 - Desdobramento por CRAS (CADU): GROUP BY f.num_cras, f.nom_cras; ORDER BY num_cras numérico 1→12 (NULL por último).
+- CRAS 1 = Central (Centro) — matrícula SISC "CRAS Centro" equivale ao CRAS 1 territorial.
 - CRAS 9 = Bonfim Paulista. Famílias com num_cras vazio/null = sem referência territorial (informe aparte).
 - **Planejamento SCFV (implantar novo serviço)**: p JOIN f — demanda por f.num_cras. PROIBIDO usar mvw_sisc_qualificado.
 - **Matrícula SISC existente**: somente quando o usuário pergunta quem já está atendido/matriculado.
