@@ -180,6 +180,9 @@ def extract_context_from_transcript(
     transcript: list[dict[str, str]] | None,
 ) -> SessionContext:
     """Reconstrói contexto a partir do histórico (fallback se Redis vazio)."""
+    from .bairro_resolver import extract_location_term
+    from .followup_enrichment import bairro_from_transcript
+
     ctx = SessionContext()
     last_q = _last_user_data_question(transcript)
     if last_q:
@@ -196,6 +199,12 @@ def extract_context_from_transcript(
             if cras:
                 ctx.last_cras = cras
                 break
+
+    bairro = bairro_from_transcript(transcript)
+    if not bairro and last_q:
+        bairro = extract_location_term(last_q)
+    if bairro:
+        ctx.last_bairro = bairro
 
     return ctx
 
@@ -269,17 +278,22 @@ def resolve_effective_question(
     transcript: list[dict[str, str]] | None,
     stored: SessionContext | None,
 ) -> tuple[str, SessionContext]:
+    from .followup_enrichment import enrich_effective_question
+
     extracted = extract_context_from_transcript(transcript)
     ctx = merge_context(stored or SessionContext(), extracted)
 
+    working = message
     reformulated = reformulate_followup(message, ctx)
     if reformulated:
-        return reformulated, ctx
+        working = reformulated
 
-    parsed = _parse_user_data_question(message)
+    effective, ctx = enrich_effective_question(working, ctx, transcript)
+
+    parsed = _parse_user_data_question(effective)
     if parsed and not _is_cras_followup_only(message):
         ctx = merge_context(ctx, parsed)
-    return message, ctx
+    return effective, ctx
 
 
 def context_after_turn(
@@ -293,6 +307,9 @@ def context_after_turn(
     """Atualiza slots após resposta de dados."""
     if mode in ("chat", "policy", "municipio", "disambiguation"):
         return prior
+
+    from .bairro_resolver import extract_location_term
+    from .followup_enrichment import bairro_from_transcript, territorial_term_from_message
 
     parsed = _parse_user_data_question(effective_message)
     if parsed and not _is_cras_followup_only(message):
@@ -311,6 +328,21 @@ def context_after_turn(
     cras = _cras_from_text(answer) or _cras_from_text(effective_message) or parse_cras_followup(message)
     if cras:
         ctx.last_cras = cras
+
+    bairro = (
+        territorial_term_from_message(effective_message)
+        or territorial_term_from_message(message)
+        or extract_location_term(effective_message)
+        or extract_location_term(message)
+    )
+    if bairro:
+        ctx.last_bairro = bairro
+    else:
+        from_transcript = bairro_from_transcript(
+            [{"role": "assistant", "content": answer}] if answer else None
+        )
+        if from_transcript:
+            ctx.last_bairro = from_transcript
 
     if not ctx.question_stem and effective_message:
         ctx.question_stem = effective_message.strip().rstrip("?.!")

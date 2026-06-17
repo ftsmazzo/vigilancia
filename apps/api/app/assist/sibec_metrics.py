@@ -9,7 +9,10 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from ..vigilance.sibec_manut_mview import latest_manut_competencia
+from .bairro_resolver import extract_location_term
 from .cras_breakdown import _fmt_int, _parse_num_cras, sort_cras_rows
+from .cadu_territory import CaduTerritory, resolve_cadu_territory
+from .followup_enrichment import is_sibec_yesno_question, territorial_term_from_message
 from .geo_territorial import _CRAS_NUM
 
 _MANUT = re.compile(
@@ -209,11 +212,13 @@ def _count_manut(
     competencia: str,
     flag_col: str | None,
     cras_num: str | None,
+    bairro: str | None = None,
     motivo_sql: str,
     motivo_params: dict,
 ) -> int:
     flag_filter = f"AND {flag_col}" if flag_col else ""
     cras_sql, cras_params = _cras_sql_filter(cras_num)
+    bairro_sql, bairro_params = _bairro_sql_filter(bairro)
     sql = f"""
         SELECT COUNT(*)::bigint AS n
         FROM vig.mvw_sibec_manut_familia_mes
@@ -221,8 +226,9 @@ def _count_manut(
           {flag_filter}
           AND {motivo_sql}
           AND {cras_sql}
+          AND {bairro_sql}
     """
-    params: dict[str, Any] = {"comp": competencia, **cras_params, **motivo_params}
+    params: dict[str, Any] = {"comp": competencia, **cras_params, **bairro_params, **motivo_params}
     return int(conn.execute(text(sql), params).scalar() or 0)
 
 
@@ -565,6 +571,15 @@ def _cras_sql_filter(num_cras: str | None) -> tuple[str, dict]:
     )
 
 
+def _bairro_sql_filter(bairro: str | None) -> tuple[str, dict]:
+    if not bairro:
+        return "TRUE", {}
+    return (
+        "lower(btrim(COALESCE(bairro::text, ''))) = lower(:bairro)",
+        {"bairro": bairro.strip()},
+    )
+
+
 def _format_cras_list(rows: list[dict[str, Any]], *, acao_label: str, comp_label: str) -> str:
     sorted_rows = sort_cras_rows(rows)
     lines: list[str] = []
@@ -626,12 +641,17 @@ def try_sibec_manut_metric(
 
     is_followup = bool(_FOLLOWUP.search(message.strip()))
     is_compare = bool(_COMPARE.search(message))
+    has_territory = bool(
+        extract_location_term(message) or territorial_term_from_message(message)
+    )
     if (
         not _QUANT.search(message)
         and not _CRAS_BREAKDOWN.search(message)
         and not is_followup
         and not is_compare
         and _cras_from_text(message) is None
+        and not has_territory
+        and not is_sibec_yesno_question(message, transcript)
     ):
         return None
 
@@ -653,14 +673,37 @@ def try_sibec_manut_metric(
     cras_num = _parse_cras_num(message, transcript)
     if cras_num is None and (is_followup or is_compare):
         cras_num = _parse_cras_session(message, transcript)
+
+    territory = resolve_cadu_territory(
+        conn,
+        message,
+        user_first_name=user_first_name,
+        allow_municipio=True,
+    )
+    if isinstance(territory, dict):
+        return territory
+
+    bairro_name: str | None = None
+    if isinstance(territory, CaduTerritory):
+        if territory.bairro:
+            bairro_name = territory.bairro
+        if cras_num is None and territory.num_cras:
+            cras_num = territory.num_cras
+
     motivo_sql, motivo_params = _motivo_filter(message)
     cras_sql, cras_params = _cras_sql_filter(cras_num)
+    bairro_sql, bairro_params = _bairro_sql_filter(bairro_name)
     comp_label = _fmt_competencia(competencia)
 
     flag_filter = f"AND {flag_col}" if flag_col else ""
     who = f"{user_first_name}, " if user_first_name else ""
 
-    params: dict[str, Any] = {"comp": competencia, **cras_params, **motivo_params}
+    params: dict[str, Any] = {
+        "comp": competencia,
+        **cras_params,
+        **bairro_params,
+        **motivo_params,
+    }
 
     if _CRAS_BREAKDOWN.search(message):
         sql = f"""
@@ -695,19 +738,23 @@ def try_sibec_manut_metric(
           {flag_filter}
           AND {motivo_sql}
           AND {cras_sql}
+          AND {bairro_sql}
     """
     n = _count_manut(
         conn,
         competencia=competencia,
         flag_col=flag_col,
         cras_num=cras_num,
+        bairro=bairro_name,
         motivo_sql=motivo_sql,
         motivo_params=motivo_params,
     )
 
-    cras_txt = ""
-    if cras_num:
-        cras_txt = f" no **CRAS {cras_num}**"
+    recorte_txt = ""
+    if bairro_name:
+        recorte_txt = f" no bairro **{bairro_name}**"
+    elif cras_num:
+        recorte_txt = f" no **CRAS {cras_num}**"
 
     motivo_txt = ""
     if motivo_sql != "TRUE":
@@ -721,12 +768,12 @@ def try_sibec_manut_metric(
     if flag_col:
         answer = (
             f"{who}em **{comp_label}**, há **{_fmt_int(n)}** famílias com "
-            f"**{acao_label}**{motivo_txt}{cras_txt}."
+            f"**{acao_label}**{motivo_txt}{recorte_txt}."
         )
     else:
         answer = (
             f"{who}em **{comp_label}**, há **{_fmt_int(n)}** famílias com "
-            f"**manutenção** registrada{cras_txt}."
+            f"**manutenção** registrada{recorte_txt}."
         )
 
     return {
@@ -739,6 +786,7 @@ def try_sibec_manut_metric(
                 "familias": n,
                 "acao": acao_label,
                 "cras": cras_num,
+                "bairro": bairro_name,
             }
         ],
         "mode": "canonical",

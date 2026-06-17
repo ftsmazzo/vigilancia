@@ -59,7 +59,17 @@ _LOCATION_PATTERNS = (
         re.I,
     ),
     re.compile(
-        r"(?:quantas?|quantos?|existem|h[aá]).*?\b(?:nos|no|na|em)\s+(?!bairro\b|cras\b)(.+?)(?:\?|\.|$)",
+        r"(?:quantas?|quantos?|existem|h[aá]|tem|possui|apresenta).*?"
+        r"\b(?:nos|no|na|em)\s+(?!bairro\b|cras\b|munic[ií]pio\b)(.+?)(?:\?|\.|$)",
+        re.I,
+    ),
+    re.compile(
+        r"(?:^|\b)(?:o|a|os|as)\s+([A-Za-zÀ-ú][A-Za-zÀ-ú0-9\s'\-]{2,}?)\s+tem\b",
+        re.I,
+    ),
+    re.compile(
+        r"(?:bloque|manuten[cç]|cancel|sibec|bolsa\s+fam).*?"
+        r"\b(?:nos|no|na|em)\s+(?!bairro\b|cras\b|munic[ií]pio\b)([A-Za-zÀ-ú][A-Za-zÀ-ú0-9\s'\-]{2,}?)(?:\?|\.|$)",
         re.I,
     ),
 )
@@ -213,6 +223,12 @@ def should_resolve_bairro(message: str, term: str | None) -> bool:
         return True
     if re.search(
         r"\b(?:índice|indice|ivs|ivcad|quantas?|quantos?|pessoas?|fam[ií]lias?|idosos?)\b",
+        message,
+        re.I,
+    ):
+        return True
+    if re.search(r"\b(?:tem|h[aá]|existem|possui)\b", message, re.I) and re.search(
+        r"\b(?:bloque|manuten[cç]|cancel|sibec|bolsa\s+fam|pbf)\b",
         message,
         re.I,
     ):
