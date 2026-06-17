@@ -49,7 +49,19 @@ _FOLLOWUP = re.compile(
     re.I,
 )
 
+_COMPARE = re.compile(
+    r"maior|menor|compar|rela[cç][ãa]o\s+a|versus|\bvs\.?\b|"
+    r"aumentou|diminuiu|subiu|caiu|diferen[cç]a|"
+    r"esse\s+n[uú]mero|essa\s+quantidade|esse\s+valor|"
+    r"foi\s+mais|foi\s+menos|mais\s+que|menos\s+que",
+    re.I,
+)
+
+_COMP_FROM_ANSWER = re.compile(r"\*\*([a-z]{3,9}/20\d{4})\*\*", re.I)
+
 _COMP_AAAAMM = re.compile(r"\b(20\d{4})\b")
+
+_YEAR = re.compile(r"\b(20\d{2})\b")
 
 _MESES: dict[str, str] = {
     "janeiro": "01",
@@ -100,11 +112,197 @@ def is_sibec_manut_context(message: str, transcript: list[dict[str, str]] | None
     msg = message.strip()
     if not msg:
         return False
-    if not _MANUT.search(msg) and not _MANUT.search(_conversation_blob(msg, transcript)):
+    blob = _conversation_blob(msg, transcript)
+    if _COMPARE.search(msg) and _MANUT.search(blob):
+        return True
+    if not _MANUT.search(msg) and not _MANUT.search(blob):
         return False
     if _FOLHA_ONLY.search(msg) and not _MANUT.search(msg):
         return False
     return True
+
+
+def _thread_has_sibec_manut(transcript: list[dict[str, str]] | None) -> bool:
+    if not transcript:
+        return False
+    blob = " ".join(m.get("content", "") for m in transcript)
+    return bool(_MANUT.search(blob))
+
+
+def _comp_label_to_aaaamm(label: str) -> str | None:
+    """Converte 'maio/2026' → '202605'."""
+    m = re.match(r"([a-záéíóúãõ]+)/(\d{4})", label.strip().lower())
+    if not m:
+        return None
+    mes_nome, ano = m.group(1), m.group(2)
+    mes_nome = mes_nome.replace("ç", "c")
+    for nome, mm in _MESES.items():
+        if nome.replace("ç", "c") == mes_nome or nome == mes_nome:
+            return f"{ano}{mm}"
+    return None
+
+
+def _parse_cras_session(message: str, transcript: list[dict[str, str]] | None) -> str | None:
+    """CRAS da pergunta atual ou do contexto recente (comparações e follow-ups)."""
+    hit = _cras_from_text(message)
+    if hit is not None:
+        return hit
+    for msg in reversed(transcript or []):
+        hit = _cras_from_text(msg.get("content", ""))
+        if hit is not None:
+            return hit
+    return None
+
+
+def _parse_competencia_atual(
+    message: str,
+    transcript: list[dict[str, str]] | None,
+    conn: Connection,
+    *,
+    exclude: str | None = None,
+) -> str | None:
+    """Competência principal do fio (período que o usuário estava analisando)."""
+    for msg in reversed(transcript or []):
+        if msg.get("role") == "assistant":
+            for m in _COMP_FROM_ANSWER.finditer(msg.get("content", "")):
+                comp = _comp_label_to_aaaamm(m.group(1))
+                if comp and comp != exclude:
+                    return comp
+        if msg.get("role") == "user":
+            hit = _competencia_from_text(msg.get("content", ""))
+            if hit and hit != exclude:
+                return hit
+    hit = _competencia_from_text(message)
+    if hit and hit != exclude:
+        return hit
+    latest = latest_manut_competencia(conn)
+    if latest and latest != exclude:
+        return latest
+    return None
+
+
+def _competencia_disponivel(conn: Connection, competencia: str) -> bool:
+    row = conn.execute(
+        text(
+            """
+            SELECT 1 FROM vig.mvw_sibec_manut_familia_mes
+            WHERE competencia = :comp
+            LIMIT 1
+            """
+        ),
+        {"comp": competencia},
+    ).scalar()
+    return bool(row)
+
+
+def _count_manut(
+    conn: Connection,
+    *,
+    competencia: str,
+    flag_col: str | None,
+    cras_num: str | None,
+    motivo_sql: str,
+    motivo_params: dict,
+) -> int:
+    flag_filter = f"AND {flag_col}" if flag_col else ""
+    cras_sql, cras_params = _cras_sql_filter(cras_num)
+    sql = f"""
+        SELECT COUNT(*)::bigint AS n
+        FROM vig.mvw_sibec_manut_familia_mes
+        WHERE competencia = :comp
+          {flag_filter}
+          AND {motivo_sql}
+          AND {cras_sql}
+    """
+    params: dict[str, Any] = {"comp": competencia, **cras_params, **motivo_params}
+    return int(conn.execute(text(sql), params).scalar() or 0)
+
+
+def _try_sibec_compare(
+    conn: Connection,
+    message: str,
+    transcript: list[dict[str, str]] | None,
+    *,
+    user_first_name: str = "",
+) -> dict | None:
+    if not _COMPARE.search(message) or not _thread_has_sibec_manut(transcript):
+        return None
+
+    comp_b = _competencia_from_text(message)
+    if not comp_b:
+        return None
+
+    comp_a = _parse_competencia_atual(message, transcript, conn, exclude=comp_b)
+    if not comp_a:
+        return None
+
+    flag_col, acao_label = _parse_action(message, transcript)
+    cras_num = _parse_cras_session(message, transcript)
+    motivo_sql, motivo_params = _motivo_filter(message)
+    who = f"{user_first_name}, " if user_first_name else ""
+
+    label_a = _fmt_competencia(comp_a)
+    label_b = _fmt_competencia(comp_b)
+    cras_txt = f" no **CRAS {cras_num}**" if cras_num else ""
+
+    if not _competencia_disponivel(conn, comp_b):
+        return {
+            "answer": (
+                f"{who}não há dados de manutenção para **{label_b}** na base. "
+                f"Ingeste essa competência em **Ingestão** e atualize a visão SIBEC em **Vigilância**."
+            ),
+            "sql": None,
+            "row_count": 0,
+            "preview": [],
+            "mode": "canonical",
+            "metric": "sibec_manut_compare_sem_mes",
+        }
+
+    n_a = _count_manut(
+        conn,
+        competencia=comp_a,
+        flag_col=flag_col,
+        cras_num=cras_num,
+        motivo_sql=motivo_sql,
+        motivo_params=motivo_params,
+    )
+    n_b = _count_manut(
+        conn,
+        competencia=comp_b,
+        flag_col=flag_col,
+        cras_num=cras_num,
+        motivo_sql=motivo_sql,
+        motivo_params=motivo_params,
+    )
+    diff = n_a - n_b
+
+    if diff > 0:
+        compara = (
+            f"**Sim.** Em **{label_a}** houve **{_fmt_int(n_a)}** famílias com **{acao_label}**{cras_txt}, "
+            f"contra **{_fmt_int(n_b)}** em **{label_b}** — **{_fmt_int(diff)} a mais**."
+        )
+    elif diff < 0:
+        compara = (
+            f"**Não.** Em **{label_a}** houve **{_fmt_int(n_a)}** famílias com **{acao_label}**{cras_txt}, "
+            f"**{_fmt_int(abs(diff))} a menos** que as **{_fmt_int(n_b)}** de **{label_b}**."
+        )
+    else:
+        compara = (
+            f"**Empate.** Em **{label_a}** e **{label_b}** o total foi o mesmo: "
+            f"**{_fmt_int(n_a)}** famílias com **{acao_label}**{cras_txt}."
+        )
+
+    return {
+        "answer": f"{who}{compara}",
+        "sql": None,
+        "row_count": 2,
+        "preview": [
+            {"competencia": comp_a, "familias": n_a},
+            {"competencia": comp_b, "familias": n_b},
+        ],
+        "mode": "canonical",
+        "metric": "sibec_manut_compare",
+    }
 
 
 def _fmt_competencia(comp: str) -> str:
@@ -138,13 +336,14 @@ def _competencia_from_text(text: str) -> str | None:
     m = _COMP_AAAAMM.search(text)
     if m:
         return m.group(1)
-    low = text.lower()
-    for nome, mm in _MESES.items():
-        if nome not in low:
-            continue
-        ym = re.search(r"(20\d{4})", text)
-        if ym:
-            return f"{ym.group(1)}{mm}"
+    low = text.lower().replace("ç", "c")
+    for nome, mm in sorted(_MESES.items(), key=lambda x: -len(x[0])):
+        token = nome.replace("ç", "c")
+        if re.search(rf"\b{re.escape(token)}\b", low):
+            ym = _COMP_AAAAMM.search(text) or _YEAR.search(text)
+            if ym:
+                year = ym.group(1)[:4]
+                return f"{year}{mm}"
     return None
 
 
@@ -180,7 +379,7 @@ def _parse_action(message: str, transcript: list[dict[str, str]] | None = None) 
     flag, label = _action_from_text(message)
     if flag:
         return flag, label
-    if _FOLLOWUP.search(message.strip()):
+    if _FOLLOWUP.search(message.strip()) or _COMPARE.search(message):
         for msg in reversed(transcript or []):
             content = msg.get("content", "")
             flag, label = _action_from_text(content)
@@ -259,14 +458,6 @@ def try_sibec_manut_metric(
 ) -> dict | None:
     if not is_sibec_manut_context(message, transcript):
         return None
-    is_followup = bool(_FOLLOWUP.search(message.strip()))
-    if (
-        not _QUANT.search(message)
-        and not _CRAS_BREAKDOWN.search(message)
-        and not is_followup
-        and _cras_from_text(message) is None
-    ):
-        return None
 
     if not _table_exists(conn, "vig", "mvw_sibec_manut_familia_mes"):
         return {
@@ -280,6 +471,21 @@ def try_sibec_manut_metric(
             "mode": "canonical",
             "metric": "sibec_manut_indisponivel",
         }
+
+    compare = _try_sibec_compare(conn, message, transcript, user_first_name=user_first_name)
+    if compare:
+        return compare
+
+    is_followup = bool(_FOLLOWUP.search(message.strip()))
+    is_compare = bool(_COMPARE.search(message))
+    if (
+        not _QUANT.search(message)
+        and not _CRAS_BREAKDOWN.search(message)
+        and not is_followup
+        and not is_compare
+        and _cras_from_text(message) is None
+    ):
+        return None
 
     competencia = _parse_competencia(message, transcript, conn)
     if not competencia:
@@ -297,6 +503,8 @@ def try_sibec_manut_metric(
 
     flag_col, acao_label = _parse_action(message, transcript)
     cras_num = _parse_cras_num(message, transcript)
+    if cras_num is None and (is_followup or is_compare):
+        cras_num = _parse_cras_session(message, transcript)
     motivo_sql, motivo_params = _motivo_filter(message)
     cras_sql, cras_params = _cras_sql_filter(cras_num)
     comp_label = _fmt_competencia(competencia)
@@ -340,7 +548,14 @@ def try_sibec_manut_metric(
           AND {motivo_sql}
           AND {cras_sql}
     """
-    n = int(conn.execute(text(sql), params).scalar() or 0)
+    n = _count_manut(
+        conn,
+        competencia=competencia,
+        flag_col=flag_col,
+        cras_num=cras_num,
+        motivo_sql=motivo_sql,
+        motivo_params=motivo_params,
+    )
 
     cras_txt = ""
     if cras_num:
