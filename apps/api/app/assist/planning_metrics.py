@@ -25,6 +25,7 @@ from .conversation_intent import (
 )
 from .cras_registry import format_territorial_cras
 from .planning_diagnostico import collect_reflexion_result
+from .planning_ranking import attach_territorial_ranking
 
 _AGE_RANGE = re.compile(
     r"(\d{1,2})\s*(?:a|-|á|at[eé])\s*(\d{1,2})\s*(?:anos)?",
@@ -264,6 +265,15 @@ def _try_bairro_municipio_planning(
             demanda=total,
             sisc=sisc,
         )
+        reflex = attach_territorial_ranking(
+            reflex,
+            rows,
+            message=message,
+            title=f"Ranking — demanda CADU ({pub}) por bairro",
+            value_key="total",
+            source="vig.mvw_pessoas × vig.mvw_familia",
+            detail="demanda potencial territorial na faixa; critério de priorização municipal",
+        )
         return {
             "answer": "",
             "sql": sql,
@@ -409,6 +419,20 @@ def try_pbf_desbloqueio_acao_metric(
             sibec_focus="bloqueio",
             sibec_competencia=competencia,
         )
+        reflex = attach_territorial_ranking(
+            reflex,
+            rows,
+            message=message,
+            title=f"Ranking — bloqueios SIBEC por bairro ({comp_label})",
+            value_key="bloqueios",
+            source="vig.mvw_sibec_manut_familia_mes",
+            detail="famílias com teve_bloqueio na competência; critério principal desbloqueio PBF",
+            suffix_fn=lambda r: (
+                f", rev.cad. {_fmt_int(int(r.get('bloq_revisao_cadastral') or 0))}"
+                if int(r.get("bloq_revisao_cadastral") or 0)
+                else ""
+            ),
+        )
         return {
             "answer": "",
             "sql": sql,
@@ -505,6 +529,15 @@ def try_cadu_territorial_acao_metric(
             sisc=None,
             demanda_label=f"Famílias desatualizadas (≥24 meses TAC) — {bairro}",
             faixa_label="atualização cadastral territorial",
+        )
+        reflex = attach_territorial_ranking(
+            reflex,
+            rows,
+            message=message,
+            title="Ranking — famílias CADU desatualizadas (≥24m TAC) por bairro",
+            value_key="fam_desatualizadas",
+            source="vig.mvw_familia",
+            detail="critério de priorização para ação de atualização cadastral",
         )
         return {
             "answer": "",

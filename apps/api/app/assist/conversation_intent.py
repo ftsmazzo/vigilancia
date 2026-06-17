@@ -197,7 +197,16 @@ def skips_bairro_preprocess(message: str, transcript: list[dict[str, str]] | Non
 
 
 def wants_planning_ranking(message: str) -> bool:
-    return bool(_LIST_OTHERS.search(message))
+    return bool(
+        _LIST_OTHERS.search(message)
+        or re.search(
+            r"demais\s+bairros|outros\s+bairros|top\s*\d|principais\s+bairros|"
+            r"quais\s+bairros|liste\s+(?:os\s+)?\d|"
+            r"\bcinco\s+bairros|\b5\s+bairros",
+            message or "",
+            re.I,
+        )
+    )
 
 
 def pending_coverage_in_thread(transcript: list[dict[str, str]] | None) -> bool:

@@ -93,8 +93,9 @@ REFLEXION_AXES: tuple[ReflexionAxis, ...] = (
     ReflexionAxis(
         "H",
         "Síntese reflexiva",
-        "Como os eixos se combinam para recomendar, condicionar ou investigar?",
-        "playbook + fatos verificados",
+        "Como os eixos se combinam para recomendar, condicionar ou investigar? "
+        "Inclui ranking municipal comparativo quando disponível.",
+        "playbook + fatos verificados + planning_ranking",
     ),
 )
 
@@ -150,6 +151,7 @@ Dimensões disponíveis: {ivs_dims}. Escala **0 a 1** (maior = mais vulnerável 
 - **SCFV infância/adolescência:** cruze **A** (demanda faixa) + **B** (carência) + **D.DCA/NC** + **F** (escola, trabalho infantil).
 - **SCFV primeira infância:** **D.DPI/NC** + **E** (moradia/alimentação).
 - **Ação desbloqueio PBF:** eixo **C (SIBEC bloqueio)** é o critério de ranking; cruzar TAC/revisão cadastral; carência SISC (**B**) é complemento, não substituto.
+- **Ranking municipal (eixo H):** disponível em ações territoriais — cite top 3–5 se pedirem lista; senão mencione só #1 e 1–2 seguintes se relevante.
 - IVS **baixo** modera urgência estrutural; **não anula** carência (**B**) nem pobreza (**C**).
 
 #### Proporcionalidade da resposta (obrigatório)
