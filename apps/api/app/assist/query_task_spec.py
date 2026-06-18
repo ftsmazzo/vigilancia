@@ -46,11 +46,19 @@ _PBF = re.compile(
     re.I,
 )
 _CRAS_BREAKDOWN = re.compile(
-    r"por\s+cras|por\s+cada\s+cras|cada\s+cras|divide|divid|detalh|distribu|desdobr|"
-    r"separad\s+por\s+cras|distribu[ií][çc][ãa]o",
+    r"por\s+cras|por\s+cada\s+cras|cada\s+cras|qual\s+cras|cras\s+tem\s+mais|"
+    r"divide|divid|detalh|distribu|desdobr|separad\s+por\s+cras|distribu[ií][çc][ãa]o",
     re.I,
 )
 _CHILD = re.compile(r"\bcrian[cç]as?\b", re.I)
+_COHORT_AGE = re.compile(
+    r"nessa\s+faixa|faixa\s+et[aá]ria|dess[aeo]s|dest[aeo]s|entre\s+(?:eles|elas)",
+    re.I,
+)
+_SUBJECT_PIVOT = re.compile(
+    r"^(?:e\s+)?(?:idosos?|crian[cç]as?|mulheres?|homens?|adolescentes?)\??\.?$",
+    re.I,
+)
 
 
 class MetricKind(str, Enum):
@@ -275,6 +283,35 @@ def _parse_territory(text: str, ctx: SessionContext | None) -> TerritorySpec | N
     return None
 
 
+def _fixed_age_for_recorte(recorte: PersonRecorte) -> AgeRange | None:
+    return {
+        "crianca": AgeRange(0, 11),
+        "adolescente": AgeRange(12, 17),
+        "fora_escola": AgeRange(7, 17),
+    }.get(recorte.key)
+
+
+def _resolve_age_for_turn(
+    text_msg: str,
+    transcript: list[dict[str, str]] | None,
+    ctx: SessionContext,
+    recorte: PersonRecorte | None,
+) -> AgeRange | None:
+    """Faixa explícita > recorte fixo > sessão; pivô de assunto não herda idade anterior."""
+    explicit = _parse_age_from_text(text_msg, transcript)
+    if explicit:
+        return explicit
+    if recorte and not _COHORT_AGE.search(text_msg):
+        if _SUBJECT_PIVOT.match(text_msg.strip()):
+            return _fixed_age_for_recorte(recorte)
+        if recorte.key in ("crianca", "adolescente", "fora_escola"):
+            return _fixed_age_for_recorte(recorte)
+        return None
+    if _COHORT_AGE.search(text_msg):
+        return _parse_age_from_session_ctx(ctx)
+    return _parse_age_from_session_ctx(ctx)
+
+
 def _parse_breakdown(
     text: str,
     ctx: SessionContext | None,
@@ -337,24 +374,34 @@ def extract_task_spec(
     metric = MetricKind.COUNT
     if _VALIDATION.search(text_msg):
         metric = MetricKind.VALIDATE
+    elif re.search(
+        r"qual\s+cras\s+tem\s+mais|cras\s+com\s+mais|maior\s+concentr",
+        text_msg,
+        re.I,
+    ):
+        metric = MetricKind.RANK
 
-    cohort = bool(_COHORT.search(text_msg))
+    cohort = bool(_COHORT.search(text_msg) or _COHORT_AGE.search(text_msg))
     requires_pbf = bool(
         _PBF.search(text_msg)
         and (
             re.search(r"\bfam[ií]lias?\b", text_msg, re.I)
+            or re.search(r"recebendo\s+(?:o\s+)?(?:pbf|bolsa)", text_msg, re.I)
             or ctx.requires_pbf
         )
     )
 
     recorte = detect_person_recorte(text_msg)
-    age_range = _parse_age_from_text(text_msg, transcript) or _parse_age_from_session_ctx(ctx)
+    age_range = _resolve_age_for_turn(text_msg, transcript, ctx, recorte)
     recorte = _resolve_person_recorte_with_age(text_msg, recorte, age_range)
     breakdown = _parse_breakdown(text_msg, ctx, transcript)
 
     if not recorte:
         if ctx.subject == "crianças" or (_CHILD.search(text_msg) and age_range):
             pass
+        elif ctx.subject == "idosos" or re.search(r"\bidosos?\b", text_msg, re.I):
+            from .cadu_pessoas_metrics import _recorte_idoso
+            recorte = _recorte_idoso()
         elif ctx.subject == "mulheres" or _SEX_FEM.search(text_msg) or re.search(r"\bdessas?\s+mulheres\b", text_msg, re.I):
             from .cadu_pessoas_metrics import _recorte_mulher
             recorte = _recorte_mulher()
@@ -412,29 +459,36 @@ def merge_task_spec_with_session(
     ctx: SessionContext,
     transcript: list[dict[str, str]] | None = None,
 ) -> QueryTaskSpec:
-    """Acumula filtros da sessão — não descarta faixa etária ao mudar território."""
-    age = spec.age_range or _parse_age_from_session_ctx(ctx)
-    if not age and ctx.question_stem:
-        age = _parse_age_from_text(ctx.question_stem, transcript)
+    """Acumula filtros da sessão — pivô de assunto não herda faixa etária anterior."""
+    msg = (spec.original_question or "").strip()
+    msg_recorte = detect_person_recorte(msg)
+    recorte = spec.person_recorte or msg_recorte
+    age = _resolve_age_for_turn(msg, transcript, ctx, recorte)
+    if age is None and spec.age_range:
+        age = spec.age_range
 
-    recorte = spec.person_recorte
     if not recorte and ctx.subject == "mulheres":
         from .cadu_pessoas_metrics import _recorte_mulher
         recorte = _recorte_mulher()
     elif not recorte and ctx.subject == "homens":
         from .cadu_pessoas_metrics import _recorte_homem
         recorte = _recorte_homem()
+    elif not recorte and ctx.subject == "idosos":
+        from .cadu_pessoas_metrics import _recorte_idoso
+        recorte = _recorte_idoso()
 
     breakdown = spec.breakdown
     if breakdown == BreakdownKind.NONE:
-        breakdown = _parse_breakdown(spec.original_question, ctx, transcript)
+        breakdown = _parse_breakdown(msg, ctx, transcript)
 
-    recorte = _resolve_person_recorte_with_age(
-        spec.original_question, recorte or spec.person_recorte, age
-    )
+    recorte = _resolve_person_recorte_with_age(msg, recorte, age)
 
     requires_pbf = spec.requires_pbf_folha or ctx.requires_pbf or bool(
-        _PBF.search(spec.original_question or "")
+        _PBF.search(msg)
+        and (
+            re.search(r"\bfam[ií]lias?\b", msg, re.I)
+            or re.search(r"recebendo\s+(?:o\s+)?(?:pbf|bolsa)", msg, re.I)
+        )
     )
 
     territory = spec.territory
@@ -447,12 +501,19 @@ def merge_task_spec_with_session(
             territory = TerritorySpec(TerritoryKind.CRAS, ctx.last_cras)
 
     filter_labels = list(spec.filter_labels)
-    for f in ctx.filters:
-        if f not in filter_labels and not f.startswith("cod_sexo"):
-            filter_labels.append(f)
+    subject_pivot = bool(_SUBJECT_PIVOT.match(msg))
+    if not subject_pivot:
+        for f in ctx.filters:
+            if f not in filter_labels and not f.startswith("cod_sexo"):
+                filter_labels.append(f)
 
-    if age and not spec.age_range:
-        filter_labels.append(f"idade {age.label()}")
+    if age and not any(
+        f.startswith("idade ") or f.startswith("crianças de ") for f in filter_labels
+    ):
+        if _CHILD.search(msg) and age:
+            filter_labels.append(f"crianças de {age.label()}")
+        elif age:
+            filter_labels.append(f"idade {age.label()}")
 
     if requires_pbf and "família na folha PBF" not in filter_labels:
         filter_labels.append("família na folha PBF")
@@ -464,12 +525,13 @@ def merge_task_spec_with_session(
     return replace(
         spec,
         person_recorte=recorte or spec.person_recorte,
-        age_range=age or spec.age_range,
+        age_range=age,
         territory=territory or spec.territory,
         filter_labels=list(dict.fromkeys(filter_labels)),
         original_question=spec.original_question or stem,
         requires_pbf_folha=requires_pbf,
-        cohort_followup=spec.cohort_followup or bool(_COHORT.search(spec.original_question or "")),
+        cohort_followup=spec.cohort_followup
+        or bool(_COHORT.search(msg) or _COHORT_AGE.search(msg)),
         breakdown=breakdown,
     )
 

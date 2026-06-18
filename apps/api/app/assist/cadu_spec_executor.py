@@ -212,13 +212,31 @@ def _format_cras_spec_answer(
     labels: list[str],
     user_first_name: str,
 ) -> str:
+    from .cras_breakdown import _count_column, _name_column, _parse_num_cras
+
     metric_label, unit = _metric_label_for_cras(spec, labels)
-    return format_cras_breakdown_answer(
+    answer = format_cras_breakdown_answer(
         rows,
         user_first_name=user_first_name,
         metric_label=metric_label,
         unit=unit,
     )
+    if spec.metric != MetricKind.RANK or not rows:
+        return answer
+
+    top_row = max(rows, key=lambda r: _count_column(r)[1])
+    _, top_total = _count_column(top_row)
+    num = _parse_num_cras(top_row.get("num_cras"))
+    nome = _name_column(top_row)
+    cras_label = f"CRAS {num}" if num else "sem referência territorial"
+    if nome and num:
+        cras_label = f"{cras_label} — {nome}"
+    who = f"{user_first_name}, " if user_first_name else ""
+    prefix = (
+        f"{who}o território com **maior concentração** é **{cras_label}** "
+        f"(**{_fmt_int(top_total)}** {unit}).\n\n"
+    )
+    return prefix + answer
 
 
 def _build_cras_sql_preview(

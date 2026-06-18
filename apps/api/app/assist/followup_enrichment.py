@@ -35,11 +35,96 @@ _MANUT = re.compile(
     r"manuten[cç]|sibec|bloque|cancel|bolsa\s+fam|pbf",
     re.I,
 )
+_BLOQUEIO = re.compile(r"bloque", re.I)
 _CRAS_FOLLOWUP = re.compile(
     r"por\s+cada\s+cras|cada\s+cras|passar?\s+(?:esse|o)\s+n[úu]mero|desdobr|detalh",
     re.I,
 )
 _CANCEL = re.compile(r"cancel", re.I)
+_SUBJECT_PIVOT = re.compile(
+    r"^(?:e\s+)?(?:idosos?|crian[cç]as?|mulheres?|homens?|adolescentes?)\??\.?$",
+    re.I,
+)
+
+
+def _subject_from_pivot(message: str) -> str:
+    text = (message or "").strip().lower()
+    if re.search(r"idos", text):
+        return "idosos"
+    if re.search(r"crian", text):
+        return "crianças"
+    if re.search(r"mulher", text):
+        return "mulheres"
+    if re.search(r"homem", text):
+        return "homens"
+    if re.search(r"adolesc", text):
+        return "adolescentes"
+    return ""
+
+
+def reformulate_subject_pivot_followup(
+    message: str,
+    ctx: SessionContext,
+    transcript: list[dict[str, str]] | None,
+) -> str | None:
+    """'E idosos?' após desdobramento por CRAS → nova pergunta com mesmo recorte territorial."""
+    text_msg = (message or "").strip()
+    if not _SUBJECT_PIVOT.match(text_msg):
+        return None
+    if not ctx.has_data_thread():
+        return None
+
+    subject = _subject_from_pivot(text_msg)
+    if not subject:
+        return None
+
+    stem = ctx.question_stem or ""
+    by_cras = bool(re.search(r"por\s+cras|distribu", stem, re.I))
+
+    if by_cras:
+        if subject == "crianças" and ctx.last_age_min is not None and ctx.last_age_max is not None:
+            return (
+                f"Qual o total de crianças de {ctx.last_age_min} a {ctx.last_age_max} "
+                f"anos por CRAS"
+            )
+        return f"Qual o total de {subject} por CRAS"
+
+    return f"Qual o total de {subject} no município"
+
+
+def reformulate_cras_breakdown_followup(
+    message: str,
+    ctx: SessionContext,
+    transcript: list[dict[str, str]] | None,
+) -> str | None:
+    """'por cada CRAS?' → recompõe pergunta-base com desdobramento territorial."""
+    text_msg = (message or "").strip()
+    if not _CRAS_FOLLOWUP.search(text_msg):
+        return None
+    if not ctx.has_data_thread() and not transcript:
+        return None
+
+    stem = ctx.question_stem
+    if stem:
+        if re.search(r"por\s+cras|distribu", stem, re.I):
+            return stem.rstrip("?.!")
+        return f"{stem.rstrip('?.!')} por CRAS"
+
+    parts: list[str] = ["Qual a distribuição de"]
+    if ctx.subject == "crianças":
+        parts.append("crianças")
+    elif ctx.subject == "mulheres":
+        parts.append("mulheres")
+    elif ctx.subject == "homens":
+        parts.append("homens")
+    elif ctx.subject:
+        parts.append(ctx.subject)
+    else:
+        parts.append("pessoas")
+    if ctx.last_age_min is not None and ctx.last_age_max is not None:
+        parts.append(f"de {ctx.last_age_min} a {ctx.last_age_max} anos")
+    parts.append("por CRAS no município")
+    return " ".join(parts)
 
 
 def _clean_term(term: str) -> str:
@@ -102,6 +187,10 @@ def is_territorial_clarification(message: str) -> bool:
 def is_sibec_yesno_question(message: str, transcript: list[dict[str, str]] | None = None) -> bool:
     text_msg = (message or "").strip()
     if _QUANT.search(text_msg):
+        return False
+    if re.search(r"\bqual\b|\bquais\b", text_msg, re.I):
+        return False
+    if re.search(r"\bcras\b|por\s+cras|distribu|recebendo\s+bolsa", text_msg, re.I):
         return False
     if _YESNO_SIBEC.search(text_msg) or _YESNO_SIBEC_REV.search(text_msg):
         return True
@@ -182,41 +271,6 @@ def reformulate_sibec_yesno(
     return f"Quantos {action} no município"
 
 
-def reformulate_cras_breakdown_followup(
-    message: str,
-    ctx: SessionContext,
-    transcript: list[dict[str, str]] | None,
-) -> str | None:
-    """'por cada CRAS?' → recompõe pergunta-base com desdobramento territorial."""
-    text_msg = (message or "").strip()
-    if not _CRAS_FOLLOWUP.search(text_msg):
-        return None
-    if not ctx.has_data_thread() and not transcript:
-        return None
-
-    stem = ctx.question_stem
-    if stem:
-        if re.search(r"por\s+cras|distribu", stem, re.I):
-            return stem.rstrip("?.!")
-        return f"{stem.rstrip('?.!')} por CRAS"
-
-    parts: list[str] = ["Qual a distribuição de"]
-    if ctx.subject == "crianças":
-        parts.append("crianças")
-    elif ctx.subject == "mulheres":
-        parts.append("mulheres")
-    elif ctx.subject == "homens":
-        parts.append("homens")
-    elif ctx.subject:
-        parts.append(ctx.subject)
-    else:
-        parts.append("pessoas")
-    if ctx.last_age_min is not None and ctx.last_age_max is not None:
-        parts.append(f"de {ctx.last_age_min} a {ctx.last_age_max} anos")
-    parts.append("por CRAS no município")
-    return " ".join(parts)
-
-
 def enrich_effective_question(
     message: str,
     ctx: SessionContext,
@@ -238,12 +292,32 @@ def enrich_effective_question(
         )
 
     for reformulator in (
+        reformulate_subject_pivot_followup,
         reformulate_cras_breakdown_followup,
         reformulate_territorial_followup,
         reformulate_sibec_yesno,
     ):
         rebuilt = reformulator(message, updated, transcript)
         if rebuilt:
-            return rebuilt.rstrip("?.!") + "?", updated
+            new_ctx = updated
+            if reformulator is reformulate_subject_pivot_followup:
+                subject = _subject_from_pivot(message)
+                filters = [
+                    f for f in updated.filters
+                    if not f.startswith("idade ") and not f.startswith("crianças de ")
+                ]
+                new_ctx = SessionContext(
+                    subject=subject,
+                    entity="pessoas",
+                    filters=filters,
+                    last_cras=updated.last_cras,
+                    last_bairro=updated.last_bairro,
+                    last_competencia=updated.last_competencia,
+                    question_stem=rebuilt.rstrip("?.!"),
+                    last_age_min=None,
+                    last_age_max=None,
+                    requires_pbf=False,
+                )
+            return rebuilt.rstrip("?.!") + "?", new_ctx
 
     return message, updated
