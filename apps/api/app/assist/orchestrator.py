@@ -1,10 +1,10 @@
 """VigIA — orquestrador multi-especialista.
 
-Pipeline autônomo (sem LangChain/CrewAI):
-  1. Reformulador → QueryTaskSpec (intenção tipada)
+Pipeline autônomo (4 fases):
+  1. Planejador LLM + TaskSpec (intenção tipada, memória de sessão)
   2. Maestro → roteamento por especialista
-  3. Executor composicional / canônico / AgenteSQL (com verificador)
-  4. Síntese analítica — só quando response_mode exige interpretação
+  3. Executor verificável (SQL composicional / canônico / AgenteSQL)
+  4. Síntese analítica generativa — sempre a partir de evidência, nunca template fixo
 
 Especialistas:
   - Políticas, Município, Vigilância (CADU + camadas), Síntese
@@ -223,11 +223,14 @@ def _answer_via_analyst(
     thread_brief: str = "",
     municipio_block: str = "",
     rag_block: str = "",
+    session_context: SessionContext | None = None,
 ) -> str:
-    if not result.get("use_analyst") and result.get("answer", "").strip():
-        return result["answer"]
-    brief = thread_brief or build_thread_brief(message, transcript)
+    """Fase 4 — síntese generativa sempre a partir de evidência verificada."""
+    brief = thread_brief or build_thread_brief(
+        message, transcript, session_context=session_context
+    )
     pack = pack_from_canonical(message, result, thread_brief=brief)
+    pack.response_mode = str(result.get("response_mode") or "")
     return interpret_evidence(
         pack,
         user_first_name=user_first_name,
@@ -361,6 +364,7 @@ def run_orchestrator_turn(
                 thread_brief=route.thread_brief,
                 municipio_block=municipio_block,
                 rag_block=rag_block,
+                session_context=merged_ctx,
             )
             return {
                 **planning,
@@ -411,20 +415,18 @@ def run_orchestrator_turn(
                 "effective_message": effective_message,
                 "task_spec": task_spec.to_dict(),
             }
-        if cadu_spec.get("use_analyst"):
-            answer = _answer_via_analyst(
-                message,
-                cadu_spec,
-                conn=conn,
-                db=db,
-                transcript=transcript,
-                user_first_name=first_name,
-                thread_brief=route.thread_brief,
-                municipio_block=municipio_block,
-                rag_block=rag_block,
-            )
-        else:
-            answer = cadu_spec["answer"]
+        answer = _answer_via_analyst(
+            data_message,
+            cadu_spec,
+            conn=conn,
+            db=db,
+            transcript=transcript,
+            user_first_name=first_name,
+            thread_brief=route.thread_brief,
+            municipio_block=municipio_block,
+            rag_block=rag_block,
+            session_context=merged_ctx,
+        )
         return {
             "answer": _trim_answer_boilerplate(answer),
             "sql": cadu_spec.get("sql"),
@@ -500,7 +502,7 @@ def run_orchestrator_turn(
     )
     if canonical:
         answer = _answer_via_analyst(
-            message,
+            data_message,
             canonical,
             conn=conn,
             db=db,
@@ -509,22 +511,9 @@ def run_orchestrator_turn(
             thread_brief=route.thread_brief,
             municipio_block=municipio_block,
             rag_block=rag_block,
+            session_context=merged_ctx,
         )
-        if canonical.get("metric") == "cadu_familias_por_cras":
-            answer = _cras_answer_with_context(
-                canonical.get("preview") or [],
-                user,
-                municipio_block,
-            )
-        elif canonical.get("metric", "").startswith("geo_"):
-            answer = _personalize_canonical(answer, user)
-        elif canonical.get("metric", "").startswith("ivs_"):
-            pass
-        elif canonical.get("metric", "").startswith("planning_"):
-            pass
-        elif canonical.get("mode") == "disambiguation":
-            answer = _personalize_canonical(answer, user)
-        elif canonical.get("source") == "vig.mvw_sisc_qualificado":
+        if canonical.get("mode") == "disambiguation":
             answer = _personalize_canonical(answer, user)
         skip_bairro_wrap = (
             canonical.get("metric", "").startswith(("planning_", "ivs_"))
@@ -559,7 +548,7 @@ def run_orchestrator_turn(
         )
         if retry:
             answer = _answer_via_analyst(
-                message,
+                data_message,
                 retry,
                 conn=conn,
                 db=db,
@@ -568,6 +557,7 @@ def run_orchestrator_turn(
                 thread_brief=route.thread_brief,
                 municipio_block=municipio_block,
                 rag_block=rag_block,
+                session_context=merged_ctx,
             )
             return {
                 "answer": _trim_answer_boilerplate(answer),
@@ -623,23 +613,16 @@ def run_orchestrator_turn(
                 thread_brief=route.thread_brief,
                 task_spec_block=retry_block,
             )
-    if sql_result.ok and sql_result.formatted_answer:
-        answer = _cras_answer_with_context(sql_result.rows, user, municipio_block)
-    elif sql_result.ok and sql_result.row_count == 0:
-        term = extract_location_term(message)
-        if term and should_resolve_bairro(message, term):
-            resolution = resolve_bairro(conn, term)
-            if resolution.status == "multiple":
-                return {
-                    "answer": _trim_answer_boilerplate(
-                        format_bairro_disambiguation(resolution, first_name)
-                    ),
-                    "sql": None,
-                    "row_count": 0,
-                    "preview": resolution.matches,
-                    "mode": "disambiguation",
-                }
-        answer = _finalize_data_reply(message, transcript, sql_question, sql_result, user_block)
+    if sql_result.ok:
+        pack = pack_from_sql(data_message, sql_result, thread_brief=route.thread_brief)
+        answer = interpret_evidence(
+            pack,
+            user_first_name=first_name,
+            conn=conn,
+            db=db,
+            municipio_block=municipio_block,
+            rag_block=rag_block,
+        )
     else:
         term = extract_location_term(message)
         if term and should_resolve_bairro(message, term):
@@ -654,23 +637,7 @@ def run_orchestrator_turn(
                     "preview": resolution.matches,
                     "mode": "disambiguation",
                 }
-        if sql_result.ok:
-            pack = pack_from_sql(message, sql_result, thread_brief=route.thread_brief)
-            if task_spec.is_simple_data_response():
-                answer = _finalize_data_reply(
-                    message, transcript, sql_question, sql_result, user_block
-                )
-            else:
-                answer = interpret_evidence(
-                    pack,
-                    user_first_name=first_name,
-                    conn=conn,
-                    db=db,
-                    municipio_block=municipio_block,
-                    rag_block=rag_block,
-                )
-        else:
-            answer = _finalize_data_reply(message, transcript, sql_question, sql_result, user_block)
+        answer = _finalize_data_reply(message, transcript, sql_question, sql_result, user_block)
 
     answer = apply_bairro_correction_to_answer(
         answer, bairro_resolution, first_name, message=message

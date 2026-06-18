@@ -395,11 +395,8 @@ def try_execute_cadu_spec(
         sql = _build_cras_sql_preview(
             spec=spec, preds=preds, fam_preds=fam_preds, familia=familia
         )
-        answer = _format_cras_spec_answer(
-            spec=spec, rows=rows, labels=labels, user_first_name=user_first_name
-        )
         return {
-            "answer": answer,
+            "answer": "",
             "sql": sql,
             "row_count": len(rows),
             "preview": sort_cras_rows(rows),
@@ -407,8 +404,8 @@ def try_execute_cadu_spec(
             "metric": "cadu_spec_cras_breakdown",
             "task_spec": spec.to_dict(),
             "filters_applied": spec.applied_filters_summary(),
-            "use_analyst": False,
-            "response_mode": "ranking",
+            "use_analyst": True,
+            "response_mode": spec.response_mode or "ranking",
         }
 
     resolved = _resolve_territory(conn, text_msg, spec, user_first_name=user_first_name)
@@ -434,26 +431,12 @@ def try_execute_cadu_spec(
     )
 
     if spec.metric == MetricKind.VALIDATE:
-        summary = spec.applied_filters_summary() or "; ".join(labels)
-        answer = _prefix_name(
-            user_first_name,
-            f"Sim, o total de **{_fmt_int(total)}** corresponde a **{summary}** "
-            f"no recorte {terr.label}, conforme os filtros aplicados na consulta.",
-        )
         metric = "cadu_spec_validate"
     else:
-        answer = _format_answer(
-            spec=spec,
-            total=total,
-            terr=terr,
-            labels=labels,
-            user_first_name=user_first_name,
-            seed=text_msg,
-        )
         metric = "cadu_spec_familias" if familia else "cadu_spec_pessoas"
 
     return {
-        "answer": answer,
+        "answer": "",
         "sql": sql,
         "row_count": 1,
         "preview": preview,
@@ -461,6 +444,6 @@ def try_execute_cadu_spec(
         "metric": metric,
         "task_spec": spec.to_dict(),
         "filters_applied": spec.applied_filters_summary(),
-        "use_analyst": not spec.is_simple_data_response(),
+        "use_analyst": True,
         "response_mode": spec.response_mode,
     }

@@ -82,6 +82,6 @@ RESPONSE_MODE_HINTS: dict[str, str] = {
 }
 
 
-def response_mode_hint(question: str, metric: str = "") -> str:
-    mode = infer_response_mode(question, metric)
+def response_mode_hint(question: str, metric: str = "", *, override: str | None = None) -> str:
+    mode = override or infer_response_mode(question, metric)
     return RESPONSE_MODE_HINTS.get(mode, RESPONSE_MODE_HINTS["balanced"])

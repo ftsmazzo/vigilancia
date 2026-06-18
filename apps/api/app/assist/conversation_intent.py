@@ -314,7 +314,7 @@ def build_thread_brief(
             )
         elif is_territorial_comparison_turn(message, transcript):
             lines.append(
-                "- Follow-up **comparativo territorial**: ranquear bairros e responder "
+                "- Contexto: comparativo territorial — ranquear bairros e responder "
                 "se há opção mais crítica que a citada na conversa."
             )
             if _SIBEC_TOPIC.search(message):
@@ -325,12 +325,12 @@ def build_thread_brief(
             lines.append("- Assunto: planejamento territorial / **SCFV** (demanda potencial no CADU).")
         lines.append("- **NÃO** usar vig.mvw_sisc_qualificado salvo pedido explícito de matrícula existente.")
         lines.append("- Cruze demanda (A), carência SISC (B), IVS/NC (D) e TAC (C) na síntese.")
-    if is_planning_followup(message, transcript):
-        lines.append("- Follow-up: detalhar **bairro dentro do CRAS** indicado na resposta anterior.")
+    if is_planning_followup(message, transcript) and is_planning_turn(message, transcript):
+        lines.append("- Contexto: planejamento territorial / detalhar bairro no CRAS citado.")
     if is_planning_coverage_followup(message, transcript):
         lines.append(
-            "- Follow-up: **carência de SCFV** — cruzar demanda CADU (p×f territorial) "
-            "com matrícula SISC no bairro/faixa etária da conversa."
+            "- Contexto: carência de SCFV — cruzar demanda CADU com matrícula SISC "
+            "no bairro/faixa etária da conversa."
         )
     if planning_thread_active(transcript):
         for msg in reversed(transcript or []):

@@ -71,7 +71,7 @@ class SessionContext:
     def to_brief(self) -> str:
         if not self.has_data_thread():
             return ""
-        lines = ["- **Memória da sessão (mantenha filtros do turno anterior):**"]
+        lines = ["- **Memória da sessão:**"]
         if self.question_stem:
             lines.append(f"  - Pergunta-base: {self.question_stem}")
         if self.subject:
@@ -321,7 +321,7 @@ def resolve_effective_question(
     transcript: list[dict[str, str]] | None,
     stored: SessionContext | None,
 ) -> tuple[str, SessionContext]:
-    from .followup_enrichment import enrich_effective_question
+    from .task_spec_planner import plan_task_turn
 
     extracted = extract_context_from_transcript(transcript)
     ctx = merge_context(stored or SessionContext(), extracted)
@@ -331,7 +331,7 @@ def resolve_effective_question(
     if reformulated:
         working = reformulated
 
-    effective, ctx = enrich_effective_question(working, ctx, transcript)
+    effective, ctx = plan_task_turn(working, ctx, transcript)
 
     parsed = _parse_user_data_question(effective)
     if parsed and not _is_cras_followup_only(message) and not _is_cras_breakdown_followup_only(message):

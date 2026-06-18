@@ -30,9 +30,13 @@ class EvidencePack:
     metric: str = ""
     mode: str = "data"
     reflexion_guide: str = ""
+    response_mode: str = ""
+    filters_applied: str = ""
 
     def to_prompt_block(self) -> str:
         lines = [f"Pergunta: {self.question}"]
+        if self.filters_applied.strip():
+            lines.append(f"Filtros aplicados na consulta: {self.filters_applied.strip()}")
         if self.thread_brief.strip():
             lines.append(f"Contexto: {self.thread_brief.strip()}")
         if self.reflexion_guide.strip():
@@ -49,8 +53,38 @@ class EvidencePack:
                     line += f" — {fact.detail}"
                 lines.append(line)
         if self.preview:
-            lines.append(f"Preview tabular ({len(self.preview)} linha(s)): {self.preview[:8]}")
+            lines.append(f"Preview tabular ({len(self.preview)} linha(s)): {self.preview[:12]}")
         return "\n".join(lines)
+
+
+def _cras_row_facts(
+    preview: list[dict[str, Any]],
+    *,
+    source: str,
+    detail: str = "",
+) -> list[EvidenceFact]:
+    from .cras_breakdown import _count_column, _name_column, _parse_num_cras, sort_cras_rows
+
+    facts: list[EvidenceFact] = []
+    for row in sort_cras_rows(preview):
+        if not isinstance(row, dict):
+            continue
+        _, total = _count_column(row)
+        num = _parse_num_cras(row.get("num_cras"))
+        nome = _name_column(row)
+        if num is None:
+            label = "Sem referência territorial de CRAS"
+        else:
+            label = f"CRAS {num}" + (f" — {nome}" if nome else "")
+        facts.append(
+            EvidenceFact(
+                label=label,
+                value=str(total),
+                source=source,
+                detail=detail,
+            )
+        )
+    return facts
 
 
 def pack_from_canonical(question: str, result: dict[str, Any], *, thread_brief: str = "") -> EvidencePack:
@@ -105,6 +139,65 @@ def pack_from_canonical(question: str, result: dict[str, Any], *, thread_brief: 
                         signal=str(row.get("signal", "")),
                     )
                 )
+    elif metric == "cadu_familias_por_cras" and preview:
+        facts.extend(
+            _cras_row_facts(
+                preview,
+                source="vig.mvw_familia (GROUP BY num_cras)",
+                detail="famílias do Cadastro Único",
+            )
+        )
+    elif metric.startswith("cadu_spec_"):
+        filters = str(result.get("filters_applied") or "")
+        if metric == "cadu_spec_cras_breakdown" and preview:
+            facts.extend(
+                _cras_row_facts(
+                    preview,
+                    source="vig.mvw_pessoas × vig.mvw_familia (GROUP BY num_cras)",
+                    detail=filters,
+                )
+            )
+            total = sum(
+                int((row.get("total_pessoas") or row.get("total_familias") or row.get("total") or 0))
+                for row in preview
+                if isinstance(row, dict)
+            )
+            if total:
+                facts.insert(
+                    0,
+                    EvidenceFact(
+                        label="Total no município",
+                        value=str(total),
+                        source="CADU",
+                        detail=filters,
+                    ),
+                )
+        else:
+            for row in preview[:8]:
+                if not isinstance(row, dict):
+                    continue
+                val = row.get("total") or row.get("total_pessoas") or row.get("total_familias")
+                if val is not None:
+                    facts.append(
+                        EvidenceFact(
+                            label=filters or "CADU",
+                            value=str(val),
+                            source="vig.mvw_pessoas × vig.mvw_familia",
+                            detail=str(row.get("granularidade") or row.get("recorte") or ""),
+                        )
+                    )
+            if not facts and preview:
+                row = preview[0] if isinstance(preview[0], dict) else {}
+                val = row.get("total") or row.get("total_pessoas") or row.get("total_familias")
+                if val is not None:
+                    facts.append(
+                        EvidenceFact(
+                            label=filters or "Total CADU",
+                            value=str(val),
+                            source="vig.mvw_pessoas × vig.mvw_familia",
+                            detail=filters,
+                        )
+                    )
     elif metric.startswith("cadu_pessoas_") or metric.startswith("cadu_familias_") or metric == "cadu_pcd_por_tipo":
         for row in preview[:6]:
             if not isinstance(row, dict):
@@ -214,6 +307,8 @@ def pack_from_canonical(question: str, result: dict[str, Any], *, thread_brief: 
         metric=metric,
         mode=str(result.get("mode", "canonical")),
         reflexion_guide=str(result.get("reflexion_guide") or ""),
+        response_mode=str(result.get("response_mode") or ""),
+        filters_applied=str(result.get("filters_applied") or ""),
     )
 
 

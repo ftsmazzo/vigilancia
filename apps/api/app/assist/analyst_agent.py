@@ -74,7 +74,11 @@ def interpret_evidence(
     if sections:
         system += f"\n\n## Contexto para leitura e decisão\n\n{sections}"
 
-    mode_line = response_mode_hint(pack.question, pack.metric)
+    mode_line = response_mode_hint(
+        pack.question,
+        pack.metric,
+        override=pack.response_mode or None,
+    )
     user_content = f"{mode_line}\n\n{pack.to_prompt_block()}"
 
     messages = [

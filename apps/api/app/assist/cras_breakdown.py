@@ -124,6 +124,7 @@ def format_cras_breakdown_answer(
     metric_label: str = "famílias do Cadastro Único",
     unit: str = "famílias",
     intro: str | None = None,
+    include_foot: bool = False,
 ) -> str:
     """Resposta humanizada determinística — lista todos os CRAS, sem truncar."""
     sorted_rows = sort_cras_rows(rows)
@@ -142,10 +143,12 @@ def format_cras_breakdown_answer(
             f"(ordem numérica 1 a 12):"
         )
 
-    foot = (
-        "\n\nEsse indicador mostra a concentração de "
-        f"{unit} em cada área de abrangência dos CRAS. "
-        f"{unit.capitalize()} sem vínculo territorial aparecem como **sem referência territorial**."
-    )
+    foot = ""
+    if include_foot:
+        foot = (
+            "\n\nEsse indicador mostra a concentração de "
+            f"{unit} em cada área de abrangência dos CRAS. "
+            f"{unit.capitalize()} sem vínculo territorial aparecem como **sem referência territorial**."
+        )
 
     return f"{lead}\n\n{summary}{foot}"
