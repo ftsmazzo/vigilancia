@@ -25,12 +25,13 @@ def _fmt_int(n: int) -> str:
 def _spec_needs_execution(spec: QueryTaskSpec, message: str) -> bool:
     text_msg = (message or "").strip()
     if spec.metric == MetricKind.VALIDATE:
-        return bool(spec.person_recorte or spec.age_range or spec.territory)
-    if not spec.is_cadu_person_query():
+        return bool(spec.person_recorte or spec.age_range or spec.territory or spec.requires_pbf_folha)
+    if not spec.is_cadu_person_query() and not spec.requires_pbf_folha:
         return False
     if not _QUANT.search(text_msg) and not _PESSOA.search(text_msg) and not _FAMILIA.search(text_msg):
-        return False
-    return bool(spec.person_recorte or spec.age_range)
+        if not spec.cohort_followup:
+            return False
+    return bool(spec.person_recorte or spec.age_range or spec.requires_pbf_folha)
 
 
 def _resolve_territory(
@@ -56,9 +57,10 @@ def _resolve_territory(
     return None
 
 
-def _build_predicates(spec: QueryTaskSpec) -> tuple[list[str], list[str]]:
-    """Retorna (predicados SQL, labels humanos)."""
+def _build_predicates(spec: QueryTaskSpec) -> tuple[list[str], list[str], list[str]]:
+    """Retorna (predicados pessoa, predicados família, labels humanos)."""
     preds: list[str] = []
+    fam_preds: list[str] = []
     labels: list[str] = []
 
     if spec.person_recorte:
@@ -74,24 +76,30 @@ def _build_predicates(spec: QueryTaskSpec) -> tuple[list[str], list[str]]:
         preds.append(spec.age_range.sql_between())
         labels.append(f"idade {spec.age_range.label()}")
 
-    return preds, labels
+    if spec.requires_pbf_folha:
+        fam_preds.append("COALESCE(f.marc_pbf, false) = true")
+        labels.append("família na folha PBF")
+
+    return preds, fam_preds, labels
 
 
 def _count_pessoas_composed(
     conn: Connection,
     *,
     preds: list[str],
+    fam_preds: list[str],
     terr: CaduTerritory,
 ) -> int:
     terr_sql, params = territory_sql_where(terr)
     where_person = " AND ".join(preds) if preds else "TRUE"
+    where_fam = " AND ".join(fam_preds) if fam_preds else "TRUE"
     row = conn.execute(
         text(
             f"""
             SELECT COUNT(p.cadu_row_id)::bigint AS total
             FROM vig.mvw_pessoas p
             INNER JOIN vig.mvw_familia f ON f.codigo_familiar = p.codigo_familiar
-            WHERE {terr_sql} AND {where_person}
+            WHERE {terr_sql} AND {where_person} AND {where_fam}
             """
         ),
         params,
@@ -136,9 +144,16 @@ def _format_answer(
 ) -> str:
     unit = "famílias" if spec.entity == EntityKind.FAMILIA else "pessoas"
     desc = ", ".join(labels) if labels else unit
-    filter_note = ""
-    if len(labels) > 1:
-        filter_note = f" ({'; '.join(labels)})"
+    filter_note = f" ({'; '.join(labels)})" if len(labels) > 1 else ""
+
+    if spec.cohort_followup and spec.requires_pbf_folha:
+        templates = [
+            f"Desses homens em {terr.label}, **{_fmt_int(total)}** estão em "
+            f"**famílias que recebem PBF**{filter_note}.",
+            f"No recorte {terr.label}, **{_fmt_int(total)}** homens "
+            f"pertencem a famílias na folha do Bolsa Família{filter_note}.",
+        ]
+        return _prefix_name(user_first_name, _pick_variant(seed, templates))
 
     templates = [
         f"Em {terr.label}, há **{_fmt_int(total)}** **{desc}** no CADU "
@@ -152,11 +167,13 @@ def _build_sql_preview(
     *,
     spec: QueryTaskSpec,
     preds: list[str],
+    fam_preds: list[str],
     terr: CaduTerritory,
     total: int,
 ) -> tuple[str, list[dict[str, Any]]]:
     terr_sql, _ = territory_sql_where(terr)
     where_person = " AND ".join(preds) if preds else "TRUE"
+    where_fam = " AND ".join(fam_preds) if fam_preds else "TRUE"
     if spec.entity == EntityKind.FAMILIA:
         sql = (
             "SELECT COUNT(DISTINCT f.codigo_familiar) FROM vig.mvw_familia f "
@@ -167,13 +184,15 @@ def _build_sql_preview(
         sql = (
             "SELECT COUNT(p.cadu_row_id) FROM vig.mvw_pessoas p "
             "INNER JOIN vig.mvw_familia f ON f.codigo_familiar = p.codigo_familiar "
-            f"WHERE {terr_sql} AND {where_person}"
+            f"WHERE {terr_sql} AND {where_person} AND {where_fam}"
         )
     preview: dict[str, Any] = {
         "total": total,
         "granularidade": spec.entity.value,
         "filters_applied": spec.applied_filters_summary(),
     }
+    if spec.requires_pbf_folha:
+        preview["pbf_folha"] = True
     if spec.person_recorte:
         preview["recorte"] = spec.person_recorte.key
     if spec.age_range:
@@ -211,17 +230,19 @@ def try_execute_cadu_spec(
         return resolved
     terr = resolved
 
-    preds, labels = _build_predicates(spec)
-    if not preds:
+    preds, fam_preds, labels = _build_predicates(spec)
+    if not preds and not fam_preds:
         return None
 
     familia = spec.entity == EntityKind.FAMILIA or wants_familia_count(text_msg)
     if familia:
         total = _count_familias_composed(conn, preds=preds, terr=terr)
     else:
-        total = _count_pessoas_composed(conn, preds=preds, terr=terr)
+        total = _count_pessoas_composed(conn, preds=preds, fam_preds=fam_preds, terr=terr)
 
-    sql, preview = _build_sql_preview(spec=spec, preds=preds, terr=terr, total=total)
+    sql, preview = _build_sql_preview(
+        spec=spec, preds=preds, fam_preds=fam_preds, terr=terr, total=total
+    )
 
     if spec.metric == MetricKind.VALIDATE:
         summary = spec.applied_filters_summary() or "; ".join(labels)

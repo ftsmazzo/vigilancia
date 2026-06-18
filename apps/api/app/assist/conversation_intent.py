@@ -181,8 +181,12 @@ def user_asks_sisc_existing(message: str, transcript: list[dict[str, str]] | Non
 
 
 def skips_bairro_preprocess(message: str, transcript: list[dict[str, str]] | None) -> bool:
-    """Não resolver bairro em planejamento municipal/CRAS sem nome de bairro."""
+    """Não resolver bairro em planejamento ou quando família/PBF é filtro de cruzamento."""
+    from .territory_guard import should_skip_bairro_resolution
+
     text_msg = message.strip()
+    if should_skip_bairro_resolution(text_msg, transcript):
+        return True
     if is_planning_turn(text_msg, transcript) and not re.search(
         r"\bbairro\s+(?!desse|nesse|deste|dese\b)",
         text_msg,

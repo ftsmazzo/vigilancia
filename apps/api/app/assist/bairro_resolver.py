@@ -35,6 +35,10 @@ _BAIRRO_STOPWORDS = frozenset({
     "funcao", "parte", "caso", "forma", "modo", "todo", "toda", "todos",
     "novo", "nova", "servico", "serviço", "convivencia", "convivência",
     "municipio", "município", "contexto", "scfv",
+    "familia", "familias", "família", "famílias",
+    "cadastro", "cadu", "pbf", "bolsa", "beneficio", "benefício",
+    "homens", "homem", "mulheres", "mulher", "pessoas", "pessoa",
+    "recebem", "recebe", "beneficiarios", "beneficiários",
 })
 
 _LOCATION_PATTERNS = (
@@ -54,13 +58,16 @@ _LOCATION_PATTERNS = (
     re.compile(
         r"(?:crianças?|crianca|idosos?|pessoas?|fam[ií]lias?|mulheres|homens?|"
         r"defici[eê]ncia|portador[a]?s?)"
-        r".*?\b(?:nos|no|na|em)\s+(?!bairro\b|cras\b|munic[ií]pio\b|conviv|considera|geral|rela|mente\b|"
-        r"funcao|função|servi[cç]o|novo\b|nova\b|contexto\b)([A-Za-zÀ-ú][A-Za-zÀ-ú0-9\s'\-]{2,}?)(?:\?|\.|$)",
+        r".*?\b(?:nos|no|na|em)\s+(?!bairro\b|cras\b|munic[ií]pio\b|"
+        r"fam[ií]lias?\b|cadastro\b|cadu\b|pbf\b|bolsa\b|benef[ií]cio\b)"
+        r"([A-Za-zÀ-ú][A-Za-zÀ-ú0-9\s'\-]{2,}?)(?:\?|\.|$)",
         re.I,
     ),
     re.compile(
         r"(?:quantas?|quantos?|existem|h[aá]|tem|possui|apresenta).*?"
-        r"\b(?:nos|no|na|em)\s+(?!bairro\b|cras\b|munic[ií]pio\b)(.+?)(?:\?|\.|$)",
+        r"\b(?:nos|no|na|em)\s+(?!bairro\b|cras\b|munic[ií]pio\b|"
+        r"fam[ií]lias?\b|cadastro\b|cadu\b|pbf\b|bolsa\b|benef[ií]cio\b)"
+        r"(.+?)(?:\?|\.|$)",
         re.I,
     ),
     re.compile(
@@ -184,8 +191,12 @@ class BairroPreprocess:
 
 
 def is_valid_bairro_term(term: str) -> bool:
+    from .territory_guard import is_non_geographic_term
+
     cleaned = _clean_term(term)
     if len(cleaned) < 3:
+        return False
+    if is_non_geographic_term(cleaned):
         return False
     folded = _fold(cleaned)
     if folded in _IVS_DIM_SIGLAS:
@@ -214,8 +225,11 @@ def should_resolve_bairro(message: str, term: str | None) -> bool:
     if not term or not is_valid_bairro_term(term):
         return False
     from .conversation_intent import skips_bairro_preprocess
+    from .territory_guard import should_skip_bairro_resolution
 
     if skips_bairro_preprocess(message, None):
+        return False
+    if should_skip_bairro_resolution(message):
         return False
     if re.search(r"\bbairro\b", message, re.I):
         if re.search(r"\b(?:desse|nesse|deste|dese)\s+cras\b", message, re.I):
@@ -649,8 +663,11 @@ def preprocess_bairro_turn(
         return BairroPreprocess(message=message)
 
     from .conversation_intent import skips_bairro_preprocess
+    from .territory_guard import should_skip_bairro_resolution
 
     if skips_bairro_preprocess(message, transcript):
+        return BairroPreprocess(message=message)
+    if should_skip_bairro_resolution(message, transcript):
         return BairroPreprocess(message=message)
 
     choice = try_parse_bairro_choice(message, transcript)

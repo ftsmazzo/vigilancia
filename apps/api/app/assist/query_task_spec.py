@@ -31,7 +31,18 @@ _SEX_FEM = re.compile(r"\bmulheres?\b|\bfeminino\b", re.I)
 _SEX_MASC = re.compile(r"\bhomens?\b|\bmasculino\b", re.I)
 _CRAS_NUM = re.compile(r"\bcras\s*(\d{1,2})\b", re.I)
 _VALIDATION = re.compile(
-    r"como\s+pedi|conforme\s+pedi|est[aá]\s+correto|aplicou|filtros?\s+aplic",
+    r"como\s+pedi|conforme\s+pedi|est[aá]\s+correto|aplicou|filtros?\s+aplic|"
+    r"n[aã]o\s+entendeu|vc\s+n[aã]o\s+entendeu",
+    re.I,
+)
+_COHORT = re.compile(
+    r"\b(?:dess[aeo]s?|dest[aeo]s?|dessas?|desses?|"
+    r"entre\s+(?:eles|elas|ess[aeo]s?))\b",
+    re.I,
+)
+_PBF = re.compile(
+    r"\b(?:pbf|bolsa\s+fam[ií]lia|programa\s+bolsa|"
+    r"benef[ií]cio\s+bolsa|recebe[m]?\s+(?:o\s+)?(?:pbf|bolsa))\b",
     re.I,
 )
 
@@ -89,6 +100,8 @@ class QueryTaskSpec:
     response_mode: str = "data"
     original_question: str = ""
     filter_labels: list[str] = field(default_factory=list)
+    requires_pbf_folha: bool = False
+    cohort_followup: bool = False
 
     def is_cadu_person_query(self) -> bool:
         if self.metric not in (MetricKind.COUNT, MetricKind.EXISTS, MetricKind.VALIDATE):
@@ -145,6 +158,11 @@ class QueryTaskSpec:
                 )
         if self.filter_labels:
             lines.append(f"- Filtros declarados: {', '.join(self.filter_labels)}")
+        if self.requires_pbf_folha:
+            lines.append(
+                "- Família na folha PBF: COALESCE(f.marc_pbf, false) = true "
+                "(família recebe Bolsa Família)"
+            )
         lines.append(
             "- A consulta DEVE incluir TODOS os filtros acima. "
             "Não omita faixa etária nem território."
@@ -165,6 +183,8 @@ class QueryTaskSpec:
             ),
             "response_mode": self.response_mode,
             "filters": self.filter_labels,
+            "requires_pbf_folha": self.requires_pbf_folha,
+            "cohort_followup": self.cohort_followup,
         }
 
 
@@ -200,6 +220,15 @@ def _parse_age_from_session_filters(filters: list[str]) -> AgeRange | None:
 
 
 def _parse_territory(text: str, ctx: SessionContext | None) -> TerritorySpec | None:
+    from .territory_guard import familia_as_data_entity, should_skip_bairro_resolution
+
+    if should_skip_bairro_resolution(text) or familia_as_data_entity(text):
+        if ctx and ctx.last_bairro:
+            return TerritorySpec(TerritoryKind.BAIRRO, ctx.last_bairro)
+        if ctx and ctx.last_cras:
+            return TerritorySpec(TerritoryKind.CRAS, ctx.last_cras)
+        return None
+
     cras_m = _CRAS_NUM.search(text)
     if cras_m:
         raw = cras_m.group(1).lstrip("0") or cras_m.group(1)
@@ -220,6 +249,10 @@ def _parse_territory(text: str, ctx: SessionContext | None) -> TerritorySpec | N
 
 
 def _wants_familia(text: str) -> bool:
+    from .territory_guard import familia_as_data_entity, has_pbf_cross_filter
+
+    if familia_as_data_entity(text) or (has_pbf_cross_filter(text) and _COHORT.search(text)):
+        return False
     if not _FAMILIA.search(text):
         return False
     if _PESSOA.search(text) and not re.search(r"\bfam[ií]lias?\s+com\b", text, re.I):
@@ -241,6 +274,9 @@ def extract_task_spec(
     if _VALIDATION.search(text_msg):
         metric = MetricKind.VALIDATE
 
+    cohort = bool(_COHORT.search(text_msg))
+    requires_pbf = bool(_PBF.search(text_msg) and re.search(r"\bfam[ií]lias?\b", text_msg, re.I))
+
     recorte = detect_person_recorte(text_msg)
     age_range = _parse_age_from_text(text_msg, transcript) or _parse_age_from_session_filters(
         ctx.filters
@@ -258,10 +294,10 @@ def extract_task_spec(
                 recorte = _recorte_homem()
 
     if not recorte:
-        if ctx.subject == "mulheres" or _SEX_FEM.search(text_msg):
+        if ctx.subject == "mulheres" or _SEX_FEM.search(text_msg) or re.search(r"\bdessas?\s+mulheres\b", text_msg, re.I):
             from .cadu_pessoas_metrics import _recorte_mulher
             recorte = _recorte_mulher()
-        elif ctx.subject == "homens" or _SEX_MASC.search(text_msg):
+        elif ctx.subject == "homens" or _SEX_MASC.search(text_msg) or re.search(r"\bdesses?\s+homens\b", text_msg, re.I):
             from .cadu_pessoas_metrics import _recorte_homem
             recorte = _recorte_homem()
 
@@ -281,6 +317,9 @@ def extract_task_spec(
     elif territory and territory.kind == TerritoryKind.CRAS and territory.value:
         filter_labels.append(f"CRAS {territory.value}")
 
+    if requires_pbf:
+        filter_labels.append("família na folha PBF")
+
     return QueryTaskSpec(
         metric=metric,
         entity=entity,
@@ -290,6 +329,8 @@ def extract_task_spec(
         response_mode=response_mode,
         original_question=text_msg,
         filter_labels=filter_labels,
+        requires_pbf_folha=requires_pbf,
+        cohort_followup=cohort,
     )
 
 
@@ -310,6 +351,8 @@ def merge_task_spec_with_session(
     elif not recorte and ctx.subject == "homens":
         from .cadu_pessoas_metrics import _recorte_homem
         recorte = _recorte_homem()
+
+    requires_pbf = spec.requires_pbf_folha or bool(_PBF.search(spec.original_question or ""))
 
     territory = spec.territory
     if not territory or territory.kind == TerritoryKind.MUNICIPIO:
@@ -334,11 +377,15 @@ def merge_task_spec_with_session(
         territory=territory or spec.territory,
         filter_labels=list(dict.fromkeys(filter_labels)),
         original_question=spec.original_question or stem,
+        requires_pbf_folha=requires_pbf or spec.requires_pbf_folha,
+        cohort_followup=spec.cohort_followup or bool(_COHORT.search(spec.original_question or "")),
     )
 
 
 def legacy_cadu_recorte_covers_spec(spec: QueryTaskSpec) -> bool:
     """Atalho antigo só quando NÃO há faixa etária extra além do recorte fixo."""
+    if spec.requires_pbf_folha or spec.cohort_followup:
+        return False
     if not spec.person_recorte or not spec.is_cadu_person_query():
         return False
     if spec.age_range:
@@ -394,5 +441,9 @@ def verify_sql_covers_spec(sql: str, spec: QueryTaskSpec) -> tuple[bool, list[st
     if spec.territory and spec.territory.kind == TerritoryKind.CRAS and spec.territory.value:
         if "num_cras" not in low and f"cras {spec.territory.value}" not in low:
             missing.append(f"CRAS {spec.territory.value}")
+
+    if spec.requires_pbf_folha:
+        if "marc_pbf" not in low:
+            missing.append("família na folha PBF (marc_pbf)")
 
     return len(missing) == 0, missing
