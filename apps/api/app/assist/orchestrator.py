@@ -1,10 +1,13 @@
 """VigIA — orquestrador multi-especialista.
 
-Arquitetura (4 especialistas + síntese):
-  1. Políticas e Normativas — SUAS, regras de programas (RAG)
-  2. Dados do Município — rede local, caracterização territorial cadastrada
-  3. Dados de Vigilância — tronco CADU + camadas (SISC, IVS, SIBEC, geo…) via SQL e métricas canônicas
-  4. Síntese analítica — cruza fatos verificados com conhecimento para apoiar decisão (não é agente de dados)
+Pipeline autônomo (sem LangChain/CrewAI):
+  1. Reformulador → QueryTaskSpec (intenção tipada)
+  2. Maestro → roteamento por especialista
+  3. Executor composicional / canônico / AgenteSQL (com verificador)
+  4. Síntese analítica — só quando response_mode exige interpretação
+
+Especialistas:
+  - Políticas, Município, Vigilância (CADU + camadas), Síntese
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ from .bairro_resolver import (
     try_pessoas_bairro_metric,
 )
 from .cadu_pessoas_metrics import try_cadu_pessoas_recorte_metric
+from .cadu_spec_executor import try_execute_cadu_spec
 from .answer_trim import trim_answer_boilerplate
 from .analyst_agent import interpret_evidence
 from .canonical_metrics import try_canonical_metric
@@ -46,6 +50,13 @@ from .maestro_router import resolve_turn_route
 from .municipio_agent import run_municipio_agent
 from .planning_metrics import try_planning_demand_metric
 from .policy_agent import run_policy_agent
+from .query_task_spec import (
+    MetricKind,
+    extract_task_spec,
+    legacy_cadu_recorte_covers_spec,
+    merge_task_spec_with_session,
+    verify_sql_covers_spec,
+)
 from .session_context import SessionContext, resolve_effective_question
 from .sql_agent import SqlAgentResult, run_sql_agent
 
@@ -309,6 +320,11 @@ def run_orchestrator_turn(
         transcript,
         session_context,
     )
+    task_spec = merge_task_spec_with_session(
+        extract_task_spec(effective_message, transcript, session_context=merged_ctx),
+        merged_ctx,
+        transcript,
+    )
     municipio_block = load_context_prompt(db)
     user_block = _user_context_block(user, municipio_block)
     rag_block = query_knowledge_base(effective_message)
@@ -384,14 +400,56 @@ def run_orchestrator_turn(
     message = bairro_pre.message
     bairro_resolution = bairro_pre.resolution
 
-    pessoas_bairro = try_pessoas_bairro_metric(conn, data_message, first_name)
-    if pessoas_bairro:
+    cadu_spec = try_execute_cadu_spec(
+        conn, task_spec, data_message, user_first_name=first_name
+    )
+    if cadu_spec:
+        if cadu_spec.get("mode") == "disambiguation":
+            return {
+                **cadu_spec,
+                "answer": _trim_answer_boilerplate(cadu_spec["answer"]),
+                "effective_message": effective_message,
+                "task_spec": task_spec.to_dict(),
+            }
+        if cadu_spec.get("use_analyst"):
+            answer = _answer_via_analyst(
+                message,
+                cadu_spec,
+                conn=conn,
+                db=db,
+                transcript=transcript,
+                user_first_name=first_name,
+                thread_brief=route.thread_brief,
+                municipio_block=municipio_block,
+                rag_block=rag_block,
+            )
+        else:
+            answer = cadu_spec["answer"]
         return {
-            **pessoas_bairro,
-            "answer": _trim_answer_boilerplate(pessoas_bairro["answer"]),
+            "answer": _trim_answer_boilerplate(answer),
+            "sql": cadu_spec.get("sql"),
+            "row_count": cadu_spec.get("row_count", 0),
+            "preview": cadu_spec.get("preview") or [],
+            "mode": cadu_spec.get("mode", "canonical"),
+            "effective_message": effective_message,
+            "task_spec": task_spec.to_dict(),
+            "filters_applied": cadu_spec.get("filters_applied"),
         }
 
-    cadu_pessoas = try_cadu_pessoas_recorte_metric(conn, data_message, user_first_name=first_name)
+    if not task_spec.person_recorte and not task_spec.age_range:
+        pessoas_bairro = try_pessoas_bairro_metric(conn, data_message, first_name)
+        if pessoas_bairro:
+            return {
+                **pessoas_bairro,
+                "answer": _trim_answer_boilerplate(pessoas_bairro["answer"]),
+                "task_spec": task_spec.to_dict(),
+            }
+
+    cadu_pessoas = None
+    if legacy_cadu_recorte_covers_spec(task_spec):
+        cadu_pessoas = try_cadu_pessoas_recorte_metric(
+            conn, data_message, user_first_name=first_name
+        )
     if cadu_pessoas:
         return {
             **cadu_pessoas,
@@ -541,9 +599,30 @@ def run_orchestrator_turn(
             f"Filtre com lower(btrim(f.bairro::text)) = lower('{bairro_resolution.canonical.replace(chr(39), '')}').]"
         )
 
+    task_spec_block = task_spec.to_sql_agent_block()
     sql_result = run_sql_agent(
-        conn, db, sql_question, thread_brief=route.thread_brief
+        conn,
+        db,
+        sql_question,
+        thread_brief=route.thread_brief,
+        task_spec_block=task_spec_block,
     )
+    if sql_result.ok and sql_result.sql:
+        verified, missing = verify_sql_covers_spec(sql_result.sql, task_spec)
+        if not verified and missing:
+            retry_block = (
+                f"{task_spec_block}\n\n"
+                f"### Correção obrigatória\n"
+                f"A consulta anterior OMITIU: {', '.join(missing)}. "
+                f"Inclua TODOS os filtros da especificação."
+            )
+            sql_result = run_sql_agent(
+                conn,
+                db,
+                sql_question,
+                thread_brief=route.thread_brief,
+                task_spec_block=retry_block,
+            )
     if sql_result.ok and sql_result.formatted_answer:
         answer = _cras_answer_with_context(sql_result.rows, user, municipio_block)
     elif sql_result.ok and sql_result.row_count == 0:
@@ -577,14 +656,19 @@ def run_orchestrator_turn(
                 }
         if sql_result.ok:
             pack = pack_from_sql(message, sql_result, thread_brief=route.thread_brief)
-            answer = interpret_evidence(
-                pack,
-                user_first_name=first_name,
-                conn=conn,
-                db=db,
-                municipio_block=municipio_block,
-                rag_block=rag_block,
-            )
+            if task_spec.is_simple_data_response():
+                answer = _finalize_data_reply(
+                    message, transcript, sql_question, sql_result, user_block
+                )
+            else:
+                answer = interpret_evidence(
+                    pack,
+                    user_first_name=first_name,
+                    conn=conn,
+                    db=db,
+                    municipio_block=municipio_block,
+                    rag_block=rag_block,
+                )
         else:
             answer = _finalize_data_reply(message, transcript, sql_question, sql_result, user_block)
 
@@ -600,4 +684,5 @@ def run_orchestrator_turn(
         "mode": "data",
         "error": sql_result.error if not sql_result.ok else None,
         "effective_message": effective_message,
+        "task_spec": task_spec.to_dict(),
     }

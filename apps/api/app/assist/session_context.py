@@ -218,12 +218,20 @@ def merge_context(stored: SessionContext, extracted: SessionContext) -> SessionC
     return SessionContext(
         subject=stored.subject or extracted.subject,
         entity=stored.entity or extracted.entity,
-        filters=stored.filters or extracted.filters,
+        filters=_merge_filter_lists(stored.filters, extracted.filters),
         last_cras=extracted.last_cras or stored.last_cras,
         last_bairro=stored.last_bairro or extracted.last_bairro,
         last_competencia=stored.last_competencia or extracted.last_competencia,
         question_stem=stored.question_stem or extracted.question_stem,
     )
+
+
+def _merge_filter_lists(stored: list[str], extracted: list[str]) -> list[str]:
+    merged = list(stored)
+    for item in extracted:
+        if item not in merged:
+            merged.append(item)
+    return merged
 
 
 def reformulate_followup(

@@ -156,10 +156,13 @@ def run_sql_agent(
     question: str,
     *,
     thread_brief: str = "",
+    task_spec_block: str = "",
 ) -> SqlAgentResult:
     """Recebe pergunta limpa do Orquestrador; devolve número/resultado ou erro."""
     context = _build_sql_context(conn, db, thread_brief=thread_brief)
     user_content = question.strip()
+    if task_spec_block.strip():
+        user_content = f"{user_content}\n\n{task_spec_block.strip()}"
     if thread_brief.strip():
         user_content = f"{user_content}\n\n### Contexto da conversa\n{thread_brief.strip()}"
 
