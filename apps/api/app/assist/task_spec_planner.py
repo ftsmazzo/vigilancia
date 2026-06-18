@@ -29,7 +29,9 @@ Regras:
 - Follow-ups curtos recombinam memória + intenção nova (ex.: após crianças 7–15 por CRAS, «E idosos?» → idosos ≥60 por CRAS, SEM herdar 7–15).
 - Coorte («nessa faixa etária», «desses homens») HERDA faixa/filtros da sessão.
 - «por CRAS», «distribuição», «qual CRAS tem mais» → breakdown = cras.
-- Famílias recebendo Bolsa Família / PBF (folha) → requires_pbf true. Não confundir com bloqueio SIBEC.
+- Famílias recebendo Bolsa Família / PBF (folha marc_pbf) → requires_pbf true.
+- **SIBEC bloqueio/cancelamento/manutenção** → NÃO é PBF folha; requires_pbf false; mencione SIBEC na pergunta reformulada.
+- **Raça/cor/etnia** → incluir na pergunta reformulada (cod_raca_cor_pessoa).
 - NÃO invente números. NÃO escreva SQL.
 
 Responda APENAS JSON:

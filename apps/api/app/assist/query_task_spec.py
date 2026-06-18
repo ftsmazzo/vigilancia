@@ -59,6 +59,11 @@ _SUBJECT_PIVOT = re.compile(
     r"^(?:e\s+)?(?:idosos?|crian[cç]as?|mulheres?|homens?|adolescentes?)\??\.?$",
     re.I,
 )
+_SIBEC = re.compile(
+    r"\bsibec\b|bloqueio|bloquead|cancelamento|manuten[cç][ãa]o|teve_bloqueio",
+    re.I,
+)
+_RACA = re.compile(r"ra[cç]a|etnia|\bcor\b|pard[oa]|pret[oa]|ind[ií]gena|branc[oa]", re.I)
 
 
 class MetricKind(str, Enum):
@@ -125,6 +130,38 @@ class QueryTaskSpec:
 
     def wants_cras_breakdown(self) -> bool:
         return self.breakdown == BreakdownKind.CRAS
+
+    def mentions_sibec(self) -> bool:
+        return bool(_SIBEC.search(self.original_question or ""))
+
+    def needs_free_sql(self) -> bool:
+        """Cruzamentos arbitrários — AgenteSQL, não executor CADU fixo."""
+        msg = self.original_question or ""
+        if _RACA.search(msg):
+            return True
+        if self.mentions_sibec() and (
+            self.age_range
+            or _CHILD.search(msg)
+            or self.person_recorte
+            or self.cohort_followup
+            or _COHORT_AGE.search(msg)
+        ):
+            return True
+        if self.mentions_sibec() and self.entity == EntityKind.FAMILIA and (
+            _CHILD.search(msg) or self.age_range
+        ):
+            return True
+        return False
+
+    def skip_cadu_spec_executor(self) -> bool:
+        """Executor composicional só para CADU puro — não SIBEC/raça/cruzamentos."""
+        if self.needs_free_sql():
+            return True
+        if self.mentions_sibec():
+            return True
+        if _RACA.search(self.original_question or ""):
+            return True
+        return False
 
     def is_cadu_person_query(self) -> bool:
         if self.metric not in (MetricKind.COUNT, MetricKind.EXISTS, MetricKind.VALIDATE):
@@ -382,6 +419,7 @@ def extract_task_spec(
         metric = MetricKind.RANK
 
     cohort = bool(_COHORT.search(text_msg) or _COHORT_AGE.search(text_msg))
+    mentions_sibec = bool(_SIBEC.search(text_msg))
     requires_pbf = bool(
         _PBF.search(text_msg)
         and (
@@ -389,6 +427,7 @@ def extract_task_spec(
             or re.search(r"recebendo\s+(?:o\s+)?(?:pbf|bolsa)", text_msg, re.I)
             or ctx.requires_pbf
         )
+        and not mentions_sibec
     )
 
     recorte = detect_person_recorte(text_msg)
@@ -417,7 +456,7 @@ def extract_task_spec(
         entity = EntityKind.FAMILIA
 
     response_mode = infer_response_mode(text_msg)
-    if breakdown == BreakdownKind.CRAS:
+    if breakdown == BreakdownKind.CRAS and not mentions_sibec:
         response_mode = "ranking"
 
     filter_labels: list[str] = []
@@ -483,12 +522,17 @@ def merge_task_spec_with_session(
 
     recorte = _resolve_person_recorte_with_age(msg, recorte, age)
 
-    requires_pbf = spec.requires_pbf_folha or ctx.requires_pbf or bool(
+    requires_pbf = spec.requires_pbf_folha or (
+        ctx.requires_pbf
+        and not _SIBEC.search(msg)
+        and not _PBF.search(msg)
+    ) or bool(
         _PBF.search(msg)
         and (
             re.search(r"\bfam[ií]lias?\b", msg, re.I)
             or re.search(r"recebendo\s+(?:o\s+)?(?:pbf|bolsa)", msg, re.I)
         )
+        and not _SIBEC.search(msg)
     )
 
     territory = spec.territory

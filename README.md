@@ -86,6 +86,9 @@ Configure **Build Path** como `/` (raiz) e aponte o Dockerfile de cada servico:
 | `ASSIST_LLM_MODEL` | Nao | Padrao: `grok-4-1-fast-reasoning`. |
 | `ASSIST_ORCH_MODEL` | Nao | Modelo do Orquestrador VigIA (padrao = ASSIST_LLM_MODEL). |
 | `ASSIST_SQL_MODEL` | Nao | Modelo do AgenteSQL (padrao = ASSIST_LLM_MODEL). |
+| `ASSIST_BACKEND` | Nao | `native` (padrao) ou `n8n` — orquestrador FastAPI vs workflow VigIA no n8n. |
+| `ASSIST_N8N_VIGIA_URL` | Com `ASSIST_BACKEND=n8n` | Webhook production, ex.: `https://.../webhook/vigia/chat`. |
+| `ASSIST_N8N_VIGIA_TOKEN` | Nao | Bearer opcional para o webhook n8n. |
 | `KB_API_URL` | RAG SUAS | URL POST da base de conhecimento (ex.: `https://.../api/kb/5/query`). |
 | `KB_API_KEY` | RAG SUAS | Bearer token da API de KB. |
 | `KB_TOP_K` | Nao | Trechos RAG por consulta; padrao: 3. |

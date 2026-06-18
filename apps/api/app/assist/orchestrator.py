@@ -291,6 +291,69 @@ def _finalize_data_reply(
     return _trim_answer_boilerplate(chat_completion(messages, temperature=0.35, role="orch").strip())
 
 
+def _run_sql_agent_turn(
+    conn: Connection,
+    db: Session,
+    data_message: str,
+    message: str,
+    transcript: list[dict[str, str]],
+    *,
+    task_spec: "QueryTaskSpec",
+    thread_brief: str,
+    user_first_name: str,
+    municipio_block: str,
+    rag_block: str,
+    bairro_resolution: Any = None,
+) -> dict[str, Any] | None:
+    """AgenteSQL para cruzamentos livres (SIBEC×CADU, raça, etc.)."""
+    task_spec_block = task_spec.to_sql_agent_block()
+    sql_result = run_sql_agent(
+        conn,
+        db,
+        data_message,
+        thread_brief=thread_brief,
+        task_spec_block=task_spec_block,
+    )
+    if sql_result.ok and sql_result.sql:
+        verified, missing = verify_sql_covers_spec(sql_result.sql, task_spec)
+        if not verified and missing:
+            retry_block = (
+                f"{task_spec_block}\n\n"
+                f"### Correção obrigatória\n"
+                f"A consulta anterior OMITIU: {', '.join(missing)}. "
+                f"Inclua TODOS os filtros da especificação."
+            )
+            sql_result = run_sql_agent(
+                conn,
+                db,
+                data_message,
+                thread_brief=thread_brief,
+                task_spec_block=retry_block,
+            )
+    if not sql_result.ok:
+        return None
+    pack = pack_from_sql(data_message, sql_result, thread_brief=thread_brief)
+    pack.filters_applied = task_spec.applied_filters_summary()
+    answer = interpret_evidence(
+        pack,
+        user_first_name=user_first_name,
+        conn=conn,
+        db=db,
+        municipio_block=municipio_block,
+        rag_block=rag_block,
+    )
+    answer = apply_bairro_correction_to_answer(
+        answer, bairro_resolution, user_first_name, message=message
+    )
+    return {
+        "answer": _trim_answer_boilerplate(answer),
+        "sql": sql_result.sql,
+        "row_count": sql_result.row_count,
+        "preview": sql_result.preview,
+        "mode": "data",
+    }
+
+
 def _personalize_canonical(answer: str, user: User) -> str:
     first = _first_name(user.name)
     if not first or answer.startswith(first):
@@ -404,9 +467,62 @@ def run_orchestrator_turn(
     message = bairro_pre.message
     bairro_resolution = bairro_pre.resolution
 
-    cadu_spec = try_execute_cadu_spec(
-        conn, task_spec, data_message, user_first_name=first_name
-    )
+    cadu_spec = None
+    if not task_spec.skip_cadu_spec_executor():
+        cadu_spec = try_execute_cadu_spec(
+            conn, task_spec, data_message, user_first_name=first_name
+        )
+    elif task_spec.needs_free_sql() or task_spec.mentions_sibec():
+        canonical_early = try_canonical_metric(
+            conn,
+            data_message,
+            transcript,
+            db=db,
+            user_first_name=first_name,
+            block_sisc=route.block_sisc,
+        )
+        if canonical_early and not task_spec.needs_free_sql():
+            answer = _answer_via_analyst(
+                data_message,
+                canonical_early,
+                conn=conn,
+                db=db,
+                transcript=transcript,
+                user_first_name=first_name,
+                thread_brief=route.thread_brief,
+                municipio_block=municipio_block,
+                rag_block=rag_block,
+                session_context=merged_ctx,
+            )
+            return {
+                "answer": _trim_answer_boilerplate(answer),
+                "sql": canonical_early.get("sql"),
+                "row_count": canonical_early.get("row_count", 0),
+                "preview": canonical_early.get("preview") or [],
+                "mode": canonical_early.get("mode", "canonical"),
+                "effective_message": effective_message,
+                "task_spec": task_spec.to_dict(),
+            }
+        sql_early = _run_sql_agent_turn(
+            conn,
+            db,
+            data_message,
+            message,
+            transcript,
+            task_spec=task_spec,
+            thread_brief=route.thread_brief,
+            user_first_name=first_name,
+            municipio_block=municipio_block,
+            rag_block=rag_block,
+            bairro_resolution=bairro_resolution,
+        )
+        if sql_early:
+            return {
+                **sql_early,
+                "effective_message": effective_message,
+                "task_spec": task_spec.to_dict(),
+            }
+
     if cadu_spec:
         if cadu_spec.get("mode") == "disambiguation":
             return {

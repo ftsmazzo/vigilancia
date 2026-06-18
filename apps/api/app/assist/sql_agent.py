@@ -45,6 +45,8 @@ Regras obrigatórias:
 - Contagem de famílias: COUNT(DISTINCT f.codigo_familiar) ou COUNT(*) em mvw_sibec_manut_familia_mes (já 1 linha/família/mês).
 - Contagem de pessoas: COUNT(p.cadu_row_id) ou COUNT(*).
 - Mulher: p.cod_sexo = '2'. Homem: p.cod_sexo = '1'.
+- **Raça/cor (pessoa)**: p.cod_raca_cor_pessoa — 1 Branca, 2 Preta, 3 Amarela, 4 Parda, 5 Indígena (texto '1'..'5').
+- **SIBEC bloqueio + CADU (crianças, idade, CRAS)**: JOIN m.codigo_familiar = f.codigo_familiar; filtre m.teve_bloqueio e m.competencia (última); p.idade BETWEEN … via EXISTS ou JOIN p.
 - **Pessoa com deficiência (PCD)**: {tem_deficiencia_expr("p")} — campos p.cod_deficiencia e p.ind_def_* (texto '1'/'0', ver dicionário p.cod_deficiencia_memb).
 - Criança até 6 anos: p.idade <= 6 AND p.idade IS NOT NULL.
 - Folha PBF (KPI painel): COALESCE(f.marc_pbf, false) = true.

@@ -57,5 +57,12 @@ class Settings(BaseSettings):
     # Dicionário CADU (dicionariotudo.csv) para o assistente
     cadu_dictionary_path: str | None = None
 
+    # n8n — orquestrador VigIA opcional (webhook production: .../webhook/vigia/chat)
+    assist_n8n_vigia_url: str | None = None
+    assist_n8n_vigia_token: str | None = None
+    assist_n8n_timeout_seconds: float = 120.0
+    # native = orquestrador FastAPI; n8n = delega ao workflow VigIA no n8n
+    assist_backend: str = "native"
+
 
 settings = Settings()
