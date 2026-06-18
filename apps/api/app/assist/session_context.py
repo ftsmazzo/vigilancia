@@ -16,8 +16,8 @@ _FOLLOWUP_AND = re.compile(
     re.I,
 )
 _CRAS_NUM = re.compile(r"\bcras\s*(\d{1,2})\b", re.I)
-_WOMEN = re.compile(r"mulher|feminino", re.I)
-_MEN = re.compile(r"homem|masculino", re.I)
+_MEN = re.compile(r"\bhomens?\b|\bmasculino\b", re.I)
+_WOMEN = re.compile(r"\bmulheres?\b|\bfeminino\b", re.I)
 _CHILD = re.compile(r"crian[cç]", re.I)
 _FAMILIA = re.compile(r"fam[ií]lia", re.I)
 _BLOQUEIO = re.compile(r"bloque", re.I)
@@ -36,6 +36,9 @@ class SessionContext:
     last_bairro: str = ""
     last_competencia: str = ""
     question_stem: str = ""
+    last_age_min: int | None = None
+    last_age_max: int | None = None
+    requires_pbf: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -44,6 +47,8 @@ class SessionContext:
     def from_dict(cls, data: dict[str, Any] | None) -> SessionContext:
         if not data:
             return cls()
+        age_min = data.get("last_age_min")
+        age_max = data.get("last_age_max")
         return cls(
             subject=str(data.get("subject") or ""),
             entity=str(data.get("entity") or ""),
@@ -52,6 +57,9 @@ class SessionContext:
             last_bairro=str(data.get("last_bairro") or ""),
             last_competencia=str(data.get("last_competencia") or ""),
             question_stem=str(data.get("question_stem") or ""),
+            last_age_min=int(age_min) if age_min is not None else None,
+            last_age_max=int(age_max) if age_max is not None else None,
+            requires_pbf=bool(data.get("requires_pbf")),
         )
 
     def has_data_thread(self) -> bool:
@@ -75,6 +83,10 @@ class SessionContext:
             lines.append(f"  - Bairro anterior: {self.last_bairro}")
         if self.last_competencia:
             lines.append(f"  - Competência anterior: {self.last_competencia}")
+        if self.last_age_min is not None and self.last_age_max is not None:
+            lines.append(f"  - Faixa etária ativa: {self.last_age_min} a {self.last_age_max} anos")
+        if self.requires_pbf:
+            lines.append("  - Cruzamento ativo: família na folha PBF (marc_pbf)")
         return "\n".join(lines)
 
 
@@ -223,6 +235,9 @@ def merge_context(stored: SessionContext, extracted: SessionContext) -> SessionC
         last_bairro=stored.last_bairro or extracted.last_bairro,
         last_competencia=stored.last_competencia or extracted.last_competencia,
         question_stem=stored.question_stem or extracted.question_stem,
+        last_age_min=stored.last_age_min if stored.last_age_min is not None else extracted.last_age_min,
+        last_age_max=stored.last_age_max if stored.last_age_max is not None else extracted.last_age_max,
+        requires_pbf=stored.requires_pbf or extracted.requires_pbf,
     )
 
 
@@ -304,6 +319,48 @@ def resolve_effective_question(
     return effective, ctx
 
 
+def apply_task_spec_to_session(
+    ctx: SessionContext,
+    task_spec: dict[str, Any] | None,
+    *,
+    filters_applied: str = "",
+) -> SessionContext:
+    """Persiste slots da QueryTaskSpec no Redis entre turnos."""
+    if not task_spec and not filters_applied:
+        return ctx
+
+    if task_spec:
+        recorte = task_spec.get("recorte")
+        if recorte == "mulher" and not ctx.subject:
+            ctx.subject = "mulheres"
+            ctx.entity = ctx.entity or "pessoas"
+        elif recorte == "homem" and not ctx.subject:
+            ctx.subject = "homens"
+            ctx.entity = ctx.entity or "pessoas"
+
+        age_min = task_spec.get("age_min")
+        age_max = task_spec.get("age_max")
+        if age_min is not None and age_max is not None:
+            ctx.last_age_min = int(age_min)
+            ctx.last_age_max = int(age_max)
+            label = f"idade {age_min} a {age_max} anos"
+            if label not in ctx.filters:
+                ctx.filters.append(label)
+
+        territory = task_spec.get("territory") or {}
+        if territory.get("kind") == "bairro" and territory.get("value"):
+            ctx.last_bairro = str(territory["value"])
+        elif territory.get("kind") == "cras" and territory.get("value"):
+            ctx.last_cras = str(territory["value"])
+
+        if task_spec.get("requires_pbf_folha"):
+            ctx.requires_pbf = True
+            if "família na folha PBF" not in ctx.filters:
+                ctx.filters.append("família na folha PBF")
+
+    return ctx
+
+
 def context_after_turn(
     message: str,
     effective_message: str,
@@ -311,6 +368,8 @@ def context_after_turn(
     prior: SessionContext,
     *,
     mode: str = "",
+    task_spec: dict[str, Any] | None = None,
+    filters_applied: str = "",
 ) -> SessionContext:
     """Atualiza slots após resposta de dados."""
     if mode in ("chat", "policy", "municipio", "disambiguation"):
@@ -318,10 +377,12 @@ def context_after_turn(
 
     from .bairro_resolver import extract_location_term
     from .followup_enrichment import bairro_from_transcript, territorial_term_from_message
+    from .territory_guard import is_cohort_followup, should_skip_bairro_resolution
 
+    cohort = is_cohort_followup(message)
     parsed = _parse_user_data_question(effective_message)
-    if parsed and not _is_cras_followup_only(message):
-        ctx = parsed
+    if parsed and not _is_cras_followup_only(message) and not cohort:
+        ctx = merge_context(prior, parsed)
     else:
         ctx = SessionContext(
             subject=prior.subject,
@@ -331,7 +392,12 @@ def context_after_turn(
             last_bairro=prior.last_bairro,
             last_competencia=prior.last_competencia,
             question_stem=prior.question_stem,
+            last_age_min=prior.last_age_min,
+            last_age_max=prior.last_age_max,
+            requires_pbf=prior.requires_pbf,
         )
+
+    ctx = apply_task_spec_to_session(ctx, task_spec, filters_applied=filters_applied)
 
     cras = _cras_from_text(answer) or _cras_from_text(effective_message) or parse_cras_followup(message)
     if cras:
@@ -340,9 +406,9 @@ def context_after_turn(
     bairro = (
         territorial_term_from_message(effective_message)
         or territorial_term_from_message(message)
-        or extract_location_term(effective_message)
-        or extract_location_term(message)
     )
+    if not should_skip_bairro_resolution(message):
+        bairro = bairro or extract_location_term(effective_message) or extract_location_term(message)
     if bairro:
         ctx.last_bairro = bairro
     else:
@@ -352,7 +418,9 @@ def context_after_turn(
         if from_transcript:
             ctx.last_bairro = from_transcript
 
-    if not ctx.question_stem and effective_message:
+    if cohort and prior.question_stem:
+        ctx.question_stem = prior.question_stem
+    elif not ctx.question_stem and effective_message:
         ctx.question_stem = effective_message.strip().rstrip("?.!")
 
     return ctx

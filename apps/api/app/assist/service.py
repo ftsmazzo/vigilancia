@@ -51,6 +51,8 @@ def chat_turn(
         result["answer"],
         stored_ctx,
         mode=str(result.get("mode") or ""),
+        task_spec=result.get("task_spec"),
+        filters_applied=str(result.get("filters_applied") or ""),
     )
     save_session_context(session.id, new_ctx.to_dict())
 

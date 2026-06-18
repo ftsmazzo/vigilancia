@@ -24,11 +24,21 @@ _IDOSO = re.compile(
     re.I,
 )
 _BAIRRO_SUGGEST = re.compile(
-    r"qual\s+bairro|bairro\s+(?:suger|indic|prioriz|deveria|recomend)|"
+    r"qual\s+bairro|bairro\s+(?:suger|indic|prioriz|deveria|recomend|"
+    r"op[cç][ãa]o|compromet|preocup)|"
     r"onde\s+(?:devo|deveria|priorizar|ir|atuar)|"
-    r"qual\s+bairro\s+suger",
+    r"qual\s+bairro\s+suger|"
+    r"(?:boa|melhor)\s+op[cç][ãa]o\s+(?:de\s+)?bairro|"
+    r"outro\s+bairro|mais\s+compromet|mais\s+preocup",
     re.I,
 )
+_TERRITORIAL_COMPARE = re.compile(
+    r"outro\s+bairro|mais\s+compromet|mais\s+preocup|"
+    r"sugere\s+outro|melhor\s+op[cç][ãa]o|"
+    r"ou\s+outro\s+bairro|perde\s+prioridade",
+    re.I,
+)
+_SIBEC_TOPIC = re.compile(r"\bbloque|sibec|manuten[cç]", re.I)
 
 
 def asks_bairro_direct(message: str) -> bool:
@@ -138,10 +148,29 @@ def is_pbf_desbloqueio_acao_turn(message: str, transcript: list[dict[str, str]] 
     text_msg = message.strip()
     if not text_msg:
         return False
+    if is_territorial_comparison_turn(text_msg, transcript) and _SIBEC_TOPIC.search(text_msg):
+        return True
     if _PBF_DESBLOQUEIO.search(text_msg):
         return True
     blob = user_messages_blob(transcript, text_msg)
     return bool(_PBF_DESBLOQUEIO.search(blob) and _BAIRRO_SUGGEST.search(text_msg))
+
+
+def is_territorial_comparison_turn(message: str, transcript: list[dict[str, str]] | None) -> bool:
+    """'Existe outro bairro mais comprometido que X?' após thread analítica."""
+    text_msg = message.strip()
+    if not text_msg or not _TERRITORIAL_COMPARE.search(text_msg):
+        return False
+    if _SIBEC_TOPIC.search(text_msg):
+        return True
+    if _CADU_ACAO.search(text_msg):
+        return True
+    blob = user_messages_blob(transcript, text_msg)
+    if transcript:
+        for msg in reversed(transcript):
+            if msg.get("role") == "assistant" and _SIBEC_TOPIC.search(msg.get("content", "")):
+                return True
+    return bool(planning_thread_active(transcript) and (_SIBEC_TOPIC.search(blob) or _CADU_ACAO.search(blob)))
 
 
 def is_planning_turn(message: str, transcript: list[dict[str, str]] | None) -> bool:
@@ -149,6 +178,8 @@ def is_planning_turn(message: str, transcript: list[dict[str, str]] | None) -> b
     if not text_msg:
         return False
     if is_planning_followup(text_msg, transcript):
+        return True
+    if is_territorial_comparison_turn(text_msg, transcript):
         return True
     if is_cadu_acao_turn(text_msg, transcript):
         return True
@@ -281,6 +312,15 @@ def build_thread_brief(
             lines.append(
                 "- Na síntese: **obrigatório** citar bloqueios SIBEC do bairro; carência SISC é complemento."
             )
+        elif is_territorial_comparison_turn(message, transcript):
+            lines.append(
+                "- Follow-up **comparativo territorial**: ranquear bairros e responder "
+                "se há opção mais crítica que a citada na conversa."
+            )
+            if _SIBEC_TOPIC.search(message):
+                lines.append("- Foco: **bloqueios SIBEC** por bairro (≠ folha PBF marc_pbf).")
+            elif _CADU_ACAO.search(message):
+                lines.append("- Foco: **CADU desatualizado / TAC** por bairro.")
         else:
             lines.append("- Assunto: planejamento territorial / **SCFV** (demanda potencial no CADU).")
         lines.append("- **NÃO** usar vig.mvw_sisc_qualificado salvo pedido explícito de matrícula existente.")

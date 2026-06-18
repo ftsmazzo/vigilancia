@@ -219,6 +219,12 @@ def _parse_age_from_session_filters(filters: list[str]) -> AgeRange | None:
     return None
 
 
+def _parse_age_from_session_ctx(ctx: SessionContext) -> AgeRange | None:
+    if ctx.last_age_min is not None and ctx.last_age_max is not None:
+        return AgeRange(ctx.last_age_min, ctx.last_age_max)
+    return _parse_age_from_session_filters(ctx.filters)
+
+
 def _parse_territory(text: str, ctx: SessionContext | None) -> TerritorySpec | None:
     from .territory_guard import familia_as_data_entity, should_skip_bairro_resolution
 
@@ -275,12 +281,16 @@ def extract_task_spec(
         metric = MetricKind.VALIDATE
 
     cohort = bool(_COHORT.search(text_msg))
-    requires_pbf = bool(_PBF.search(text_msg) and re.search(r"\bfam[ií]lias?\b", text_msg, re.I))
+    requires_pbf = bool(
+        _PBF.search(text_msg)
+        and (
+            re.search(r"\bfam[ií]lias?\b", text_msg, re.I)
+            or ctx.requires_pbf
+        )
+    )
 
     recorte = detect_person_recorte(text_msg)
-    age_range = _parse_age_from_text(text_msg, transcript) or _parse_age_from_session_filters(
-        ctx.filters
-    )
+    age_range = _parse_age_from_text(text_msg, transcript) or _parse_age_from_session_ctx(ctx)
 
     if age_range and recorte and recorte.key in ("idoso", "crianca", "adolescente", "fora_escola"):
         recorte = _SEX_FEM.search(text_msg) and detect_person_recorte(text_msg) or recorte
@@ -340,7 +350,7 @@ def merge_task_spec_with_session(
     transcript: list[dict[str, str]] | None = None,
 ) -> QueryTaskSpec:
     """Acumula filtros da sessão — não descarta faixa etária ao mudar território."""
-    age = spec.age_range or _parse_age_from_session_filters(ctx.filters)
+    age = spec.age_range or _parse_age_from_session_ctx(ctx)
     if not age and ctx.question_stem:
         age = _parse_age_from_text(ctx.question_stem, transcript)
 
@@ -352,7 +362,9 @@ def merge_task_spec_with_session(
         from .cadu_pessoas_metrics import _recorte_homem
         recorte = _recorte_homem()
 
-    requires_pbf = spec.requires_pbf_folha or bool(_PBF.search(spec.original_question or ""))
+    requires_pbf = spec.requires_pbf_folha or ctx.requires_pbf or bool(
+        _PBF.search(spec.original_question or "")
+    )
 
     territory = spec.territory
     if not territory or territory.kind == TerritoryKind.MUNICIPIO:
@@ -369,6 +381,9 @@ def merge_task_spec_with_session(
     if age and not spec.age_range:
         filter_labels.append(f"idade {age.label()}")
 
+    if requires_pbf and "família na folha PBF" not in filter_labels:
+        filter_labels.append("família na folha PBF")
+
     stem = ctx.question_stem or spec.original_question
     return replace(
         spec,
@@ -377,7 +392,7 @@ def merge_task_spec_with_session(
         territory=territory or spec.territory,
         filter_labels=list(dict.fromkeys(filter_labels)),
         original_question=spec.original_question or stem,
-        requires_pbf_folha=requires_pbf or spec.requires_pbf_folha,
+        requires_pbf_folha=requires_pbf,
         cohort_followup=spec.cohort_followup or bool(_COHORT.search(spec.original_question or "")),
     )
 
