@@ -6,6 +6,7 @@ e verificável, sem depender de regex por frase.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from sqlalchemy import text
@@ -15,7 +16,13 @@ from ..vigilance.familia_mview import _table_exists
 from .bairro_resolver import _pick_variant, _prefix_name
 from .cadu_pessoas_metrics import PersonRecorte, _QUANT, _FAMILIA, _PESSOA, wants_familia_count
 from .cadu_territory import CaduTerritory, resolve_cadu_territory, territory_sql_where
+from .cras_breakdown import format_cras_breakdown_answer, sort_cras_rows
 from .query_task_spec import EntityKind, MetricKind, QueryTaskSpec, TerritoryKind
+
+_CHILD = re.compile(r"\bcrian[cç]as?\b", re.I)
+_CRAS_BREAKDOWN = re.compile(
+    r"por\s+cras|por\s+cada\s+cras|distribu|desdobr", re.I
+)
 
 
 def _fmt_int(n: int) -> str:
@@ -24,6 +31,15 @@ def _fmt_int(n: int) -> str:
 
 def _spec_needs_execution(spec: QueryTaskSpec, message: str) -> bool:
     text_msg = (message or "").strip()
+    if spec.wants_cras_breakdown():
+        return bool(
+            spec.age_range
+            or spec.person_recorte
+            or spec.requires_pbf_folha
+            or _PESSOA.search(text_msg)
+            or _FAMILIA.search(text_msg)
+            or _CRAS_BREAKDOWN.search(text_msg)
+        )
     if spec.metric == MetricKind.VALIDATE:
         return bool(spec.person_recorte or spec.age_range or spec.territory or spec.requires_pbf_folha)
     if not spec.is_cadu_person_query() and not spec.requires_pbf_folha:
@@ -74,7 +90,10 @@ def _build_predicates(spec: QueryTaskSpec) -> tuple[list[str], list[str], list[s
 
     if spec.age_range:
         preds.append(spec.age_range.sql_between())
-        labels.append(f"idade {spec.age_range.label()}")
+        if _CHILD.search(spec.original_question):
+            labels.append(f"crianças de {spec.age_range.label()}")
+        else:
+            labels.append(f"idade {spec.age_range.label()}")
 
     if spec.requires_pbf_folha:
         fam_preds.append("COALESCE(f.marc_pbf, false) = true")
@@ -105,6 +124,126 @@ def _count_pessoas_composed(
         params,
     ).mappings().first()
     return int((row or {}).get("total") or 0)
+
+
+_CRAS_ORDER = """
+        ORDER BY
+            CASE
+                WHEN f.num_cras IS NULL OR btrim(COALESCE(f.num_cras::text, '')) = '' THEN 9999
+                ELSE NULLIF(regexp_replace(btrim(f.num_cras::text), '[^0-9].*', ''), '')::int
+            END NULLS LAST,
+            f.nom_cras
+"""
+
+
+def _count_pessoas_por_cras(
+    conn: Connection,
+    *,
+    preds: list[str],
+    fam_preds: list[str],
+) -> list[dict[str, Any]]:
+    where_person = " AND ".join(preds) if preds else "TRUE"
+    where_fam = " AND ".join(fam_preds) if fam_preds else "TRUE"
+    rows = conn.execute(
+        text(
+            f"""
+            SELECT
+                f.num_cras,
+                f.nom_cras,
+                COUNT(p.cadu_row_id)::bigint AS total_pessoas
+            FROM vig.mvw_pessoas p
+            INNER JOIN vig.mvw_familia f ON f.codigo_familiar = p.codigo_familiar
+            WHERE {where_person} AND {where_fam}
+            GROUP BY f.num_cras, f.nom_cras
+            {_CRAS_ORDER}
+            """
+        )
+    ).mappings().all()
+    return [dict(r) for r in rows]
+
+
+def _count_familias_por_cras(
+    conn: Connection,
+    *,
+    preds: list[str],
+    fam_preds: list[str],
+) -> list[dict[str, Any]]:
+    where_person = " AND ".join(preds) if preds else "TRUE"
+    where_fam = " AND ".join(fam_preds) if fam_preds else "TRUE"
+    rows = conn.execute(
+        text(
+            f"""
+            SELECT
+                f.num_cras,
+                f.nom_cras,
+                COUNT(DISTINCT f.codigo_familiar)::bigint AS total_familias
+            FROM vig.mvw_familia f
+            WHERE {where_fam}
+              AND EXISTS (
+                SELECT 1 FROM vig.mvw_pessoas p
+                WHERE p.codigo_familiar = f.codigo_familiar
+                  AND {where_person}
+              )
+            GROUP BY f.num_cras, f.nom_cras
+            {_CRAS_ORDER}
+            """
+        )
+    ).mappings().all()
+    return [dict(r) for r in rows]
+
+
+def _metric_label_for_cras(spec: QueryTaskSpec, labels: list[str]) -> tuple[str, str]:
+    """Retorna (metric_label, unit) para formatação do desdobramento."""
+    if labels:
+        lead = labels[0]
+        if lead.startswith("crianças de "):
+            return lead, "crianças"
+        if spec.entity == EntityKind.FAMILIA:
+            return lead if "família" in lead.lower() else f"{lead} (famílias)", "famílias"
+        return lead, "pessoas"
+    unit = "famílias" if spec.entity == EntityKind.FAMILIA else "pessoas"
+    return f"{unit} do Cadastro Único", unit
+
+
+def _format_cras_spec_answer(
+    *,
+    spec: QueryTaskSpec,
+    rows: list[dict[str, Any]],
+    labels: list[str],
+    user_first_name: str,
+) -> str:
+    metric_label, unit = _metric_label_for_cras(spec, labels)
+    return format_cras_breakdown_answer(
+        rows,
+        user_first_name=user_first_name,
+        metric_label=metric_label,
+        unit=unit,
+    )
+
+
+def _build_cras_sql_preview(
+    *,
+    spec: QueryTaskSpec,
+    preds: list[str],
+    fam_preds: list[str],
+    familia: bool,
+) -> str:
+    where_person = " AND ".join(preds) if preds else "TRUE"
+    where_fam = " AND ".join(fam_preds) if fam_preds else "TRUE"
+    if familia:
+        return (
+            "SELECT f.num_cras, f.nom_cras, COUNT(DISTINCT f.codigo_familiar) "
+            "FROM vig.mvw_familia f WHERE "
+            f"{where_fam} AND EXISTS (SELECT 1 FROM vig.mvw_pessoas p "
+            f"WHERE p.codigo_familiar = f.codigo_familiar AND {where_person}) "
+            "GROUP BY f.num_cras, f.nom_cras"
+        )
+    return (
+        "SELECT f.num_cras, f.nom_cras, COUNT(p.cadu_row_id) "
+        "FROM vig.mvw_pessoas p INNER JOIN vig.mvw_familia f "
+        f"ON f.codigo_familiar = p.codigo_familiar WHERE {where_person} AND {where_fam} "
+        "GROUP BY f.num_cras, f.nom_cras"
+    )
 
 
 def _count_familias_composed(
@@ -223,6 +362,37 @@ def try_execute_cadu_spec(
     if not _table_exists(conn, "vig", "mvw_familia") or not _table_exists(conn, "vig", "mvw_pessoas"):
         return None
 
+    preds, fam_preds, labels = _build_predicates(spec)
+    familia = spec.entity == EntityKind.FAMILIA or wants_familia_count(text_msg)
+
+    if spec.wants_cras_breakdown():
+        if not preds and not fam_preds:
+            return None
+        if familia:
+            rows = _count_familias_por_cras(conn, preds=preds, fam_preds=fam_preds)
+        else:
+            rows = _count_pessoas_por_cras(conn, preds=preds, fam_preds=fam_preds)
+        if not rows:
+            return None
+        sql = _build_cras_sql_preview(
+            spec=spec, preds=preds, fam_preds=fam_preds, familia=familia
+        )
+        answer = _format_cras_spec_answer(
+            spec=spec, rows=rows, labels=labels, user_first_name=user_first_name
+        )
+        return {
+            "answer": answer,
+            "sql": sql,
+            "row_count": len(rows),
+            "preview": sort_cras_rows(rows),
+            "mode": "canonical",
+            "metric": "cadu_spec_cras_breakdown",
+            "task_spec": spec.to_dict(),
+            "filters_applied": spec.applied_filters_summary(),
+            "use_analyst": False,
+            "response_mode": "ranking",
+        }
+
     resolved = _resolve_territory(conn, text_msg, spec, user_first_name=user_first_name)
     if resolved is None:
         return None
@@ -230,11 +400,12 @@ def try_execute_cadu_spec(
         return resolved
     terr = resolved
 
-    preds, fam_preds, labels = _build_predicates(spec)
+    if not preds and not fam_preds:
+        preds, fam_preds, labels = _build_predicates(spec)
+
     if not preds and not fam_preds:
         return None
 
-    familia = spec.entity == EntityKind.FAMILIA or wants_familia_count(text_msg)
     if familia:
         total = _count_familias_composed(conn, preds=preds, terr=terr)
     else:

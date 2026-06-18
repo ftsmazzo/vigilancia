@@ -77,7 +77,11 @@ def sort_cras_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(rows, key=sort_key)
 
 
-def format_cras_breakdown_summary(rows: list[dict[str, Any]]) -> str:
+def format_cras_breakdown_summary(
+    rows: list[dict[str, Any]],
+    *,
+    unit: str = "famílias",
+) -> str:
     """Texto completo para o Orquestrador (todas as linhas, ordem numérica)."""
     if not rows:
         return "Nenhum CRAS encontrado."
@@ -102,12 +106,12 @@ def format_cras_breakdown_summary(rows: list[dict[str, Any]]) -> str:
             short = nome.replace("AREA DO CRAS ", "Área ").replace("AREA DO ", "")
             label = f"{label} — {short}"
 
-        lines.append(f"- {label}: {_fmt_int(total)} famílias")
+        lines.append(f"- {label}: {_fmt_int(total)} {unit}")
 
     body = "\n".join(lines)
     if sem_ref:
         body += (
-            f"\n- **Sem referência territorial de CRAS:** {_fmt_int(sem_ref)} famílias"
+            f"\n- **Sem referência territorial de CRAS:** {_fmt_int(sem_ref)} {unit}"
         )
     return body
 
@@ -118,12 +122,13 @@ def format_cras_breakdown_answer(
     user_first_name: str = "",
     municipio_nome: str = "",
     metric_label: str = "famílias do Cadastro Único",
+    unit: str = "famílias",
     intro: str | None = None,
 ) -> str:
     """Resposta humanizada determinística — lista todos os CRAS, sem truncar."""
     sorted_rows = sort_cras_rows(rows)
     total_geral = sum(_count_column(r)[1] for r in sorted_rows)
-    summary = format_cras_breakdown_summary(rows)
+    summary = format_cras_breakdown_summary(rows, unit=unit)
 
     who = f"{user_first_name}, " if user_first_name else ""
     where = f" em {municipio_nome}" if municipio_nome else ""
@@ -138,8 +143,9 @@ def format_cras_breakdown_answer(
         )
 
     foot = (
-        "\n\nEsse indicador mostra a concentração de famílias em cada área de abrangência "
-        "dos CRAS. Famílias sem vínculo territorial aparecem como **sem referência territorial**."
+        "\n\nEsse indicador mostra a concentração de "
+        f"{unit} em cada área de abrangência dos CRAS. "
+        f"{unit.capitalize()} sem vínculo territorial aparecem como **sem referência territorial**."
     )
 
     return f"{lead}\n\n{summary}{foot}"

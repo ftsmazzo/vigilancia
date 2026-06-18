@@ -6,7 +6,10 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-_DATA_Q = re.compile(r"quantas?|quantos?|total|n[uú]mero", re.I)
+_DATA_Q = re.compile(
+    r"quantas?|quantos?|total|n[uú]mero|distribu|qual\s+a\s+distribu|consegue\s+me\s+passar",
+    re.I,
+)
 _FOLLOWUP_CRAS = re.compile(
     r"^(?:e\s+)?(?:no|na|em)\s+(?:cras\s*)?(\d{1,2})\s*\??\.?$",
     re.I,
@@ -170,6 +173,23 @@ def _last_user_data_question(transcript: list[dict[str, str]] | None) -> str:
     return ""
 
 
+_CRAS_BREAKDOWN_FOLLOWUP = re.compile(
+    r"por\s+cada\s+cras|cada\s+cras|passar?\s+(?:esse|o)\s+n[úu]mero|desdobr|detalh",
+    re.I,
+)
+
+
+def _is_cras_breakdown_followup_only(message: str) -> bool:
+    text = message.strip()
+    if not text:
+        return False
+    if _CRAS_BREAKDOWN_FOLLOWUP.search(text) and not re.search(
+        r"quantas?|quantos?|distribu", text, re.I
+    ):
+        return True
+    return False
+
+
 def _is_cras_followup_only(message: str) -> bool:
     text = message.strip()
     if _FOLLOWUP_CRAS.match(text):
@@ -314,7 +334,7 @@ def resolve_effective_question(
     effective, ctx = enrich_effective_question(working, ctx, transcript)
 
     parsed = _parse_user_data_question(effective)
-    if parsed and not _is_cras_followup_only(message):
+    if parsed and not _is_cras_followup_only(message) and not _is_cras_breakdown_followup_only(message):
         ctx = merge_context(ctx, parsed)
     return effective, ctx
 
@@ -344,8 +364,18 @@ def apply_task_spec_to_session(
             ctx.last_age_min = int(age_min)
             ctx.last_age_max = int(age_max)
             label = f"idade {age_min} a {age_max} anos"
+            if ctx.subject == "crianças":
+                label = f"crianças de {age_min} a {age_max} anos"
             if label not in ctx.filters:
                 ctx.filters.append(label)
+
+        if task_spec.get("breakdown") == "cras" and ctx.subject == "crianças":
+            pass
+        elif recorte == "crianca" or (
+            age_min is not None and ctx.subject == "" and task_spec.get("breakdown") != "cras"
+        ):
+            ctx.subject = ctx.subject or "crianças"
+            ctx.entity = ctx.entity or "pessoas"
 
         territory = task_spec.get("territory") or {}
         if territory.get("kind") == "bairro" and territory.get("value"):
@@ -381,7 +411,7 @@ def context_after_turn(
 
     cohort = is_cohort_followup(message)
     parsed = _parse_user_data_question(effective_message)
-    if parsed and not _is_cras_followup_only(message) and not cohort:
+    if parsed and not _is_cras_followup_only(message) and not _is_cras_breakdown_followup_only(message) and not cohort:
         ctx = merge_context(prior, parsed)
     else:
         ctx = SessionContext(

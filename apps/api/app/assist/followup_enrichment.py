@@ -35,7 +35,10 @@ _MANUT = re.compile(
     r"manuten[cç]|sibec|bloque|cancel|bolsa\s+fam|pbf",
     re.I,
 )
-_BLOQUEIO = re.compile(r"bloque", re.I)
+_CRAS_FOLLOWUP = re.compile(
+    r"por\s+cada\s+cras|cada\s+cras|passar?\s+(?:esse|o)\s+n[úu]mero|desdobr|detalh",
+    re.I,
+)
 _CANCEL = re.compile(r"cancel", re.I)
 
 
@@ -179,6 +182,41 @@ def reformulate_sibec_yesno(
     return f"Quantos {action} no município"
 
 
+def reformulate_cras_breakdown_followup(
+    message: str,
+    ctx: SessionContext,
+    transcript: list[dict[str, str]] | None,
+) -> str | None:
+    """'por cada CRAS?' → recompõe pergunta-base com desdobramento territorial."""
+    text_msg = (message or "").strip()
+    if not _CRAS_FOLLOWUP.search(text_msg):
+        return None
+    if not ctx.has_data_thread() and not transcript:
+        return None
+
+    stem = ctx.question_stem
+    if stem:
+        if re.search(r"por\s+cras|distribu", stem, re.I):
+            return stem.rstrip("?.!")
+        return f"{stem.rstrip('?.!')} por CRAS"
+
+    parts: list[str] = ["Qual a distribuição de"]
+    if ctx.subject == "crianças":
+        parts.append("crianças")
+    elif ctx.subject == "mulheres":
+        parts.append("mulheres")
+    elif ctx.subject == "homens":
+        parts.append("homens")
+    elif ctx.subject:
+        parts.append(ctx.subject)
+    else:
+        parts.append("pessoas")
+    if ctx.last_age_min is not None and ctx.last_age_max is not None:
+        parts.append(f"de {ctx.last_age_min} a {ctx.last_age_max} anos")
+    parts.append("por CRAS no município")
+    return " ".join(parts)
+
+
 def enrich_effective_question(
     message: str,
     ctx: SessionContext,
@@ -199,7 +237,11 @@ def enrich_effective_question(
             question_stem=ctx.question_stem,
         )
 
-    for reformulator in (reformulate_territorial_followup, reformulate_sibec_yesno):
+    for reformulator in (
+        reformulate_cras_breakdown_followup,
+        reformulate_territorial_followup,
+        reformulate_sibec_yesno,
+    ):
         rebuilt = reformulator(message, updated, transcript)
         if rebuilt:
             return rebuilt.rstrip("?.!") + "?", updated
