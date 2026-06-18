@@ -3,11 +3,8 @@
 Pipeline autônomo (4 fases):
   1. Planejador LLM + TaskSpec (intenção tipada, memória de sessão)
   2. Maestro → roteamento por especialista
-  3. Executor verificável (SQL composicional / canônico / AgenteSQL)
+  3. AgenteSQL primeiro; atalhos SQL verificados só em fallback
   4. Síntese analítica generativa — sempre a partir de evidência, nunca template fixo
-
-Especialistas:
-  - Políticas, Município, Vigilância (CADU + camadas), Síntese
 """
 
 from __future__ import annotations
@@ -21,7 +18,6 @@ from sqlalchemy.orm import Session
 
 from ..models import User
 from ..municipio_context import load_context_prompt
-from .cras_breakdown import format_cras_breakdown_answer
 from .bairro_resolver import (
     BairroPreprocess,
     apply_bairro_correction_to_answer,
@@ -43,7 +39,7 @@ from .conversation_intent import (
     is_planning_coverage_followup,
     planning_thread_active,
 )
-from .evidence import pack_from_canonical, pack_from_sql
+from .evidence import EvidenceFact, EvidencePack, pack_from_canonical, pack_from_sql
 from .kb_client import query_knowledge_base
 from .llm import chat_completion
 from .maestro_router import resolve_turn_route
@@ -51,7 +47,7 @@ from .municipio_agent import run_municipio_agent
 from .planning_metrics import try_planning_demand_metric
 from .policy_agent import run_policy_agent
 from .query_task_spec import (
-    MetricKind,
+    QueryTaskSpec,
     extract_task_spec,
     legacy_cadu_recorte_covers_spec,
     merge_task_spec_with_session,
@@ -97,37 +93,6 @@ Converse de forma cordial, clara e profissional em português do Brasil.
 - Não invente estatísticas — se pedirem números, diga que pode consultar o CADU e sugira uma pergunta objetiva
 - Respostas curtas (2–4 parágrafos no máximo)
 """
-
-ORCHESTRATOR_FINALIZE_SYSTEM = """Você é VigIA. Transforme o resultado numérico do AgenteSQL em resposta humanizada.
-
-- Trate o usuário pelo primeiro nome (uma vez só)
-- Responda APENAS o que foi perguntado — sem explicações extras, sem metodologia, sem fontes técnicas
-- 1–2 frases diretas com o número principal
-- Tom cordial e profissional
-- NÃO liste outros CRAS/bairros salvo se o usuário pediu ranking ou comparação
-- NÃO corrija grafia de bairro nem mencione bairro se a pergunta não citou território
-- NÃO adicione parágrafo sobre PBF, SISC, CADU ou definições de indicador
-- NÃO mostre SQL, JSON, nomes de campos/tabelas nem siglas de banco
-- Use APENAS números presentes nos resultados fornecidos
-- Se o resultado for desdobramento por CRAS pedido explicitamente: liste na ordem numérica
-"""
-
-def _municipio_nome(municipio_block: str) -> str:
-    m = re.search(r"Município:\s*\*\*([^*]+)\*\*", municipio_block)
-    return m.group(1).strip() if m else ""
-
-
-def _cras_answer_with_context(
-    rows: list[dict[str, Any]],
-    user: User,
-    municipio_block: str,
-) -> str:
-    return format_cras_breakdown_answer(
-        rows,
-        user_first_name=_first_name(user.name),
-        municipio_nome=_municipio_nome(municipio_block),
-    )
-
 
 def _first_name(full_name: str | None) -> str:
     if not full_name:
@@ -241,56 +206,6 @@ def _answer_via_analyst(
     )
 
 
-def _finalize_data_reply(
-    message: str,
-    transcript: list[dict[str, str]],
-    sql_question: str,
-    sql_result: SqlAgentResult,
-    user_block: str,
-) -> str:
-    if not sql_result.ok:
-        # Resposta amigável mesmo em falha
-        fail_messages: list[dict[str, str]] = [
-            {
-                "role": "system",
-                "content": (
-                    ORCHESTRATOR_FINALIZE_SYSTEM
-                    + "\n\nO AgenteSQL não conseguiu obter o dado. Explique com empatia, "
-                    "sugira reformular a pergunta ou ser mais específico (CRAS, PBF, faixa etária). "
-                    "Não repita erro técnico cru."
-                )
-                + (f"\n\n{user_block}" if user_block else ""),
-            },
-            *transcript,
-            {
-                "role": "user",
-                "content": (
-                    f"Pergunta original: {message}\n"
-                    f"Pedido ao AgenteSQL: {sql_question}\n"
-                    f"Problema: {sql_result.error}"
-                ),
-            },
-        ]
-        return _trim_answer_boilerplate(chat_completion(fail_messages, temperature=0.4, role="orch").strip())
-
-    messages: list[dict[str, str]] = [
-        {
-            "role": "system",
-            "content": ORCHESTRATOR_FINALIZE_SYSTEM + (f"\n\n{user_block}" if user_block else ""),
-        },
-        *transcript,
-        {
-            "role": "user",
-            "content": (
-                f"Pergunta do usuário: {message}\n"
-                f"Consulta formulada: {sql_question}\n"
-                f"Resultado AgenteSQL ({sql_result.row_count} linha(s)): {sql_result.summary}"
-            ),
-        },
-    ]
-    return _trim_answer_boilerplate(chat_completion(messages, temperature=0.35, role="orch").strip())
-
-
 def _run_sql_agent_turn(
     conn: Connection,
     db: Session,
@@ -354,6 +269,335 @@ def _run_sql_agent_turn(
     }
 
 
+def _data_payload(
+    answer: str,
+    *,
+    effective_message: str,
+    task_spec: QueryTaskSpec,
+    **extra: Any,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "answer": _trim_answer_boilerplate(answer),
+        "effective_message": effective_message,
+        "task_spec": task_spec.to_dict(),
+        **extra,
+    }
+    return payload
+
+
+def _canonical_via_analyst(
+    data_message: str,
+    canonical: dict[str, Any],
+    *,
+    conn: Connection,
+    db: Session,
+    transcript: list[dict[str, str]],
+    user: User,
+    first_name: str,
+    route: Any,
+    municipio_block: str,
+    rag_block: str,
+    merged_ctx: SessionContext,
+    bairro_resolution: Any,
+    message: str,
+    effective_message: str,
+    task_spec: QueryTaskSpec,
+) -> dict[str, Any]:
+    if canonical.get("mode") == "disambiguation":
+        answer = canonical.get("answer") or ""
+        if not answer.strip():
+            pack = pack_from_canonical(data_message, canonical, thread_brief=route.thread_brief)
+            answer = interpret_evidence(
+                pack,
+                user_first_name=first_name,
+                conn=conn,
+                db=db,
+                municipio_block=municipio_block,
+                rag_block=rag_block,
+            )
+        else:
+            answer = _personalize_canonical(answer, user)
+        return _data_payload(
+            answer,
+            effective_message=effective_message,
+            task_spec=task_spec,
+            sql=canonical.get("sql"),
+            row_count=canonical.get("row_count", 0),
+            preview=canonical.get("preview") or [],
+            mode=canonical.get("mode", "disambiguation"),
+        )
+
+    answer = _answer_via_analyst(
+        data_message,
+        canonical,
+        conn=conn,
+        db=db,
+        transcript=transcript,
+        user_first_name=first_name,
+        thread_brief=route.thread_brief,
+        municipio_block=municipio_block,
+        rag_block=rag_block,
+        session_context=merged_ctx,
+    )
+    skip_bairro_wrap = canonical.get("metric", "").startswith(("planning_", "ivs_"))
+    if not skip_bairro_wrap:
+        answer = apply_bairro_correction_to_answer(
+            answer, bairro_resolution, first_name, message=message
+        )
+    return _data_payload(
+        answer,
+        effective_message=effective_message,
+        task_spec=task_spec,
+        sql=canonical.get("sql"),
+        row_count=canonical.get("row_count", 0),
+        preview=canonical.get("preview") or [],
+        mode=canonical.get("mode", "canonical"),
+        filters_applied=canonical.get("filters_applied"),
+    )
+
+
+def _try_fast_data_executors(
+    conn: Connection,
+    db: Session,
+    *,
+    data_message: str,
+    message: str,
+    transcript: list[dict[str, str]],
+    task_spec: QueryTaskSpec,
+    route: Any,
+    user: User,
+    first_name: str,
+    municipio_block: str,
+    rag_block: str,
+    merged_ctx: SessionContext,
+    bairro_resolution: Any,
+    effective_message: str,
+) -> dict[str, Any] | None:
+    """Atalhos SQL verificados — só quando o AgenteSQL não respondeu."""
+    if not task_spec.skip_cadu_spec_executor():
+        cadu_spec = try_execute_cadu_spec(
+            conn, task_spec, data_message, user_first_name=first_name
+        )
+        if cadu_spec:
+            if cadu_spec.get("mode") == "disambiguation":
+                return _data_payload(
+                    cadu_spec.get("answer") or "",
+                    effective_message=effective_message,
+                    task_spec=task_spec,
+                    sql=cadu_spec.get("sql"),
+                    row_count=cadu_spec.get("row_count", 0),
+                    preview=cadu_spec.get("preview") or [],
+                    mode="disambiguation",
+                )
+            answer = _answer_via_analyst(
+                data_message,
+                cadu_spec,
+                conn=conn,
+                db=db,
+                transcript=transcript,
+                user_first_name=first_name,
+                thread_brief=route.thread_brief,
+                municipio_block=municipio_block,
+                rag_block=rag_block,
+                session_context=merged_ctx,
+            )
+            return _data_payload(
+                answer,
+                effective_message=effective_message,
+                task_spec=task_spec,
+                sql=cadu_spec.get("sql"),
+                row_count=cadu_spec.get("row_count", 0),
+                preview=cadu_spec.get("preview") or [],
+                mode=cadu_spec.get("mode", "canonical"),
+                filters_applied=cadu_spec.get("filters_applied"),
+            )
+
+    canonical = try_canonical_metric(
+        conn,
+        data_message,
+        transcript,
+        db=db,
+        user_first_name=first_name,
+        block_sisc=route.block_sisc,
+    )
+    if canonical:
+        return _canonical_via_analyst(
+            data_message,
+            canonical,
+            conn=conn,
+            db=db,
+            transcript=transcript,
+            user=user,
+            first_name=first_name,
+            route=route,
+            municipio_block=municipio_block,
+            rag_block=rag_block,
+            merged_ctx=merged_ctx,
+            bairro_resolution=bairro_resolution,
+            message=message,
+            effective_message=effective_message,
+            task_spec=task_spec,
+        )
+
+    if not task_spec.person_recorte and not task_spec.age_range:
+        pessoas_bairro = try_pessoas_bairro_metric(conn, data_message, first_name)
+        if pessoas_bairro:
+            if pessoas_bairro.get("mode") == "disambiguation":
+                return _data_payload(
+                    pessoas_bairro.get("answer") or "",
+                    effective_message=effective_message,
+                    task_spec=task_spec,
+                    sql=None,
+                    row_count=0,
+                    preview=pessoas_bairro.get("preview") or [],
+                    mode="disambiguation",
+                )
+            answer = _answer_via_analyst(
+                data_message,
+                pessoas_bairro,
+                conn=conn,
+                db=db,
+                transcript=transcript,
+                user_first_name=first_name,
+                thread_brief=route.thread_brief,
+                municipio_block=municipio_block,
+                rag_block=rag_block,
+                session_context=merged_ctx,
+            )
+            return _data_payload(
+                answer,
+                effective_message=effective_message,
+                task_spec=task_spec,
+                sql=pessoas_bairro.get("sql"),
+                row_count=pessoas_bairro.get("row_count", 0),
+                preview=pessoas_bairro.get("preview") or [],
+                mode=pessoas_bairro.get("mode", "canonical"),
+            )
+
+    if legacy_cadu_recorte_covers_spec(task_spec):
+        cadu_pessoas = try_cadu_pessoas_recorte_metric(
+            conn, data_message, user_first_name=first_name
+        )
+        if cadu_pessoas:
+            answer = _answer_via_analyst(
+                data_message,
+                cadu_pessoas,
+                conn=conn,
+                db=db,
+                transcript=transcript,
+                user_first_name=first_name,
+                thread_brief=route.thread_brief,
+                municipio_block=municipio_block,
+                rag_block=rag_block,
+                session_context=merged_ctx,
+            )
+            return _data_payload(
+                answer,
+                effective_message=effective_message,
+                task_spec=task_spec,
+                sql=cadu_pessoas.get("sql"),
+                row_count=cadu_pessoas.get("row_count", 0),
+                preview=cadu_pessoas.get("preview") or [],
+                mode=cadu_pessoas.get("mode", "canonical"),
+            )
+
+    return None
+
+
+def _run_data_pipeline_sql_first(
+    conn: Connection,
+    db: Session,
+    *,
+    data_message: str,
+    message: str,
+    transcript: list[dict[str, str]],
+    task_spec: QueryTaskSpec,
+    route: Any,
+    user: User,
+    first_name: str,
+    municipio_block: str,
+    rag_block: str,
+    merged_ctx: SessionContext,
+    bairro_resolution: Any,
+    effective_message: str,
+) -> dict[str, Any] | None:
+    """AgenteSQL primeiro; atalhos verificados só em fallback."""
+    sql_result = _run_sql_agent_turn(
+        conn,
+        db,
+        data_message,
+        message,
+        transcript,
+        task_spec=task_spec,
+        thread_brief=route.thread_brief,
+        user_first_name=first_name,
+        municipio_block=municipio_block,
+        rag_block=rag_block,
+        bairro_resolution=bairro_resolution,
+    )
+    if sql_result:
+        return {
+            **sql_result,
+            "effective_message": effective_message,
+            "task_spec": task_spec.to_dict(),
+        }
+
+    return _try_fast_data_executors(
+        conn,
+        db,
+        data_message=data_message,
+        message=message,
+        transcript=transcript,
+        task_spec=task_spec,
+        route=route,
+        user=user,
+        first_name=first_name,
+        municipio_block=municipio_block,
+        rag_block=rag_block,
+        merged_ctx=merged_ctx,
+        bairro_resolution=bairro_resolution,
+        effective_message=effective_message,
+    )
+
+
+def _sql_failure_answer(
+    data_message: str,
+    sql_result: SqlAgentResult,
+    *,
+    conn: Connection,
+    db: Session,
+    first_name: str,
+    municipio_block: str,
+    rag_block: str,
+    thread_brief: str,
+) -> str:
+    facts: list[EvidenceFact] = []
+    if sql_result.error:
+        facts.append(
+            EvidenceFact(
+                label="Consulta não concluída",
+                value=sql_result.error[:300],
+                source="AgenteSQL",
+            )
+        )
+    pack = EvidencePack(
+        question=data_message,
+        thread_brief=thread_brief,
+        facts=facts,
+        sql=sql_result.sql,
+        metric="sql_agent",
+        mode="data",
+    )
+    return interpret_evidence(
+        pack,
+        user_first_name=first_name,
+        conn=conn,
+        db=db,
+        municipio_block=municipio_block,
+        rag_block=rag_block,
+    )
+
+
 def _personalize_canonical(answer: str, user: User) -> str:
     first = _first_name(user.name)
     if not first or answer.startswith(first):
@@ -379,7 +623,7 @@ def run_orchestrator_turn(
 ) -> dict[str, Any]:
     """
     Pipeline VigIA:
-    Maestro → Políticas | Município | Vigilância (CADU + camadas) → Síntese analítica
+    Políticas | Município | Planejamento → dados SQL-first → síntese analítica
     """
     effective_message, merged_ctx = resolve_effective_question(
         message,
@@ -455,125 +699,6 @@ def run_orchestrator_turn(
                 "mode": "data",
             }
 
-    if route.skip_bairro_preprocess:
-        bairro_pre = BairroPreprocess(message=message)
-    else:
-        bairro_pre = preprocess_bairro_turn(conn, first_name, message, transcript)
-    if bairro_pre.early_response:
-        return {
-            **bairro_pre.early_response,
-            "answer": _trim_answer_boilerplate(bairro_pre.early_response["answer"]),
-        }
-    message = bairro_pre.message
-    bairro_resolution = bairro_pre.resolution
-
-    cadu_spec = None
-    if not task_spec.skip_cadu_spec_executor():
-        cadu_spec = try_execute_cadu_spec(
-            conn, task_spec, data_message, user_first_name=first_name
-        )
-    elif task_spec.needs_free_sql() or task_spec.mentions_sibec():
-        canonical_early = try_canonical_metric(
-            conn,
-            data_message,
-            transcript,
-            db=db,
-            user_first_name=first_name,
-            block_sisc=route.block_sisc,
-        )
-        if canonical_early and not task_spec.needs_free_sql():
-            answer = _answer_via_analyst(
-                data_message,
-                canonical_early,
-                conn=conn,
-                db=db,
-                transcript=transcript,
-                user_first_name=first_name,
-                thread_brief=route.thread_brief,
-                municipio_block=municipio_block,
-                rag_block=rag_block,
-                session_context=merged_ctx,
-            )
-            return {
-                "answer": _trim_answer_boilerplate(answer),
-                "sql": canonical_early.get("sql"),
-                "row_count": canonical_early.get("row_count", 0),
-                "preview": canonical_early.get("preview") or [],
-                "mode": canonical_early.get("mode", "canonical"),
-                "effective_message": effective_message,
-                "task_spec": task_spec.to_dict(),
-            }
-        sql_early = _run_sql_agent_turn(
-            conn,
-            db,
-            data_message,
-            message,
-            transcript,
-            task_spec=task_spec,
-            thread_brief=route.thread_brief,
-            user_first_name=first_name,
-            municipio_block=municipio_block,
-            rag_block=rag_block,
-            bairro_resolution=bairro_resolution,
-        )
-        if sql_early:
-            return {
-                **sql_early,
-                "effective_message": effective_message,
-                "task_spec": task_spec.to_dict(),
-            }
-
-    if cadu_spec:
-        if cadu_spec.get("mode") == "disambiguation":
-            return {
-                **cadu_spec,
-                "answer": _trim_answer_boilerplate(cadu_spec["answer"]),
-                "effective_message": effective_message,
-                "task_spec": task_spec.to_dict(),
-            }
-        answer = _answer_via_analyst(
-            data_message,
-            cadu_spec,
-            conn=conn,
-            db=db,
-            transcript=transcript,
-            user_first_name=first_name,
-            thread_brief=route.thread_brief,
-            municipio_block=municipio_block,
-            rag_block=rag_block,
-            session_context=merged_ctx,
-        )
-        return {
-            "answer": _trim_answer_boilerplate(answer),
-            "sql": cadu_spec.get("sql"),
-            "row_count": cadu_spec.get("row_count", 0),
-            "preview": cadu_spec.get("preview") or [],
-            "mode": cadu_spec.get("mode", "canonical"),
-            "effective_message": effective_message,
-            "task_spec": task_spec.to_dict(),
-            "filters_applied": cadu_spec.get("filters_applied"),
-        }
-
-    if not task_spec.person_recorte and not task_spec.age_range:
-        pessoas_bairro = try_pessoas_bairro_metric(conn, data_message, first_name)
-        if pessoas_bairro:
-            return {
-                **pessoas_bairro,
-                "answer": _trim_answer_boilerplate(pessoas_bairro["answer"]),
-                "task_spec": task_spec.to_dict(),
-            }
-
-    cadu_pessoas = None
-    if legacy_cadu_recorte_covers_spec(task_spec):
-        cadu_pessoas = try_cadu_pessoas_recorte_metric(
-            conn, data_message, user_first_name=first_name
-        )
-    if cadu_pessoas:
-        return {
-            **cadu_pessoas,
-            "answer": _trim_answer_boilerplate(cadu_pessoas["answer"]),
-        }
-
     if route.primary == "policy":
         policy = run_policy_agent(
             message,
@@ -607,46 +732,37 @@ def run_orchestrator_turn(
             "agent": "municipio",
         }
 
-    # Métricas canônicas (SISC×CADU, CRAS, PBF) têm prioridade — sempre com SQL explícito
-    canonical = try_canonical_metric(
-        conn,
-        data_message,
-        transcript,
-        db=db,
-        user_first_name=first_name,
-        block_sisc=route.block_sisc,
-    )
-    if canonical:
-        answer = _answer_via_analyst(
-            data_message,
-            canonical,
-            conn=conn,
-            db=db,
+    if route.skip_bairro_preprocess:
+        bairro_pre = BairroPreprocess(message=message)
+    else:
+        bairro_pre = preprocess_bairro_turn(conn, first_name, message, transcript)
+    if bairro_pre.early_response:
+        return {
+            **bairro_pre.early_response,
+            "answer": _trim_answer_boilerplate(bairro_pre.early_response["answer"]),
+        }
+    message = bairro_pre.message
+    bairro_resolution = bairro_pre.resolution
+
+    if task_spec.is_data_turn(merged_ctx) or route.primary == "data":
+        data_result = _run_data_pipeline_sql_first(
+            conn,
+            db,
+            data_message=data_message,
+            message=message,
             transcript=transcript,
-            user_first_name=first_name,
-            thread_brief=route.thread_brief,
+            task_spec=task_spec,
+            route=route,
+            user=user,
+            first_name=first_name,
             municipio_block=municipio_block,
             rag_block=rag_block,
-            session_context=merged_ctx,
+            merged_ctx=merged_ctx,
+            bairro_resolution=bairro_resolution,
+            effective_message=effective_message,
         )
-        if canonical.get("mode") == "disambiguation":
-            answer = _personalize_canonical(answer, user)
-        skip_bairro_wrap = (
-            canonical.get("metric", "").startswith(("planning_", "ivs_"))
-            or canonical.get("mode") == "disambiguation"
-        )
-        if canonical.get("mode") != "disambiguation" and not skip_bairro_wrap:
-            answer = apply_bairro_correction_to_answer(
-                answer, bairro_resolution, first_name, message=message
-            )
-        return {
-            "answer": _trim_answer_boilerplate(answer),
-            "sql": canonical.get("sql"),
-            "row_count": canonical.get("row_count", 0),
-            "preview": canonical.get("preview") or [],
-            "mode": canonical.get("mode", "canonical"),
-            "effective_message": effective_message,
-        }
+        if data_result:
+            return data_result
 
     plan = _plan_turn(data_message, transcript, rag_block, user_block)
 
@@ -663,25 +779,23 @@ def run_orchestrator_turn(
             block_sisc=False,
         )
         if retry:
-            answer = _answer_via_analyst(
+            return _canonical_via_analyst(
                 data_message,
                 retry,
                 conn=conn,
                 db=db,
                 transcript=transcript,
-                user_first_name=first_name,
-                thread_brief=route.thread_brief,
+                user=user,
+                first_name=first_name,
+                route=route,
                 municipio_block=municipio_block,
                 rag_block=rag_block,
-                session_context=merged_ctx,
+                merged_ctx=merged_ctx,
+                bairro_resolution=bairro_resolution,
+                message=message,
+                effective_message=effective_message,
+                task_spec=task_spec,
             )
-            return {
-                "answer": _trim_answer_boilerplate(answer),
-                "sql": retry.get("sql"),
-                "row_count": retry.get("row_count", 0),
-                "preview": retry.get("preview") or [],
-                "mode": retry.get("mode", "canonical"),
-            }
 
     if plan["mode"] == "chat":
         answer = _chat_reply(message, transcript, rag_block, user_block)
@@ -731,6 +845,7 @@ def run_orchestrator_turn(
             )
     if sql_result.ok:
         pack = pack_from_sql(data_message, sql_result, thread_brief=route.thread_brief)
+        pack.filters_applied = task_spec.applied_filters_summary()
         answer = interpret_evidence(
             pack,
             user_first_name=first_name,
@@ -753,19 +868,46 @@ def run_orchestrator_turn(
                     "preview": resolution.matches,
                     "mode": "disambiguation",
                 }
-        answer = _finalize_data_reply(message, transcript, sql_question, sql_result, user_block)
+        fast = _try_fast_data_executors(
+            conn,
+            db,
+            data_message=data_message,
+            message=message,
+            transcript=transcript,
+            task_spec=task_spec,
+            route=route,
+            user=user,
+            first_name=first_name,
+            municipio_block=municipio_block,
+            rag_block=rag_block,
+            merged_ctx=merged_ctx,
+            bairro_resolution=bairro_resolution,
+            effective_message=effective_message,
+        )
+        if fast:
+            return fast
+        answer = _sql_failure_answer(
+            data_message,
+            sql_result,
+            conn=conn,
+            db=db,
+            first_name=first_name,
+            municipio_block=municipio_block,
+            rag_block=rag_block,
+            thread_brief=route.thread_brief,
+        )
 
     answer = apply_bairro_correction_to_answer(
         answer, bairro_resolution, first_name, message=message
     )
 
-    return {
-        "answer": _trim_answer_boilerplate(answer),
-        "sql": sql_result.sql,
-        "row_count": sql_result.row_count,
-        "preview": sql_result.preview,
-        "mode": "data",
-        "error": sql_result.error if not sql_result.ok else None,
-        "effective_message": effective_message,
-        "task_spec": task_spec.to_dict(),
-    }
+    return _data_payload(
+        answer,
+        effective_message=effective_message,
+        task_spec=task_spec,
+        sql=sql_result.sql,
+        row_count=sql_result.row_count,
+        preview=sql_result.preview,
+        mode="data",
+        error=sql_result.error if not sql_result.ok else None,
+    )

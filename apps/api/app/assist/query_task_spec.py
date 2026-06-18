@@ -163,6 +163,26 @@ class QueryTaskSpec:
             return True
         return False
 
+    def is_data_turn(self, ctx: SessionContext | None = None) -> bool:
+        """Turno que pede número ou cruzamento — candidato ao pipeline SQL-first."""
+        msg = self.original_question or ""
+        if _QUANT.search(msg):
+            return True
+        if self.person_recorte or self.age_range:
+            return True
+        if self.territory and self.territory.kind != TerritoryKind.MUNICIPIO:
+            return True
+        if self.wants_cras_breakdown() or self.requires_pbf_folha:
+            return True
+        if self.mentions_sibec() or _RACA.search(msg):
+            return True
+        if _CRAS_NUM.search(msg) and ctx and ctx.has_data_thread():
+            return True
+        if ctx and ctx.has_data_thread() and len(msg.strip()) <= 100:
+            if _COHORT.search(msg) or _COHORT_AGE.search(msg) or _SUBJECT_PIVOT.match(msg.strip()):
+                return True
+        return False
+
     def is_cadu_person_query(self) -> bool:
         if self.metric not in (MetricKind.COUNT, MetricKind.EXISTS, MetricKind.VALIDATE):
             return False
@@ -647,5 +667,13 @@ def verify_sql_covers_spec(sql: str, spec: QueryTaskSpec) -> tuple[bool, list[st
     if spec.wants_cras_breakdown():
         if "group by" not in low or "num_cras" not in low:
             missing.append("desdobramento por CRAS (GROUP BY num_cras)")
+
+    if spec.mentions_sibec():
+        if "sibec" not in low and "teve_bloqueio" not in low and "teve_cancelamento" not in low:
+            missing.append("manutenção SIBEC (mvw_sibec_manut_familia_mes / teve_bloqueio)")
+
+    if _RACA.search(spec.original_question or ""):
+        if "cod_raca_cor" not in low and "raca" not in low:
+            missing.append("raça/cor (cod_raca_cor_pessoa)")
 
     return len(missing) == 0, missing

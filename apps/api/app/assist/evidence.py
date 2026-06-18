@@ -198,6 +198,17 @@ def pack_from_canonical(question: str, result: dict[str, Any], *, thread_brief: 
                             detail=filters,
                         )
                     )
+    elif metric == "geo_pessoas_por_bairro":
+        for row in preview[:3]:
+            if isinstance(row, dict) and row.get("pessoas") is not None:
+                bairro = row.get("bairro") or "bairro"
+                facts.append(
+                    EvidenceFact(
+                        label=f"Pessoas no bairro {bairro}",
+                        value=str(row.get("pessoas")),
+                        source="vig.mvw_pessoas × vig.mvw_familia (geo)",
+                    )
+                )
     elif metric.startswith("cadu_pessoas_") or metric.startswith("cadu_familias_") or metric == "cadu_pcd_por_tipo":
         for row in preview[:6]:
             if not isinstance(row, dict):
