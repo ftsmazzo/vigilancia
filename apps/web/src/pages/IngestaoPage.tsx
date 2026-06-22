@@ -248,6 +248,8 @@ export default function IngestaoPage({ token }: Props) {
   const [geoCreasLoading, setGeoCreasLoading] = useState(false);
   const [geoCreasStatus, setGeoCreasStatus] = useState("");
   const [geoCreasPreview, setGeoCreasPreview] = useState<Record<string, unknown> | null>(null);
+  const [geoMapsLoading, setGeoMapsLoading] = useState(false);
+  const [geoMapsStatus, setGeoMapsStatus] = useState("");
   const [geoMissingLoading, setGeoMissingLoading] = useState(false);
   const [geoMissingCeps, setGeoMissingCeps] = useState<Array<Record<string, unknown>>>([]);
   const [geoViaCepLoading, setGeoViaCepLoading] = useState(false);
@@ -528,6 +530,38 @@ export default function IngestaoPage({ token }: Props) {
       setGeoCreasStatus(e instanceof Error ? e.message : "Erro inesperado.");
     } finally {
       setGeoCreasLoading(false);
+    }
+  }
+
+  async function reapplyTerritorialMaps() {
+    setGeoMapsLoading(true);
+    setGeoMapsStatus("");
+    try {
+      const response = await fetch(`${API_URL}/api/v1/geo/reapply-territorial-maps`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = (await response.json().catch(() => ({}))) as Record<string, unknown> & { detail?: unknown };
+      if (!response.ok) {
+        throw new Error(typeof data.detail === "string" ? data.detail : "Falha ao reaplicar mapas.");
+      }
+      if (data.reaplicado === false) {
+        setGeoMapsStatus(
+          String(
+            data.motivo ??
+              "Nenhum mapa salvo. Aplique bairros_cras.csv e bairros_creas.csv uma vez para gravar o mapa.",
+          ),
+        );
+        return;
+      }
+      const pos = (data.geo_apos_reaplicar ?? {}) as Record<string, unknown>;
+      setGeoMapsStatus(
+        `Mapas reaplicados. Linhas com CRAS: ${String(pos.linhas_com_cras ?? "—")}, CREAS: ${String(pos.linhas_com_creas ?? "—")}. Regenere a visão Família.`,
+      );
+    } catch (e) {
+      setGeoMapsStatus(e instanceof Error ? e.message : "Erro inesperado.");
+    } finally {
+      setGeoMapsLoading(false);
     }
   }
 
@@ -1266,6 +1300,26 @@ export default function IngestaoPage({ token }: Props) {
                     <li>Linhas com bairro na geo: {String(geoCreasPreview.linhas_geo_com_bairro ?? "—")}</li>
                     <li>CREAS atualizados: {String(geoCreasPreview.linhas_geo_atualizadas ?? "—")}</li>
                   </ul>
+                )}
+              </div>
+
+              <div
+                className="auth-form"
+                style={{ marginTop: "1.25rem", padding: "0.75rem 0", borderTop: "1px solid var(--color-border, #333)" }}
+              >
+                <h2 style={{ fontSize: "1.05rem", margin: "0 0 0.5rem" }}>Reaplicar CRAS/CREAS na geo</h2>
+                <p className="ingestao-desc" style={{ marginBottom: "0.75rem" }}>
+                  Depois de reenviar <code className="inline-code">tbl_geo.csv</code> ou refazer Vigilância, os códigos
+                  CRAS/CREAS somem das linhas (o CSV base não traz essas colunas). Use este botão para restaurar a
+                  partir do último <strong>bairros_cras.csv</strong> e <strong>bairros_creas.csv</strong> aplicados.
+                </p>
+                <button type="button" className="btn btn-secondary" onClick={() => void reapplyTerritorialMaps()} disabled={geoMapsLoading}>
+                  {geoMapsLoading ? "Reaplicando…" : "Reaplicar mapas salvos na tbl_geo"}
+                </button>
+                {geoMapsStatus && (
+                  <p className={geoMapsStatus.includes("reaplicados") ? "status-ok" : "error"} style={{ marginTop: "0.75rem" }}>
+                    {geoMapsStatus}
+                  </p>
                 )}
               </div>
 

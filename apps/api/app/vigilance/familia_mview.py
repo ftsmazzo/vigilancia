@@ -605,6 +605,31 @@ def refresh_familia_mview(conn: Connection) -> FamiliaRefreshResult:
         )
 
     use_geo = _table_exists(conn, "raw", GEO_TABLE)
+    if use_geo:
+        from .geo_territorial_maps import (
+            geo_territorial_fill_stats,
+            map_counts,
+            reapply_persisted_territorial_maps,
+        )
+
+        fill = geo_territorial_fill_stats(conn)
+        maps = map_counts(conn)
+        precisa_reaplicar = (
+            (maps.get("creas_bairros", 0) > 0 and fill.get("linhas_com_creas", 0) == 0)
+            or (maps.get("cras_bairros", 0) > 0 and fill.get("linhas_com_cras", 0) == 0)
+        )
+        if precisa_reaplicar:
+            rep = reapply_persisted_territorial_maps(conn)
+            if rep.get("reaplicado"):
+                pos = rep.get("geo_apos_reaplicar") or {}
+                warnings.append(
+                    "CRAS/CREAS reaplicados na geo a partir do mapa persistido "
+                    f"(linhas com CREAS: {pos.get('linhas_com_creas', 0)}, "
+                    f"CRAS: {pos.get('linhas_com_cras', 0)})."
+                )
+            elif rep.get("motivo"):
+                warnings.append(str(rep["motivo"]))
+
     use_geo_creas = False
     if use_geo:
         geo_cols = _columns(conn, "raw", GEO_TABLE)

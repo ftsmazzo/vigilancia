@@ -15,6 +15,13 @@ from ..models import User
 from ..vigilance.familia_mview import ensure_vig_functions
 from ..vigilance.geo_cras import apply_cras_bairros_to_geo, parse_bairros_cras_csv
 from ..vigilance.geo_creas import apply_creas_bairros_to_geo, parse_bairros_creas_csv
+from ..vigilance.geo_territorial_maps import (
+    geo_territorial_fill_stats,
+    map_counts,
+    persist_cras_map,
+    persist_creas_map,
+    reapply_persisted_territorial_maps,
+)
 from ..vigilance.geo_viacep import list_missing_ceps_from_cadu, supplement_geo_from_viacep
 from ..municipio_context import get_or_create_context
 
@@ -61,6 +68,8 @@ async def geo_apply_creas_bairros(
             conflicts=conflicts,
             dry_run=dry_run,
         )
+        if not dry_run:
+            persist_creas_map(conn, mapping)
 
     return {
         "status": "preview" if dry_run else "success",
@@ -70,6 +79,7 @@ async def geo_apply_creas_bairros(
             "Se precisar de cruzamento por logradouro, avise para evoluirmos depois."
         ),
         "regra_duplicata": "Bairro em mais de um CREAS: mantém o de número maior.",
+        "mapa_persistido": not dry_run,
         "bairros_no_mapa": result.bairros_no_mapa,
         "linhas_geo_atualizadas": result.linhas_geo_atualizadas,
         "linhas_geo_bairro_renomeadas": result.linhas_geo_bairro_renomeadas,
@@ -81,6 +91,43 @@ async def geo_apply_creas_bairros(
         "amostra_atualizacoes": result.amostra_atualizacoes,
         "amostra_renomes_bairro": result.amostra_renomes_bairro,
     }
+
+
+@router.post("/reapply-territorial-maps")
+def geo_reapply_territorial_maps(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """
+    Reaplica CRAS/CREAS na tbl_geo a partir dos mapas persistidos (último CSV aplicado).
+    Use após reingestão de tbl_geo.csv ou quando os filtros CREAS/CRAS ficarem vazios.
+    """
+    if not _raw_table_exists(db, GEO_TABLE):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tabela raw.geo__tbl_geo não encontrada.",
+        )
+    with db.bind.begin() as conn:
+        result = reapply_persisted_territorial_maps(conn)
+        counts = map_counts(conn)
+    return {
+        "status": "success" if result.get("reaplicado") else "skipped",
+        **result,
+        "mapas_cadastrados": counts,
+    }
+
+
+@router.get("/territorial-maps-status")
+def geo_territorial_maps_status(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Contagem de mapas persistidos e linhas com CRAS/CREAS preenchidos na geo."""
+    with db.bind.connect() as conn:
+        return {
+            "mapas": map_counts(conn),
+            "geo_preenchimento": geo_territorial_fill_stats(conn),
+        }
 
 
 @router.post("/apply-cras-bairros")
@@ -126,6 +173,8 @@ async def geo_apply_cras_bairros(
             conflicts=conflicts,
             dry_run=dry_run,
         )
+        if not dry_run:
+            persist_cras_map(conn, mapping)
 
     return {
         "status": "preview" if dry_run else "success",
@@ -138,6 +187,7 @@ async def geo_apply_cras_bairros(
             "Bairro em CRAS antigo (1–7) e novo (8–12): mantém 8–12. "
             "Abreviações Jd/Cond/Vl/Pq/Conj expandidas na comparação."
         ),
+        "mapa_persistido": not dry_run,
         "bairros_no_mapa": result.bairros_no_mapa,
         "linhas_geo_atualizadas": result.linhas_geo_atualizadas,
         "linhas_geo_bairro_renomeadas": result.linhas_geo_bairro_renomeadas,

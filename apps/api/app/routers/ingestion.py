@@ -209,6 +209,7 @@ async def import_raw_table(
     db.commit()
     db.refresh(run)
 
+    territorial_reapply = None
     try:
         with db.bind.begin() as connection:
             connection.execute(text("CREATE SCHEMA IF NOT EXISTS raw"))
@@ -302,6 +303,12 @@ async def import_raw_table(
 
                 connection.execute(insert_stmt, payload_rows)
 
+            territorial_reapply = None
+            if target_table == "geo__tbl_geo":
+                from ..vigilance.geo_territorial_maps import reapply_persisted_territorial_maps
+
+                territorial_reapply = reapply_persisted_territorial_maps(connection)
+
         run.status = "success"
         run.row_count = len(rows)
         run.finished_at = datetime.utcnow()
@@ -331,4 +338,5 @@ async def import_raw_table(
         "competencia": competencia,
         "row_count": len(rows),
         "columns_count": len(normalized_map),
+        "territorial_reapply": territorial_reapply if target_table == "geo__tbl_geo" else None,
     }
