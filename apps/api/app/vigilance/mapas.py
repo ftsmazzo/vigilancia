@@ -72,12 +72,14 @@ def mapas_heatmap_from_views(
     conn: Connection,
     cras_cod: str | None = None,
     bairro: str | None = None,
+    creas_cod: str | None = None,
 ) -> dict:
     """Pontos por família (coordenada real) + totais CADU em uma única consulta."""
     _require_views(conn)
 
     cras_sel = (cras_cod or "").strip() or "__todos__"
-    where_extra, params = _territorio_filter_clause(cras_sel, bairro)
+    creas_sel = (creas_cod or "").strip() or "__todos__"
+    where_extra, params = _territorio_filter_clause(cras_sel, bairro, creas_sel)
 
     lat_expr = _lat_sql("fam.lat_num")
     lng_expr = _lng_sql("fam.long_num")
@@ -216,6 +218,7 @@ def mapas_heatmap_from_views(
 
     bairro_sel = (bairro or "").strip() or None
     cras_label = cras_sel if cras_sel not in ("", "__todos__") else None
+    creas_label = creas_sel if creas_sel not in ("", "__todos__") else None
 
     return {
         "disponivel": len(pontos) > 0,
@@ -225,7 +228,7 @@ def mapas_heatmap_from_views(
             if pontos
             else "Sem famílias georreferenciadas para o recorte. Ajuste filtros ou atualize a geo."
         ),
-        "recorte": {"cras_cod": cras_label, "bairro": bairro_sel},
+        "recorte": {"cras_cod": cras_label, "creas_cod": creas_label, "bairro": bairro_sel},
         "centro": centro,
         "bounds": bounds,
         "totais_geo": totais_geo,

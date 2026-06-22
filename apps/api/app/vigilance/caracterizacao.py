@@ -21,6 +21,7 @@ from .cras_analytics import (
     _pessoas_bucket,
     _require_views,
 )
+from .creas_analytics import _creas_filter_clause, _creas_nome_sql
 from .familia_mview import _table_exists
 
 PAINEL_CARACTERIZACAO_VERSAO = 3
@@ -174,13 +175,29 @@ def _ranking_bairros_geo(
     }
 
 
-def _titulo_escopo(cras_sel: str, cras_nome: str | None, bairro: str | None = None) -> str:
-    if cras_sel in ("", "__todos__"):
-        base = "Município — Cadastro Único (todas as famílias)"
-    elif cras_sel == "__sem_cras__":
-        base = "Famílias sem CRAS territorial na geo (CEP sem match)"
+def _titulo_escopo(
+    cras_sel: str,
+    cras_nome: str | None,
+    bairro: str | None = None,
+    *,
+    creas_sel: str = "__todos__",
+    creas_nome: str | None = None,
+) -> str:
+    parts: list[str] = []
+    if creas_sel not in ("", "__todos__"):
+        if creas_sel == "__sem_creas__":
+            parts.append("Famílias sem CREAS territorial na geo")
+        else:
+            parts.append(creas_nome or f"CREAS {creas_sel}")
+    if cras_sel not in ("", "__todos__"):
+        if cras_sel == "__sem_cras__":
+            parts.append("Sem CRAS territorial na geo")
+        else:
+            parts.append(cras_nome or f"CRAS {cras_sel}")
+    if parts:
+        base = " · ".join(parts)
     else:
-        base = cras_nome or f"CRAS {cras_sel}"
+        base = "Município — Cadastro Único (todas as famílias)"
     if bairro and bairro.strip():
         return f"{base} · {bairro.strip()}"
     return base
@@ -189,9 +206,14 @@ def _titulo_escopo(cras_sel: str, cras_nome: str | None, bairro: str | None = No
 def _territorio_filter_clause(
     cras_cod: str | None,
     bairro: str | None = None,
+    creas_cod: str | None = None,
 ) -> tuple[str, dict]:
     cras_sel = (cras_cod or "").strip() or "__todos__"
+    creas_sel = (creas_cod or "").strip() or "__todos__"
     where_extra, params = _cras_filter_clause(cras_sel)
+    creas_extra, creas_params = _creas_filter_clause(creas_sel)
+    where_extra += creas_extra
+    params.update(creas_params)
     if bairro and bairro.strip():
         where_extra += " AND btrim(f.bairro::text) = :bairro "
         params["bairro"] = bairro.strip()
@@ -202,12 +224,15 @@ def caracterizacao_painel_from_views(
     conn: Connection,
     cras_cod: str | None = None,
     bairro: str | None = None,
+    creas_cod: str | None = None,
 ) -> dict:
     """Demografia de pessoas no CADU (fonte verdade), com filtro territorial opcional."""
     _require_views(conn)
     cras_sel = (cras_cod or "").strip() or "__todos__"
-    where_extra, params = _territorio_filter_clause(cras_sel, bairro)
+    creas_sel = (creas_cod or "").strip() or "__todos__"
+    where_extra, params = _territorio_filter_clause(cras_sel, bairro, creas_sel)
     cn = _cras_nome_sql("fam")
+    cren = _creas_nome_sql("fam")
 
     base = conn.execute(
         text(
@@ -224,7 +249,8 @@ def caracterizacao_painel_from_views(
               COUNT(pes.cadu_row_id)::bigint AS pessoas,
               COUNT(pes.cadu_row_id) FILTER (WHERE {SEXO_MASC})::bigint AS homens,
               COUNT(pes.cadu_row_id) FILTER (WHERE {SEXO_FEM})::bigint AS mulheres,
-              MAX({cn}) AS cras_nome
+              MAX({cn}) AS cras_nome,
+              MAX({cren}) AS creas_nome
             FROM fam
             LEFT JOIN pes ON pes.codigo_familiar = fam.codigo_familiar
             """
@@ -245,8 +271,15 @@ def caracterizacao_painel_from_views(
         "disponivel": True,
         "painel_versao": PAINEL_CARACTERIZACAO_VERSAO,
         "cras_selecionado": cras_sel,
+        "creas_selecionado": creas_sel,
         "bairro_selecionado": bairro.strip() if bairro and bairro.strip() else None,
-        "titulo": _titulo_escopo(cras_sel, base.get("cras_nome"), bairro),
+        "titulo": _titulo_escopo(
+            cras_sel,
+            base.get("cras_nome"),
+            bairro,
+            creas_sel=creas_sel,
+            creas_nome=base.get("creas_nome"),
+        ),
         "fonte": "Cadastro Único — vig.mvw_familia + vig.mvw_pessoas",
         "resumo": {
             "familias": familias,

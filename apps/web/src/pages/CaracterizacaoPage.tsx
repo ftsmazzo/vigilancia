@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import BarChartPanel, { type BarItem } from "../components/charts/BarChartPanel";
 import DonutChart from "../components/charts/DonutChart";
+import TerritorialFilterSelects, { appendTerritorialParams } from "../components/TerritorialFilterSelects";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -9,18 +10,6 @@ type Props = {
   token: string;
 };
 
-type CrasOption = {
-  cras_cod: string;
-  cras_nome: string;
-  cras_codigo_exibicao?: string;
-  rotulo_ordenado?: string;
-  familias: number;
-};
-
-type BairroOption = {
-  bairro: string;
-  familias: number;
-};
 
 type Painel = {
   disponivel: boolean;
@@ -73,49 +62,15 @@ export default function CaracterizacaoPage({ token }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [crasCod, setCrasCod] = useState("__todos__");
+  const [creasCod, setCreasCod] = useState("__todos__");
   const [bairroFiltro, setBairroFiltro] = useState("");
-  const [bairrosOptions, setBairrosOptions] = useState<BairroOption[]>([]);
-  const [loadingBairros, setLoadingBairros] = useState(false);
-  const [catalog, setCatalog] = useState<CrasOption[]>([]);
   const [painel, setPainel] = useState<Painel | null>(null);
-
-  useEffect(() => {
-    fetch(`${API_URL}/api/v1/cras/catalog`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(async (res) => {
-        if (!res.ok) throw new Error();
-        const data = (await res.json()) as { items: CrasOption[] };
-        setCatalog(data.items || []);
-      })
-      .catch(() => setCatalog([]));
-  }, [token]);
-
-  useEffect(() => {
-    setBairroFiltro("");
-    if (!crasCod || crasCod === "__todos__" || crasCod === "__sem_cras__") {
-      setBairrosOptions([]);
-      return;
-    }
-    setLoadingBairros(true);
-    fetch(`${API_URL}/api/v1/cras/bairros?num_cras=${encodeURIComponent(crasCod)}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(async (res) => {
-        if (!res.ok) throw new Error();
-        const data = (await res.json()) as { items: BairroOption[] };
-        setBairrosOptions(data.items ?? []);
-      })
-      .catch(() => setBairrosOptions([]))
-      .finally(() => setLoadingBairros(false));
-  }, [token, crasCod]);
 
   useEffect(() => {
     setLoading(true);
     setError("");
     const params = new URLSearchParams();
-    if (crasCod && crasCod !== "__todos__") params.set("cras_cod", crasCod);
-    if (bairroFiltro.trim()) params.set("bairro", bairroFiltro.trim());
+    appendTerritorialParams(params, crasCod, creasCod, bairroFiltro);
     const qs = params.toString();
     fetch(`${API_URL}/api/v1/caracterizacao/painel${qs ? `?${qs}` : ""}`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -130,7 +85,7 @@ export default function CaracterizacaoPage({ token }: Props) {
         setPainel(null);
       })
       .finally(() => setLoading(false));
-  }, [token, crasCod, bairroFiltro]);
+  }, [token, crasCod, creasCod, bairroFiltro]);
 
   const r = painel?.resumo;
   const sexoSlices =
@@ -144,16 +99,12 @@ export default function CaracterizacaoPage({ token }: Props) {
         : [];
 
   const tituloRecorte = useMemo(() => {
-    if (crasCod === "__todos__" && !bairroFiltro.trim()) return "Município inteiro";
-    if (crasCod === "__sem_cras__") return "Sem CRAS territorial";
-    const c = catalog.find((x) => x.cras_cod === crasCod);
-    const crasLabel = c?.rotulo_ordenado || c?.cras_nome || crasCod;
-    if (bairroFiltro.trim()) return `${crasLabel} · ${fmtBairro(bairroFiltro.trim())}`;
-    return crasLabel;
-  }, [crasCod, bairroFiltro, catalog]);
-
-  const bairroSelectDisabled =
-    crasCod === "__todos__" || crasCod === "__sem_cras__" || loadingBairros;
+    if (painel?.titulo) return painel.titulo;
+    if (crasCod === "__todos__" && creasCod === "__todos__" && !bairroFiltro.trim()) {
+      return "Município inteiro";
+    }
+    return "Recorte territorial";
+  }, [painel?.titulo, crasCod, creasCod, bairroFiltro]);
 
   return (
     <section className="kpi-page caracterizacao-page">
@@ -162,7 +113,7 @@ export default function CaracterizacaoPage({ token }: Props) {
           <h1>Caracterização sociodemográfica</h1>
           <p className="caract-lead">
             Perfil do público no <strong>Cadastro Único</strong> — raça, sexo, escolaridade, deficiência,
-            faixa etária e renda per capita com recorte territorial por CRAS e bairro (geo × CEP).
+            faixa etária e renda per capita com recorte territorial por CRAS, CREAS e bairro (geo × CEP).
           </p>
           <p className="caract-meta">{painel?.fonte}</p>
           <p className="caract-link">
@@ -172,73 +123,35 @@ export default function CaracterizacaoPage({ token }: Props) {
       </header>
 
       <section className="caract-filtros fx-card">
-        <div className="caract-filtros-grid">
-          <label>
-            <span>CRAS territorial</span>
-            <select
-              className="cras-select"
-              value={crasCod}
-              onChange={(e) => {
-                setCrasCod(e.target.value);
-                setBairroFiltro("");
-              }}
-              disabled={loading}
-            >
-              <option value="__todos__">Município inteiro</option>
-              <option value="__sem_cras__">Sem CRAS na geo</option>
-              {catalog.map((c) => (
-                <option key={c.cras_cod} value={c.cras_cod}>
-                  {(c.rotulo_ordenado ?? c.cras_nome) +
-                    (c.cras_codigo_exibicao && c.cras_codigo_exibicao !== "—"
-                      ? ` [${c.cras_codigo_exibicao}]`
-                      : "")}
-                  {" · "}
-                  {c.familias.toLocaleString("pt-BR")} fam.
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>Bairro</span>
-            <select
-              className="cras-select"
-              value={bairroFiltro}
-              onChange={(e) => setBairroFiltro(e.target.value)}
-              disabled={bairroSelectDisabled || loading}
-            >
-              <option value="">
-                {crasCod === "__todos__"
-                  ? "Selecione um CRAS"
-                  : loadingBairros
-                    ? "Carregando bairros…"
-                    : bairrosOptions.length === 0
-                      ? "Nenhum bairro territorial"
-                      : "Todos os bairros do CRAS"}
-              </option>
-              {bairrosOptions.map((b) => (
-                <option key={b.bairro} value={b.bairro}>
-                  {fmtBairro(b.bairro)} · {b.familias.toLocaleString("pt-BR")} fam.
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            className="btn btn-secondary caract-filtros-clear"
-            onClick={() => {
-              setCrasCod("__todos__");
-              setBairroFiltro("");
-              setBairrosOptions([]);
-            }}
-          >
-            Limpar filtros
-          </button>
-        </div>
+        <TerritorialFilterSelects
+          token={token}
+          loading={loading}
+          crasCod={crasCod}
+          creasCod={creasCod}
+          bairroFiltro={bairroFiltro}
+          onCrasChange={(v) => {
+            setCrasCod(v);
+            setBairroFiltro("");
+          }}
+          onCreasChange={(v) => {
+            setCreasCod(v);
+            setBairroFiltro("");
+          }}
+          onBairroChange={setBairroFiltro}
+        />
+        <button
+          type="button"
+          className="btn btn-secondary caract-filtros-clear"
+          onClick={() => {
+            setCrasCod("__todos__");
+            setCreasCod("__todos__");
+            setBairroFiltro("");
+          }}
+        >
+          Limpar filtros
+        </button>
         <p className="caract-recorte-label">
           Exibindo: <strong>{tituloRecorte}</strong>
-          {painel?.titulo && painel.titulo !== tituloRecorte && (
-            <> · <span className="fx-accent-word">{painel.titulo}</span></>
-          )}
         </p>
       </section>
 

@@ -111,11 +111,33 @@ def _cras_filter_clause(cras_cod: str | None) -> tuple[str, dict]:
     return "btrim(COALESCE(num_cras::text, '')) = btrim(:num_cras)", {"num_cras": c}
 
 
+def _creas_filter_clause(creas_cod: str | None) -> tuple[str, dict]:
+    if not creas_cod or creas_cod.strip() in ("", "__todos__"):
+        return "TRUE", {}
+    c = creas_cod.strip()
+    if c == "__sem_creas__":
+        return "(num_creas IS NULL OR btrim(num_creas::text) = '')", {}
+    return "btrim(COALESCE(num_creas::text, '')) = btrim(:num_creas)", {"num_creas": c}
+
+
+def _territorio_filter_clause(
+    cras_cod: str | None,
+    creas_cod: str | None = None,
+) -> tuple[str, dict]:
+    cras_sql, cras_params = _cras_filter_clause(cras_cod)
+    creas_sql, creas_params = _creas_filter_clause(creas_cod)
+    parts = [p for p in (cras_sql, creas_sql) if p and p != "TRUE"]
+    if not parts:
+        return "TRUE", {}
+    return " AND ".join(parts), {**cras_params, **creas_params}
+
+
 def fetch_sibec_painel(
     conn: Connection,
     *,
     competencia: str | None = None,
     cras_cod: str | None = None,
+    creas_cod: str | None = None,
 ) -> dict:
     if not _mview_ok(conn):
         return {
@@ -130,7 +152,7 @@ def fetch_sibec_painel(
             "mensagem": "Nenhuma competência encontrada na MV SIBEC Manutenções.",
         }
 
-    where_cras, cras_params = _cras_filter_clause(cras_cod)
+    where_cras, cras_params = _territorio_filter_clause(cras_cod, creas_cod)
     params = {"comp": comp, **cras_params}
 
     resumo_row = conn.execute(
@@ -333,6 +355,7 @@ def fetch_sibec_serie(
     de: str | None = None,
     ate: str | None = None,
     cras_cod: str | None = None,
+    creas_cod: str | None = None,
 ) -> dict:
     if not _mview_ok(conn):
         return {"disponivel": False, "items": []}
@@ -345,7 +368,7 @@ def fetch_sibec_serie(
     if ate:
         where_parts.append("competencia <= :ate")
         params["ate"] = ate.strip()
-    where_cras, cras_params = _cras_filter_clause(cras_cod)
+    where_cras, cras_params = _territorio_filter_clause(cras_cod, creas_cod)
     where_parts.append(where_cras)
     params.update(cras_params)
     where_sql = " AND ".join(where_parts)

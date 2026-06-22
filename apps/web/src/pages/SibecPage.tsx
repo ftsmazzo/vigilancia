@@ -10,6 +10,12 @@ type Props = {
   token: string;
 };
 
+type CreasOption = {
+  creas_cod: string;
+  creas_nome: string;
+  rotulo_ordenado?: string;
+};
+
 type CrasOption = {
   cras_cod: string;
   cras_nome: string;
@@ -123,7 +129,9 @@ export default function SibecPage({ token }: Props) {
   const [competencias, setCompetencias] = useState<string[]>([]);
   const [competencia, setCompetencia] = useState("");
   const [crasCod, setCrasCod] = useState("__todos__");
+  const [creasCod, setCreasCod] = useState("__todos__");
   const [catalog, setCatalog] = useState<CrasOption[]>([]);
+  const [creasCatalog, setCreasCatalog] = useState<CreasOption[]>([]);
   const [painel, setPainel] = useState<Painel | null>(null);
   const [serie, setSerie] = useState<SerieItem[]>([]);
 
@@ -137,6 +145,16 @@ export default function SibecPage({ token }: Props) {
         setCatalog(data.items ?? []);
       })
       .catch(() => setCatalog([]));
+
+    fetch(`${API_URL}/api/v1/creas/catalog`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(async (res) => {
+        if (!res.ok) return;
+        const data = (await res.json()) as { items: CreasOption[] };
+        setCreasCatalog(data.items ?? []);
+      })
+      .catch(() => setCreasCatalog([]));
   }, [token]);
 
   useEffect(() => {
@@ -160,9 +178,11 @@ export default function SibecPage({ token }: Props) {
       const params = new URLSearchParams();
       if (competencia) params.set("competencia", competencia);
       if (crasCod && crasCod !== "__todos__") params.set("cras_cod", crasCod);
+      if (creasCod && creasCod !== "__todos__") params.set("creas_cod", creasCod);
       const qs = params.toString();
       const serieParams = new URLSearchParams();
       if (crasCod && crasCod !== "__todos__") serieParams.set("cras_cod", crasCod);
+      if (creasCod && creasCod !== "__todos__") serieParams.set("creas_cod", creasCod);
       const serieQs = serieParams.toString();
 
       const [response, serieResponse] = await Promise.all([
@@ -194,7 +214,7 @@ export default function SibecPage({ token }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [token, competencia, crasCod]);
+  }, [token, competencia, crasCod, creasCod]);
 
   useEffect(() => {
     void loadPainel();
@@ -231,11 +251,24 @@ export default function SibecPage({ token }: Props) {
   );
 
   const tituloRecorte = useMemo(() => {
-    if (crasCod === "__todos__") return "Município inteiro";
-    if (crasCod === "__sem_cras__") return "Sem CRAS de referência";
-    const c = catalog.find((x) => x.cras_cod === crasCod);
-    return c?.rotulo_ordenado || c?.cras_nome || crasCod;
-  }, [crasCod, catalog]);
+    if (crasCod === "__todos__" && creasCod === "__todos__") return "Município inteiro";
+    const parts: string[] = [];
+    if (creasCod !== "__todos__") {
+      if (creasCod === "__sem_creas__") parts.push("Sem CREAS de referência");
+      else {
+        const c = creasCatalog.find((x) => x.creas_cod === creasCod);
+        parts.push(c?.rotulo_ordenado || c?.creas_nome || creasCod);
+      }
+    }
+    if (crasCod !== "__todos__") {
+      if (crasCod === "__sem_cras__") parts.push("Sem CRAS de referência");
+      else {
+        const c = catalog.find((x) => x.cras_cod === crasCod);
+        parts.push(c?.rotulo_ordenado || c?.cras_nome || crasCod);
+      }
+    }
+    return parts.join(" · ");
+  }, [crasCod, creasCod, catalog, creasCatalog]);
 
   const resumo = painel?.resumo;
   const cmp = painel?.comparacao_anterior;
@@ -294,11 +327,29 @@ export default function SibecPage({ token }: Props) {
               ))}
             </select>
           </label>
+          <label>
+            <span>CREAS</span>
+            <select
+              className="cras-select"
+              value={creasCod}
+              onChange={(e) => setCreasCod(e.target.value)}
+              disabled={loading}
+            >
+              <option value="__todos__">Todos os CREAS</option>
+              <option value="__sem_creas__">Sem CREAS de referência</option>
+              {creasCatalog.map((c) => (
+                <option key={c.creas_cod} value={c.creas_cod}>
+                  {c.rotulo_ordenado || c.creas_nome}
+                </option>
+              ))}
+            </select>
+          </label>
           <button
             type="button"
             className="btn btn-secondary caract-filtros-clear"
             onClick={() => {
               setCrasCod("__todos__");
+              setCreasCod("__todos__");
               if (competencias.length > 0) setCompetencia(competencias[0]);
             }}
           >

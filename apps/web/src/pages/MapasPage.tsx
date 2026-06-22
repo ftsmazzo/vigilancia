@@ -12,6 +12,12 @@ type Props = {
   token: string;
 };
 
+type CreasOption = {
+  creas_cod: string;
+  creas_nome: string;
+  rotulo_ordenado?: string;
+};
+
 type CrasOption = {
   cras_cod: string;
   cras_nome: string;
@@ -26,7 +32,7 @@ type BairroOption = {
 type MapasPainel = HeatmapPayload & {
   totais_geo: HeatmapTotais;
   totais_cadu: HeatmapTotais;
-  recorte: { cras_cod: string | null; bairro: string | null };
+  recorte: { cras_cod: string | null; creas_cod: string | null; bairro: string | null };
 };
 
 const emptyTotais: HeatmapTotais = {
@@ -46,7 +52,7 @@ const emptyMapa: MapasPainel = {
   pontos: [],
   totais_geo: emptyTotais,
   totais_cadu: emptyTotais,
-  recorte: { cras_cod: null, bairro: null },
+  recorte: { cras_cod: null, creas_cod: null, bairro: null },
 };
 
 export default function MapasPage({ token }: Props) {
@@ -55,9 +61,11 @@ export default function MapasPage({ token }: Props) {
   const [error, setError] = useState("");
   const [painel, setPainel] = useState<MapasPainel>(emptyMapa);
   const [catalog, setCatalog] = useState<CrasOption[]>([]);
+  const [creasCatalog, setCreasCatalog] = useState<CreasOption[]>([]);
   const [bairrosOptions, setBairrosOptions] = useState<BairroOption[]>([]);
   const [loadingBairros, setLoadingBairros] = useState(true);
   const [crasCod, setCrasCod] = useState("__todos__");
+  const [creasCod, setCreasCod] = useState("__todos__");
   const [bairroFiltro, setBairroFiltro] = useState("");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -71,6 +79,16 @@ export default function MapasPage({ token }: Props) {
         setCatalog(data.items ?? []);
       })
       .catch(() => setCatalog([]));
+
+    fetch(`${API_URL}/api/v1/creas/catalog`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(async (res) => {
+        if (!res.ok) return;
+        const data = (await res.json()) as { items: CreasOption[] };
+        setCreasCatalog(data.items ?? []);
+      })
+      .catch(() => setCreasCatalog([]));
   }, [token]);
 
   useEffect(() => {
@@ -93,6 +111,7 @@ export default function MapasPage({ token }: Props) {
     try {
       const params = new URLSearchParams();
       if (crasCod && crasCod !== "__todos__") params.set("cras_cod", crasCod);
+      if (creasCod && creasCod !== "__todos__") params.set("creas_cod", creasCod);
       if (bairroFiltro.trim()) params.set("bairro", bairroFiltro.trim());
       const qs = params.toString();
       const response = await fetch(`${API_URL}/api/v1/vigilance/mapas-heatmap${qs ? `?${qs}` : ""}`, {
@@ -110,7 +129,7 @@ export default function MapasPage({ token }: Props) {
       setRefreshing(false);
       setInitialLoading(false);
     }
-  }, [token, crasCod, bairroFiltro, initialLoading]);
+  }, [token, crasCod, creasCod, bairroFiltro, initialLoading]);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -124,16 +143,26 @@ export default function MapasPage({ token }: Props) {
 
   const recorteParts: string[] = [];
   if (painel.recorte.bairro) recorteParts.push(painel.recorte.bairro);
+  if (painel.recorte.creas_cod) recorteParts.push(`CREAS ${painel.recorte.creas_cod}`);
   if (painel.recorte.cras_cod) recorteParts.push(`CRAS ${painel.recorte.cras_cod}`);
   const recorteLabel = recorteParts.length > 0 ? recorteParts.join(" · ") : "Município inteiro";
 
   const geo = painel.totais_geo ?? emptyTotais;
   const cadu = painel.totais_cadu ?? emptyTotais;
   const destacarRecorte =
-    (crasCod !== "__todos__" && crasCod !== "") || bairroFiltro.trim().length > 0;
+    (crasCod !== "__todos__" && crasCod !== "") ||
+    (creasCod !== "__todos__" && creasCod !== "") ||
+    bairroFiltro.trim().length > 0;
 
   function handleCrasChange(value: string) {
     setCrasCod(value);
+    if (value !== "__todos__") {
+      setBairroFiltro("");
+    }
+  }
+
+  function handleCreasChange(value: string) {
+    setCreasCod(value);
     if (value !== "__todos__") {
       setBairroFiltro("");
     }
@@ -152,8 +181,7 @@ export default function MapasPage({ token }: Props) {
         <div>
           <h1>Mapas territoriais</h1>
           <p className="mapas-hero-sub">
-            Filtros de CRAS e bairro são independentes — use um por vez. O calor usa as coordenadas reais
-            das famílias georreferenciadas.
+            Filtros de CRAS, CREAS e bairro — bairro municipal ou recorte por unidade territorial.
           </p>
         </div>
         <div className="mapas-hero-actions">
@@ -173,6 +201,18 @@ export default function MapasPage({ token }: Props) {
               {catalog.map((c) => (
                 <option key={c.cras_cod} value={c.cras_cod}>
                   {c.rotulo_ordenado ?? c.cras_nome}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>CREAS territorial</span>
+            <select className="cras-select" value={creasCod} onChange={(e) => handleCreasChange(e.target.value)}>
+              <option value="__todos__">Todos os CREAS</option>
+              <option value="__sem_creas__">Sem referência CREAS</option>
+              {creasCatalog.map((c) => (
+                <option key={c.creas_cod} value={c.creas_cod}>
+                  {c.rotulo_ordenado ?? c.creas_nome}
                 </option>
               ))}
             </select>

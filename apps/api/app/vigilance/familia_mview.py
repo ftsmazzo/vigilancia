@@ -396,6 +396,7 @@ def build_familia_mview_sql(
     pbf_valor: str | None,
     pbf_ref: str | None,
     use_geo: bool = False,
+    use_geo_creas: bool = False,
 ) -> str:
     c = _cadu_required_columns()
 
@@ -416,6 +417,12 @@ def build_familia_mview_sql(
 
     geo_cte = ""
     geo_join = ""
+    creas_agg_col = ""
+    if use_geo_creas:
+        creas_agg_col = """
+        mode() WITHIN GROUP (
+          ORDER BY NULLIF(btrim(g.creas::text), '')
+        ) AS creas,"""
     if use_geo:
         geo_cte = f""",
     geo_agg AS (
@@ -430,6 +437,7 @@ def build_familia_mview_sql(
         mode() WITHIN GROUP (
           ORDER BY NULLIF(btrim(g.cras::text), '')
         ) AS cras,
+        {creas_agg_col}
         max(
           NULLIF(regexp_replace(btrim(g.lat_num::text), ',', '.', 'g'), '')::double precision
         ) AS lat_num,
@@ -451,6 +459,15 @@ def build_familia_mview_sql(
           WHEN g.cras IS NOT NULL AND btrim(g.cras::text) <> ''
           THEN 'CRAS ' || btrim(g.cras::text)
         END"""
+        if use_geo_creas:
+            num_creas_out = "vig.ltrim_zeros_text(g.creas::text)"
+            nom_creas_out = """CASE
+          WHEN g.creas IS NOT NULL AND btrim(g.creas::text) <> ''
+          THEN 'CREAS ' || btrim(g.creas::text)
+        END"""
+        else:
+            num_creas_out = "NULL::text"
+            nom_creas_out = "NULL::text"
         tem_geo_out = "(g.cep_norm IS NOT NULL)"
         lat_out = "g.lat_num"
         lng_out = "g.long_num"
@@ -459,6 +476,8 @@ def build_familia_mview_sql(
         endereco_out = "d.endereco_cadu"
         num_cras_out = "d.num_cras_cadu"
         nom_cras_out = "d.nom_cras_cadu"
+        num_creas_out = "NULL::text"
+        nom_creas_out = "NULL::text"
         tem_geo_out = "FALSE"
         lat_out = "NULL::double precision"
         lng_out = "NULL::double precision"
@@ -524,6 +543,8 @@ def build_familia_mview_sql(
       d.cep,
       {num_cras_out} AS num_cras,
       {nom_cras_out} AS nom_cras,
+      {num_creas_out} AS num_creas,
+      {nom_creas_out} AS nom_creas,
       d.bairro_cadu,
       d.endereco_cadu,
       d.num_cras_cadu,
@@ -584,11 +605,21 @@ def refresh_familia_mview(conn: Connection) -> FamiliaRefreshResult:
         )
 
     use_geo = _table_exists(conn, "raw", GEO_TABLE)
+    use_geo_creas = False
     if use_geo:
-        warnings.append(
+        geo_cols = _columns(conn, "raw", GEO_TABLE)
+        use_geo_creas = "creas" in geo_cols
+    if use_geo:
+        msg = (
             "Território (bairro, endereço, CRAS, lat/long) vem de raw.geo__tbl_geo via CEP da família. "
             "Campos *_cadu preservam o texto original do CADU."
         )
+        if use_geo_creas:
+            msg = (
+                "Território (bairro, endereço, CRAS, CREAS, lat/long) vem de raw.geo__tbl_geo via CEP. "
+                "Campos *_cadu preservam o texto original do CADU."
+            )
+        warnings.append(msg)
     else:
         warnings.append(
             "Base geo ausente: bairro/CRAS/endereço continuam do CADU. "
@@ -601,6 +632,7 @@ def refresh_familia_mview(conn: Connection) -> FamiliaRefreshResult:
         pbf_valor=pbf_valor,
         pbf_ref=pbf_ref,
         use_geo=use_geo,
+        use_geo_creas=use_geo_creas,
     )
 
     conn.execute(text("DROP MATERIALIZED VIEW IF EXISTS vig.mvw_familia CASCADE"))

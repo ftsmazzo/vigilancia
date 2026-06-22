@@ -14,6 +14,7 @@ from ..deps import get_current_user
 from ..models import User
 from ..vigilance.familia_mview import ensure_vig_functions
 from ..vigilance.geo_cras import apply_cras_bairros_to_geo, parse_bairros_cras_csv
+from ..vigilance.geo_creas import apply_creas_bairros_to_geo, parse_bairros_creas_csv
 from ..vigilance.geo_viacep import list_missing_ceps_from_cadu, supplement_geo_from_viacep
 from ..municipio_context import get_or_create_context
 
@@ -21,6 +22,65 @@ router = APIRouter(prefix="/geo", tags=["geo"])
 
 CADU_TABLE = "cecad__cadu"
 GEO_TABLE = "geo__tbl_geo"
+
+
+@router.post("/apply-creas-bairros")
+async def geo_apply_creas_bairros(
+    file: UploadFile = File(..., description="Matriz bairros_creas.csv (delimitador ;)"),
+    dry_run: bool = Query(False, description="Se true, só simula sem gravar creas na tbl_geo"),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """
+    Preenche `creas` em raw.geo__tbl_geo cruzando **bairro** com a matriz municipal.
+
+    O arquivo `bairros_creas.csv` tem colunas CREAS 1…5 (cabeçalho + linhas de bairros).
+    """
+    if not _raw_table_exists(db, GEO_TABLE):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Tabela raw.geo__tbl_geo não encontrada. "
+                "Envie tbl_geo.csv em Ingestão → Geo antes."
+            ),
+        )
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Arquivo vazio.")
+
+    try:
+        mapping, conflicts = parse_bairros_creas_csv(content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    with db.bind.begin() as conn:
+        result = apply_creas_bairros_to_geo(
+            conn,
+            bairro_to_creas=mapping,
+            conflicts=conflicts,
+            dry_run=dry_run,
+        )
+
+    return {
+        "status": "preview" if dry_run else "success",
+        "metodo": "bairro",
+        "nota_rua": (
+            "Endereço/rua da tbl_geo não foi usado. "
+            "Se precisar de cruzamento por logradouro, avise para evoluirmos depois."
+        ),
+        "regra_duplicata": "Bairro em mais de um CREAS: mantém o de número maior.",
+        "bairros_no_mapa": result.bairros_no_mapa,
+        "linhas_geo_atualizadas": result.linhas_geo_atualizadas,
+        "linhas_geo_bairro_renomeadas": result.linhas_geo_bairro_renomeadas,
+        "linhas_geo_ja_com_creas": result.linhas_geo_ja_com_creas,
+        "linhas_sem_bairro": result.linhas_sem_bairro,
+        "linhas_geo_com_bairro": result.linhas_geo_total,
+        "bairros_geo_sem_match": result.bairros_geo_sem_match,
+        "conflitos_bairro": result.conflitos_bairro,
+        "amostra_atualizacoes": result.amostra_atualizacoes,
+        "amostra_renomes_bairro": result.amostra_renomes_bairro,
+    }
 
 
 @router.post("/apply-cras-bairros")

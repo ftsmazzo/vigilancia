@@ -8,6 +8,7 @@ from .models import User, UserRole
 from .routers.auth import router as auth_router
 from .routers.geo import router as geo_router
 from .routers.cras import router as cras_router
+from .routers.creas import router as creas_router
 from .routers.sisc import router as sisc_router
 from .routers.ingestion import router as ingestion_router
 from .routers.users import router as users_router
@@ -82,6 +83,7 @@ app.include_router(vigilance_router, prefix="/api/v1")
 app.include_router(geo_router, prefix="/api/v1")
 app.include_router(sisc_router, prefix="/api/v1")
 app.include_router(cras_router, prefix="/api/v1")
+app.include_router(creas_router, prefix="/api/v1")
 app.include_router(assist_router, prefix="/api/v1")
 app.include_router(municipio_router, prefix="/api/v1")
 app.include_router(caracterizacao_router, prefix="/api/v1")

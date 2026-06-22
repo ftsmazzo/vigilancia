@@ -1,21 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import TerritorialFilterSelects, { appendTerritorialParams } from "../components/TerritorialFilterSelects";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 type Props = {
   token: string;
-};
-
-type CrasOption = {
-  cras_cod: string;
-  cras_nome: string;
-  rotulo_ordenado?: string;
-};
-
-type BairroOption = {
-  bairro: string;
-  familias: number;
 };
 
 type IndicadorPainel = {
@@ -33,7 +23,7 @@ type DimensaoPainel = {
 };
 
 type IvsPainel = {
-  recorte: { num_cras: string | null; bairro: string | null };
+  recorte: { num_cras: string | null; num_creas: string | null; bairro: string | null };
   universo: {
     familias_elegiveis: number;
     familias_cadu: number;
@@ -74,51 +64,17 @@ export default function IvsPage({ token }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [painel, setPainel] = useState<IvsPainel | null>(null);
-  const [catalog, setCatalog] = useState<CrasOption[]>([]);
-  const [bairrosOptions, setBairrosOptions] = useState<BairroOption[]>([]);
-  const [loadingBairros, setLoadingBairros] = useState(false);
   const [crasCod, setCrasCod] = useState("__todos__");
+  const [creasCod, setCreasCod] = useState("__todos__");
   const [bairroFiltro, setBairroFiltro] = useState("");
   const [dimAtiva, setDimAtiva] = useState<DimSigla>(null);
-
-  useEffect(() => {
-    fetch(`${API_URL}/api/v1/cras/catalog`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(async (res) => {
-        if (!res.ok) return;
-        const data = (await res.json()) as { items: CrasOption[] };
-        setCatalog(data.items ?? []);
-      })
-      .catch(() => setCatalog([]));
-  }, [token]);
-
-  useEffect(() => {
-    setBairroFiltro("");
-    if (!crasCod || crasCod === "__todos__" || crasCod === "__sem_cras__") {
-      setBairrosOptions([]);
-      return;
-    }
-    setLoadingBairros(true);
-    fetch(`${API_URL}/api/v1/cras/bairros?num_cras=${encodeURIComponent(crasCod)}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(async (res) => {
-        if (!res.ok) throw new Error();
-        const data = (await res.json()) as { items: BairroOption[] };
-        setBairrosOptions(data.items ?? []);
-      })
-      .catch(() => setBairrosOptions([]))
-      .finally(() => setLoadingBairros(false));
-  }, [token, crasCod]);
 
   const loadPainel = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       const params = new URLSearchParams();
-      if (crasCod && crasCod !== "__todos__") params.set("num_cras", crasCod);
-      if (bairroFiltro.trim()) params.set("bairro", bairroFiltro.trim());
+      appendTerritorialParams(params, crasCod, creasCod, bairroFiltro, { ivsMode: true });
       if (dimAtiva) params.set("dimensao", dimAtiva);
       const qs = params.toString();
       const response = await fetch(`${API_URL}/api/v1/vigilance/ivs/painel${qs ? `?${qs}` : ""}`, {
@@ -139,7 +95,7 @@ export default function IvsPage({ token }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [token, crasCod, bairroFiltro, dimAtiva]);
+  }, [token, crasCod, creasCod, bairroFiltro, dimAtiva]);
 
   useEffect(() => {
     void loadPainel();
@@ -153,18 +109,13 @@ export default function IvsPage({ token }: Props) {
   }, [painel, dimAtiva]);
 
   const tituloRecorte = useMemo(() => {
-    if (crasCod === "__todos__" && !bairroFiltro.trim()) return "Município";
-    if (crasCod === "__sem_cras__") return "Sem referência territorial";
-    const c = catalog.find((x) => x.cras_cod === crasCod);
-    const crasLabel = c?.rotulo_ordenado || c?.cras_nome || crasCod;
-    if (bairroFiltro.trim()) {
-      return `${crasLabel} · ${bairroFiltro.trim().toLocaleUpperCase("pt-BR")}`;
-    }
-    return crasLabel;
-  }, [crasCod, bairroFiltro, catalog]);
-
-  const bairroSelectDisabled =
-    crasCod === "__todos__" || crasCod === "__sem_cras__" || loadingBairros;
+    if (crasCod === "__todos__" && creasCod === "__todos__" && !bairroFiltro.trim()) return "Município";
+    const parts: string[] = [];
+    if (creasCod !== "__todos__") parts.push(creasCod === "__sem_creas__" ? "Sem CREAS" : `CREAS ${creasCod}`);
+    if (crasCod !== "__todos__") parts.push(crasCod === "__sem_cras__" ? "Sem CRAS" : `CRAS ${crasCod}`);
+    if (bairroFiltro.trim()) parts.push(bairroFiltro.trim().toLocaleUpperCase("pt-BR"));
+    return parts.length > 0 ? parts.join(" · ") : "Município";
+  }, [crasCod, creasCod, bairroFiltro]);
 
   return (
     <div className="ivs-page">
@@ -187,60 +138,35 @@ export default function IvsPage({ token }: Props) {
       </header>
 
       <section className="ivs-filtros fx-card">
-        <div className="ivs-filtros-grid">
-          <label>
-            <span>Recorte territorial</span>
-            <select
-              value={crasCod}
-              onChange={(e) => {
-                setCrasCod(e.target.value);
-                setBairroFiltro("");
-              }}
-            >
-              <option value="__todos__">Município (todas as famílias)</option>
-              {catalog.map((c) => (
-                <option key={c.cras_cod} value={c.cras_cod}>
-                  {c.rotulo_ordenado || c.cras_nome || c.cras_cod}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>Bairro</span>
-            <select
-              value={bairroFiltro}
-              onChange={(e) => setBairroFiltro(e.target.value)}
-              disabled={bairroSelectDisabled}
-            >
-              <option value="">
-                {crasCod === "__todos__"
-                  ? "Selecione um CRAS primeiro"
-                  : loadingBairros
-                    ? "Carregando bairros…"
-                    : bairrosOptions.length === 0
-                      ? "Nenhum bairro territorial"
-                      : "Todos os bairros do CRAS"}
-              </option>
-              {bairrosOptions.map((b) => (
-                <option key={b.bairro} value={b.bairro}>
-                  {b.bairro.toLocaleUpperCase("pt-BR")} · {b.familias.toLocaleString("pt-BR")} fam.
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={() => {
-              setCrasCod("__todos__");
-              setBairroFiltro("");
-              setBairrosOptions([]);
-              setDimAtiva(null);
-            }}
-          >
-            Limpar filtros
-          </button>
-        </div>
+        <TerritorialFilterSelects
+          token={token}
+          loading={loading}
+          crasCod={crasCod}
+          creasCod={creasCod}
+          bairroFiltro={bairroFiltro}
+          onCrasChange={(v) => {
+            setCrasCod(v);
+            setBairroFiltro("");
+          }}
+          onCreasChange={(v) => {
+            setCreasCod(v);
+            setBairroFiltro("");
+          }}
+          onBairroChange={setBairroFiltro}
+          className="ivs-filtros-grid"
+        />
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={() => {
+            setCrasCod("__todos__");
+            setCreasCod("__todos__");
+            setBairroFiltro("");
+            setDimAtiva(null);
+          }}
+        >
+          Limpar filtros
+        </button>
         <p className="ivs-recorte-label">
           Exibindo: <strong>{tituloRecorte}</strong>
         </p>

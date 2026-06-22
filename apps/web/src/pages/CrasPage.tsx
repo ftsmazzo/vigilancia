@@ -98,7 +98,11 @@ type CrasPainel = {
 
 export default function CrasPage({ token }: Props) {
   const [catalog, setCatalog] = useState<CrasCatalogItem[]>([]);
+  const [creasCatalog, setCreasCatalog] = useState<
+    Array<{ creas_cod: string; creas_nome: string; rotulo_ordenado?: string; familias: number }>
+  >([]);
   const [crasCod, setCrasCod] = useState("__todos__");
+  const [creasCod, setCreasCod] = useState("__todos__");
   const [painel, setPainel] = useState<CrasPainel | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -122,12 +126,14 @@ export default function CrasPage({ token }: Props) {
   }, [token]);
 
   const loadPainel = useCallback(
-    async (cod: string) => {
+    async (cod: string, creas: string) => {
       setLoading(true);
       setError("");
       try {
-        const q = cod && cod !== "__todos__" ? `?cras_cod=${encodeURIComponent(cod)}` : "?cras_cod=__todos__";
-        const res = await apiGet(`/api/v1/cras/painel${q}`, token);
+        const params = new URLSearchParams();
+        params.set("cras_cod", cod && cod !== "__todos__" ? cod : "__todos__");
+        if (creas && creas !== "__todos__") params.set("creas_cod", creas);
+        const res = await apiGet(`/api/v1/cras/painel?${params.toString()}`, token);
         const data = (await res.json().catch(() => ({}))) as CrasPainel & { detail?: unknown };
         if (!res.ok) {
           throw new Error(typeof data.detail === "string" ? data.detail : `Falha no painel CRAS (${res.status}).`);
@@ -147,18 +153,23 @@ export default function CrasPage({ token }: Props) {
     void (async () => {
       try {
         await loadCatalog();
+        const res = await apiGet("/api/v1/creas/catalog", token);
+        const data = (await res.json().catch(() => ({}))) as {
+          items?: Array<{ creas_cod: string; creas_nome: string; rotulo_ordenado?: string; familias: number }>;
+        };
+        if (res.ok) setCreasCatalog(data.items ?? []);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Erro ao carregar catálogo.");
       }
     })();
-  }, [loadCatalog]);
+  }, [loadCatalog, token]);
 
   useEffect(() => {
-    void loadPainel(crasCod);
-  }, [crasCod, loadPainel]);
+    void loadPainel(crasCod, creasCod);
+  }, [crasCod, creasCod, loadPainel]);
 
   const r = painel?.resumo;
-  const isTodos = crasCod === "__todos__";
+  const isTodos = crasCod === "__todos__" && creasCod === "__todos__";
   const sisc = painel?.sisc;
 
   return (
@@ -191,6 +202,26 @@ export default function CrasPage({ token }: Props) {
                   (c.cras_codigo_exibicao !== "—" ? ` [${c.cras_codigo_exibicao}]` : "")}
                 {" · "}
                 {c.familias.toLocaleString("pt-BR")} fam.
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="cras-select-wrap">
+          <span>Unidade (CREAS)</span>
+          <select
+            className="cras-select"
+            value={creasCod}
+            onChange={(ev) => setCreasCod(ev.target.value)}
+            disabled={loading}
+          >
+            <option value="__todos__">— Todos os CREAS —</option>
+            <option value="__sem_creas__">Sem CREAS na geo</option>
+            {creasCatalog.map((c) => (
+              <option key={c.creas_cod} value={c.creas_cod}>
+                {(c.rotulo_ordenado ?? c.creas_nome) +
+                  " · " +
+                  c.familias.toLocaleString("pt-BR") +
+                  " fam."}
               </option>
             ))}
           </select>

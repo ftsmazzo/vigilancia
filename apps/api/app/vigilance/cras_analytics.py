@@ -16,6 +16,7 @@ from .cadu_classificacao import (
     tem_deficiencia_expr,
 )
 from .cadu_params import SM_METADE
+from .creas_analytics import _creas_filter_clause, _creas_nome_sql
 from .familia_mview import _table_exists
 
 SISC_MVIEW = "mvw_sisc_qualificado"
@@ -384,11 +385,19 @@ def _sisc_painel(conn: Connection, cras_sel: str) -> dict:
     }
 
 
-def cras_painel_from_views(conn: Connection, cras_cod: str | None = None) -> dict:
+def cras_painel_from_views(
+    conn: Connection,
+    cras_cod: str | None = None,
+    creas_cod: str | None = None,
+) -> dict:
     _require_views(conn)
     where_extra, params = _cras_filter_clause(cras_cod)
+    creas_extra, creas_params = _creas_filter_clause(creas_cod)
+    where_extra += creas_extra
+    params.update(creas_params)
     ck = _cras_key_sql("fam")
     cn = _cras_nome_sql("fam")
+    cren = _creas_nome_sql("fam")
 
     base = conn.execute(
         text(
@@ -424,6 +433,7 @@ def cras_painel_from_views(conn: Connection, cras_cod: str | None = None) -> dic
               COUNT(pes.cadu_row_id) FILTER (WHERE {cadu_sim('pes.marc_sit_rua')})::bigint AS pessoas_situacao_rua,
               COUNT(pes.cadu_row_id) FILTER (WHERE {cadu_sim('pes.ind_atend_cras')})::bigint AS pessoas_atendidas_cras,
               MAX({cn}) AS cras_nome,
+              MAX({cren}) AS creas_nome,
               MAX({ck}) AS cras_cod_raw
             FROM fam
             LEFT JOIN pes ON pes.codigo_familiar = fam.codigo_familiar
@@ -442,15 +452,27 @@ def cras_painel_from_views(conn: Connection, cras_cod: str | None = None) -> dic
     denom_sexo = homens + mulheres
 
     cras_sel = cras_cod.strip() if cras_cod else "__todos__"
-    if cras_sel in ("", "__todos__"):
+    creas_sel = creas_cod.strip() if creas_cod else "__todos__"
+    if cras_sel in ("", "__todos__") and creas_sel in ("", "__todos__"):
         titulo = "Município — todos os CRAS (CADU)"
         cod_exib = "__todos__"
-    elif cras_sel == "__sem_cras__":
+    elif cras_sel == "__sem_cras__" and creas_sel in ("", "__todos__"):
         titulo = "Famílias sem CRAS territorial na geo (CEP sem match ou sem cras)"
         cod_exib = "__sem_cras__"
     else:
-        titulo = base.get("cras_nome") or cras_sel
-        cod_exib = cras_sel
+        parts: list[str] = []
+        if creas_sel not in ("", "__todos__"):
+            if creas_sel == "__sem_creas__":
+                parts.append("Sem CREAS territorial na geo")
+            else:
+                parts.append(str(base.get("creas_nome") or f"CREAS {creas_sel}"))
+        if cras_sel not in ("", "__todos__"):
+            if cras_sel == "__sem_cras__":
+                parts.append("Sem CRAS territorial na geo")
+            else:
+                parts.append(str(base.get("cras_nome") or cras_sel))
+        titulo = " · ".join(parts) if parts else "Município — todos os CRAS (CADU)"
+        cod_exib = cras_sel if cras_sel not in ("", "__todos__") else "__todos__"
 
     denom_fam = familias or 1
     pessoas_def = int(base.get("pessoas_com_deficiencia") or 0)
@@ -458,6 +480,7 @@ def cras_painel_from_views(conn: Connection, cras_cod: str | None = None) -> dic
         "disponivel": True,
         "painel_versao": PAINEL_CRAS_VERSAO,
         "cras_selecionado": cod_exib,
+        "creas_selecionado": creas_sel,
         "cras_titulo": titulo,
         "dicionario": {
             "codigo_campo": "raw.geo__tbl_geo.cras → vig.mvw_familia.num_cras (via CEP)",
@@ -490,7 +513,7 @@ def cras_painel_from_views(conn: Connection, cras_cod: str | None = None) -> dic
         "sisc": _sisc_painel(conn, cras_sel),
     }
 
-    if cras_sel in ("", "__todos__"):
+    if cras_sel in ("", "__todos__") and creas_sel in ("", "__todos__"):
         payload["tabela_cras"] = cras_catalog_from_views(conn)
     else:
         payload["por_escolaridade"] = _pessoas_bucket(conn, where_extra, params, ESCOLARIDADE_EXPR, 10)

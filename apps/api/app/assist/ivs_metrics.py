@@ -172,7 +172,7 @@ def _fetch_recorte(
     idx_col: str | None = None,
     flag_col: str | None = None,
 ) -> dict[str, Any]:
-    where, params = ivs_filter_clause(num_cras=num_cras, bairro=bairro)
+    where, params = ivs_filter_clause(num_cras=num_cras, num_creas=None, bairro=bairro)
     if flag_col:
         value_sql = (
             f"ROUND(100.0 * AVG(i.{flag_col}::numeric) FILTER (WHERE i.elegivel_ivs)::numeric, 2)"
@@ -546,7 +546,7 @@ def try_ivs_metric(
         resolution=resolution,
     )
 
-    where, params = ivs_filter_clause(num_cras=num_cras, bairro=bairro_canon)
+    where, params = ivs_filter_clause(num_cras=num_cras, num_creas=None, bairro=bairro_canon)
     if flag_col:
         metric_sql = f"100*AVG(i.{flag_col}::numeric) FILTER (WHERE i.elegivel_ivs)"
     elif idx_col:

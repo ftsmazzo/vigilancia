@@ -244,6 +244,10 @@ export default function IngestaoPage({ token }: Props) {
   const [geoCrasLoading, setGeoCrasLoading] = useState(false);
   const [geoCrasStatus, setGeoCrasStatus] = useState("");
   const [geoCrasPreview, setGeoCrasPreview] = useState<Record<string, unknown> | null>(null);
+  const [bairrosCreasFile, setBairrosCreasFile] = useState<File | null>(null);
+  const [geoCreasLoading, setGeoCreasLoading] = useState(false);
+  const [geoCreasStatus, setGeoCreasStatus] = useState("");
+  const [geoCreasPreview, setGeoCreasPreview] = useState<Record<string, unknown> | null>(null);
   const [geoMissingLoading, setGeoMissingLoading] = useState(false);
   const [geoMissingCeps, setGeoMissingCeps] = useState<Array<Record<string, unknown>>>([]);
   const [geoViaCepLoading, setGeoViaCepLoading] = useState(false);
@@ -481,6 +485,49 @@ export default function IngestaoPage({ token }: Props) {
       setGeoCrasStatus(e instanceof Error ? e.message : "Erro inesperado.");
     } finally {
       setGeoCrasLoading(false);
+    }
+  }
+
+  async function applyGeoCreas(dryRun: boolean) {
+    if (!bairrosCreasFile) {
+      setGeoCreasStatus("Selecione o arquivo bairros_creas.csv.");
+      return;
+    }
+    setGeoCreasLoading(true);
+    setGeoCreasStatus("");
+    if (!dryRun) setGeoCreasPreview(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", bairrosCreasFile);
+      const q = dryRun ? "?dry_run=true" : "";
+      const response = await fetch(`${API_URL}/api/v1/geo/apply-creas-bairros${q}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      });
+      const data = (await response.json().catch(() => ({}))) as Record<string, unknown> & { detail?: unknown };
+      if (!response.ok) {
+        const msg =
+          typeof data.detail === "string"
+            ? data.detail
+            : "Falha ao aplicar CREAS na tbl_geo.";
+        throw new Error(msg);
+      }
+      setGeoCreasPreview(data);
+      if (dryRun) {
+        setGeoCreasStatus(
+          `Prévia: ${String(data.linhas_geo_atualizadas ?? 0)} linhas receberiam CREAS ` +
+            `(mapa com ${String(data.bairros_no_mapa ?? 0)} bairros).`,
+        );
+      } else {
+        setGeoCreasStatus(
+          `CREAS gravado em ${String(data.linhas_geo_atualizadas ?? 0)} linhas de raw.geo__tbl_geo. Regenere a visão Família em Vigilância.`,
+        );
+      }
+    } catch (e) {
+      setGeoCreasStatus(e instanceof Error ? e.message : "Erro inesperado.");
+    } finally {
+      setGeoCreasLoading(false);
     }
   }
 
@@ -1166,6 +1213,58 @@ export default function IngestaoPage({ token }: Props) {
                           {(geoCrasPreview.conflitos_bairro as unknown[]).length}
                         </li>
                       )}
+                  </ul>
+                )}
+              </div>
+
+              <div
+                className="auth-form"
+                style={{ marginTop: "1.25rem", padding: "0.75rem 0", borderTop: "1px solid var(--color-border, #333)" }}
+              >
+                <h2 style={{ fontSize: "1.05rem", margin: "0 0 0.5rem" }}>CREAS por bairro (pontual)</h2>
+                <p className="ingestao-desc" style={{ marginBottom: "0.75rem" }}>
+                  Envie <code className="inline-code">bairros_creas.csv</code> (matriz CREAS 1–5 × bairros, delimitador{" "}
+                  <strong>;</strong>). Preenche <code className="inline-code">creas</code> em{" "}
+                  <code className="inline-code">raw.geo__tbl_geo</code> pelo <strong>bairro</strong>. Depois regenere a
+                  visão Família em Vigilância.
+                </p>
+                <label>
+                  Arquivo bairros_creas.csv
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={(ev) => setBairrosCreasFile(ev.target.files?.[0] || null)}
+                    disabled={geoCreasLoading}
+                  />
+                </label>
+                <div className="vig-actions" style={{ flexWrap: "wrap", gap: "0.5rem", marginTop: "0.5rem" }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => void applyGeoCreas(true)}
+                    disabled={geoCreasLoading}
+                  >
+                    {geoCreasLoading ? "Processando…" : "Prévia (dry-run)"}
+                  </button>
+                  <button type="button" onClick={() => void applyGeoCreas(false)} disabled={geoCreasLoading}>
+                    Aplicar CREAS na tbl_geo
+                  </button>
+                </div>
+                {geoCreasStatus && (
+                  <p
+                    className={
+                      geoCreasStatus.includes("Prévia") || geoCreasStatus.includes("gravado") ? "status-ok" : "error"
+                    }
+                    style={{ marginTop: "0.75rem" }}
+                  >
+                    {geoCreasStatus}
+                  </p>
+                )}
+                {geoCreasPreview && (
+                  <ul className="vig-warnings" style={{ listStyle: "disc", marginTop: "0.5rem" }}>
+                    <li>Bairros no mapa: {String(geoCreasPreview.bairros_no_mapa ?? "—")}</li>
+                    <li>Linhas com bairro na geo: {String(geoCreasPreview.linhas_geo_com_bairro ?? "—")}</li>
+                    <li>CREAS atualizados: {String(geoCreasPreview.linhas_geo_atualizadas ?? "—")}</li>
                   </ul>
                 )}
               </div>

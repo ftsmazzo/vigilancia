@@ -253,6 +253,8 @@ def build_sibec_manut_mview_sql(
       fam.bairro,
       fam.num_cras,
       fam.nom_cras,
+      fam.num_creas,
+      fam.nom_creas,
       (fam.codigo_familiar IS NOT NULL) AS vinculo_cadu,
       (
         fam.codigo_familiar IS NOT NULL

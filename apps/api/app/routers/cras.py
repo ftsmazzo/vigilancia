@@ -58,6 +58,10 @@ def get_cras_painel(
         None,
         description="Código CRAS (num_cras) ou __todos__ / __sem_cras__",
     ),
+    creas_cod: str | None = Query(
+        None,
+        description="Código CREAS (num_creas) ou __todos__ / __sem_creas__",
+    ),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
@@ -67,7 +71,7 @@ def get_cras_painel(
   """
     try:
         with db.bind.connect() as conn:
-            return cras_painel_from_views(conn, cras_cod)
+            return cras_painel_from_views(conn, cras_cod, creas_cod)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:

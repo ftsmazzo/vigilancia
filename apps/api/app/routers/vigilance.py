@@ -40,8 +40,8 @@ def _require_ivs_mview(conn) -> None:
         )
 
 
-def _ivs_resumo_sql(*, num_cras: str | None, bairro: str | None) -> tuple[str, dict]:
-    where, params = ivs_filter_clause(num_cras=num_cras, bairro=bairro)
+def _ivs_resumo_sql(*, num_cras: str | None, num_creas: str | None, bairro: str | None) -> tuple[str, dict]:
+    where, params = ivs_filter_clause(num_cras=num_cras, num_creas=num_creas, bairro=bairro)
     sql = f"""
         SELECT
           COUNT(*) FILTER (WHERE i.elegivel_ivs)::bigint AS familias_elegiveis,
@@ -654,6 +654,7 @@ def get_mapas_bairros(
 @router.get("/mapas-heatmap")
 def get_mapas_heatmap(
     cras_cod: str | None = Query(None, description="Código CRAS, __todos__ ou __sem_cras__"),
+    creas_cod: str | None = Query(None, description="Código CREAS, __todos__ ou __sem_creas__"),
     bairro: str | None = Query(None, description="Bairro territorial (match exato)"),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
@@ -661,7 +662,7 @@ def get_mapas_heatmap(
     """Mapas de calor por bairro georreferenciado (crianças, idosos, PBF, escolaridade)."""
     try:
         with db.bind.begin() as conn:
-            return mapas_heatmap_from_views(conn, cras_cod, bairro)
+            return mapas_heatmap_from_views(conn, cras_cod, bairro, creas_cod)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
@@ -685,12 +686,13 @@ def get_sibec_competencias(
 def get_sibec_painel(
     competencia: str | None = Query(None, description="AAAAMM; padrão = última competência"),
     cras_cod: str | None = Query(None, description="Código CRAS, __todos__ ou __sem_cras__"),
+    creas_cod: str | None = Query(None, description="Código CREAS, __todos__ ou __sem_creas__"),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
     """Painel SIBEC Manutenções — KPIs por família×competência com territorialização."""
     with db.bind.begin() as conn:
-        return fetch_sibec_painel(conn, competencia=competencia, cras_cod=cras_cod)
+        return fetch_sibec_painel(conn, competencia=competencia, cras_cod=cras_cod, creas_cod=creas_cod)
 
 
 @router.get("/sibec/serie")
@@ -698,12 +700,13 @@ def get_sibec_serie(
     de: str | None = Query(None, description="Competência inicial AAAAMM"),
     ate: str | None = Query(None, description="Competência final AAAAMM"),
     cras_cod: str | None = Query(None, description="Código CRAS, __todos__ ou __sem_cras__"),
+    creas_cod: str | None = Query(None, description="Código CREAS, __todos__ ou __sem_creas__"),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
     """Série temporal de manutenções (famílias distintas por competência)."""
     with db.bind.begin() as conn:
-        return fetch_sibec_serie(conn, de=de, ate=ate, cras_cod=cras_cod)
+        return fetch_sibec_serie(conn, de=de, ate=ate, cras_cod=cras_cod, creas_cod=creas_cod)
 
 
 @router.post("/materialized-views/sibec-manut/refresh")
@@ -941,6 +944,7 @@ def get_ivs_painel(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
     num_cras: str | None = Query(None, description="Código CRAS, __sem_cras__ ou vazio = município"),
+    num_creas: str | None = Query(None, description="Código CREAS, __sem_creas__ ou vazio = todos"),
     bairro: str | None = Query(None, description="Filtra por bairro (ILIKE parcial)"),
     dimensao: str | None = Query(None, description="Sigla NC, DPI, DCA, TQA, DR ou CH — detalhe de indicadores"),
 ):
@@ -950,6 +954,7 @@ def get_ivs_painel(
         return fetch_ivs_painel(
             conn,
             num_cras=num_cras if num_cras and num_cras.strip() else None,
+            num_creas=num_creas if num_creas and num_creas.strip() else None,
             bairro=bairro,
             dimensao=dimensao,
         )
@@ -960,12 +965,13 @@ def get_ivs_resumo(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
     num_cras: str | None = Query(None, description="Filtra por CRAS (vig.mvw_familia.num_cras)"),
+    num_creas: str | None = Query(None, description="Filtra por CREAS (vig.mvw_familia.num_creas)"),
     bairro: str | None = Query(None, description="Filtra por bairro (ILIKE parcial)"),
 ):
     """Médias IVS e dimensões no universo elegível (requer refresh prévio)."""
     with db.bind.begin() as conn:
         _require_ivs_mview(conn)
-        sql, params = _ivs_resumo_sql(num_cras=num_cras, bairro=bairro)
+        sql, params = _ivs_resumo_sql(num_cras=num_cras, num_creas=num_creas, bairro=bairro)
         row = conn.execute(text(sql), params).mappings().first()
     out = dict(row or {})
     if num_cras is not None:
