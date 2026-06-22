@@ -310,23 +310,25 @@ async def import_raw_table(
                 from ..vigilance.geo_territorial_maps import reapply_persisted_territorial_maps
 
                 territorial_reapply = reapply_persisted_territorial_maps(connection)
-                if territorial_reapply.get("reaplicado"):
-                    try:
-                        from ..vigilance.familia_mview import refresh_familia_mview
-
-                        fr = refresh_familia_mview(connection)
-                        familia_refresh = {
-                            "familias": fr.row_count,
-                            "warnings": fr.warnings,
-                        }
-                    except ValueError as exc:
-                        familia_refresh = {"skipped": True, "motivo": str(exc)}
 
         run.status = "success"
         run.row_count = len(rows)
         run.finished_at = datetime.utcnow()
         db.add(run)
         db.commit()
+
+        if target_table == "geo__tbl_geo" and territorial_reapply and territorial_reapply.get("reaplicado"):
+            try:
+                with db.bind.begin() as connection:
+                    from ..vigilance.familia_mview import refresh_familia_mview
+
+                    fr = refresh_familia_mview(connection)
+                familia_refresh = {
+                    "familias": fr.row_count,
+                    "warnings": fr.warnings,
+                }
+            except ValueError as exc:
+                familia_refresh = {"skipped": True, "motivo": str(exc)}
     except HTTPException as exc:
         run.status = "failed"
         run.error_message = str(exc.detail)[:500]

@@ -72,18 +72,20 @@ async def geo_apply_creas_bairros(
             conflicts=conflicts,
             dry_run=dry_run,
         )
-        familia_refresh: dict | None = None
         if not dry_run:
             persist_creas_map(conn, mapping)
-            if refresh_familia:
-                try:
-                    fr = refresh_familia_mview(conn)
-                    familia_refresh = {
-                        "familias": fr.row_count,
-                        "warnings": fr.warnings,
-                    }
-                except ValueError as exc:
-                    familia_refresh = {"skipped": True, "motivo": str(exc)}
+
+    familia_refresh: dict | None = None
+    if not dry_run and refresh_familia:
+        try:
+            with db.bind.begin() as conn:
+                fr = refresh_familia_mview(conn)
+            familia_refresh = {
+                "familias": fr.row_count,
+                "warnings": fr.warnings,
+            }
+        except ValueError as exc:
+            familia_refresh = {"skipped": True, "motivo": str(exc)}
 
     payload: dict = {
         "status": "preview" if dry_run else "success",
@@ -131,16 +133,19 @@ def geo_reapply_territorial_maps(
     with db.bind.begin() as conn:
         result = reapply_persisted_territorial_maps(conn)
         counts = map_counts(conn)
-        familia_refresh: dict | None = None
-        if refresh_familia and result.get("reaplicado"):
-            try:
+
+    familia_refresh: dict | None = None
+    if refresh_familia and result.get("reaplicado"):
+        try:
+            with db.bind.begin() as conn:
                 fr = refresh_familia_mview(conn)
-                familia_refresh = {
-                    "familias": fr.row_count,
-                    "warnings": fr.warnings,
-                }
-            except ValueError as exc:
-                familia_refresh = {"skipped": True, "motivo": str(exc)}
+            familia_refresh = {
+                "familias": fr.row_count,
+                "warnings": fr.warnings,
+            }
+        except ValueError as exc:
+            familia_refresh = {"skipped": True, "motivo": str(exc)}
+
     out = {
         "status": "success" if result.get("reaplicado") else "skipped",
         **result,

@@ -16,6 +16,11 @@ CADU_TABLE = "cecad__cadu"
 PBF_TABLE = "sibec__programa_bolsa_familia"
 GEO_TABLE = "geo__tbl_geo"
 
+# Evita InternalError "tuple concurrently updated" no pg_catalog quando dois
+# refreshes/disparos paralelos executam CREATE OR REPLACE FUNCTION ao mesmo tempo.
+VIG_FUNCTIONS_ADVISORY_LOCK = 89472340
+FAMILIA_MVIEW_ADVISORY_LOCK = 89472341
+
 PBF_COD_CANDIDATES = (
     "cod_familiar",
     "cod_familiar_fam",
@@ -247,7 +252,12 @@ $$;
 ]
 
 
+def _advisory_xact_lock(conn: Connection, lock_id: int) -> None:
+    conn.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id})
+
+
 def ensure_vig_functions(conn: Connection) -> None:
+    _advisory_xact_lock(conn, VIG_FUNCTIONS_ADVISORY_LOCK)
     for stmt in VIG_DDL_STATEMENTS:
         conn.execute(text(stmt))
 
@@ -569,6 +579,7 @@ def build_familia_mview_sql(
 
 
 def refresh_familia_mview(conn: Connection) -> FamiliaRefreshResult:
+    _advisory_xact_lock(conn, FAMILIA_MVIEW_ADVISORY_LOCK)
     warnings: list[str] = []
     ensure_vig_functions(conn)
 
