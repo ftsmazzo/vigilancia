@@ -770,6 +770,11 @@ def try_planning_demand_metric(
     user_first_name: str = "",
 ) -> dict[str, Any] | None:
     """Demanda potencial no CADU para planejar SCFV ou ação territorial (≠ matrícula SISC)."""
+    from .multi_bairro_metrics import is_simple_territorial_count, message_has_bairro_list_scope
+
+    if is_simple_territorial_count(message, transcript) or message_has_bairro_list_scope(message):
+        return None
+
     cadu_acao = try_cadu_territorial_acao_metric(
         conn, message, transcript, db=db, user_first_name=user_first_name
     )

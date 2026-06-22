@@ -45,7 +45,7 @@ from .llm import chat_completion
 from .maestro_router import resolve_turn_route
 from .municipio_agent import run_municipio_agent
 from .planning_metrics import try_planning_demand_metric
-from .multi_bairro_metrics import try_multi_bairro_pbf_metric
+from .multi_bairro_metrics import try_multi_bairro_pbf_metric, is_simple_territorial_count
 from .policy_agent import run_policy_agent
 from .query_task_spec import (
     QueryTaskSpec,
@@ -223,7 +223,7 @@ def _run_sql_agent_turn(
 ) -> dict[str, Any] | None:
     """AgenteSQL para cruzamentos livres (SIBEC×CADU, raça, etc.)."""
     multi_bairro = try_multi_bairro_pbf_metric(
-        conn, data_message, user_first_name=user_first_name
+        conn, data_message, transcript, user_first_name=user_first_name
     )
     if multi_bairro:
         answer = _answer_via_analyst(
@@ -671,6 +671,39 @@ def run_orchestrator_turn(
         effective_message=effective_message,
     )
     data_message = route.effective_message or effective_message
+
+    if is_simple_territorial_count(message, transcript) or is_simple_territorial_count(
+        effective_message, transcript
+    ):
+        multi_early = try_multi_bairro_pbf_metric(
+            conn,
+            data_message,
+            transcript,
+            user_first_name=first_name,
+        )
+        if multi_early:
+            answer = _answer_via_analyst(
+                data_message,
+                multi_early,
+                conn=conn,
+                db=db,
+                transcript=transcript,
+                user_first_name=first_name,
+                thread_brief=route.thread_brief,
+                municipio_block=municipio_block,
+                rag_block=rag_block,
+                session_context=merged_ctx,
+            )
+            return _data_payload(
+                answer,
+                effective_message=effective_message,
+                task_spec=task_spec,
+                sql=multi_early.get("sql"),
+                row_count=multi_early.get("row_count", 0),
+                preview=multi_early.get("preview") or [],
+                mode="data",
+                filters_applied=multi_early.get("filters_applied"),
+            )
 
     if route.primary == "planning":
         policy_rag = query_knowledge_base(

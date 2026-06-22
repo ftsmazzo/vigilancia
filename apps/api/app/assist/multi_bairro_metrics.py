@@ -102,6 +102,48 @@ def message_has_bairro_list_scope(message: str) -> bool:
     return len(extract_bairro_list(message)) >= 2
 
 
+def find_bairro_list_in_conversation(
+    message: str,
+    transcript: list[dict[str, str]] | None = None,
+) -> list[str]:
+    """Lista na mensagem atual ou em turno anterior (ex.: usuário repete sem colar de novo)."""
+    names = extract_bairro_list(message)
+    if len(names) >= 2:
+        return names
+    refers_list = bool(
+        _LIST_INTRO.search(message or "")
+        or _BAIRRO_LIST_HEADER.search(message or "")
+        or re.search(r"\b(?:nesses|nestes|seguintes)\s+bairros?\b", message or "", re.I)
+    )
+    if not refers_list or not transcript:
+        return names
+    for msg in reversed(transcript):
+        if msg.get("role") != "user":
+            continue
+        prev = extract_bairro_list(msg.get("content", ""))
+        if len(prev) >= 2:
+            return prev
+    return names
+
+
+def is_simple_territorial_count(
+    message: str,
+    transcript: list[dict[str, str]] | None = None,
+) -> bool:
+    """Contagem numérica territorial — NÃO é planejamento/desbloqueio."""
+    text_msg = (message or "").strip()
+    if not text_msg or not _QUANT.search(text_msg):
+        return False
+    if message_has_bairro_list_scope(text_msg):
+        return True
+    if len(find_bairro_list_in_conversation(text_msg, transcript)) >= 2:
+        return True
+    if _FAMILIAS.search(text_msg) or _PESSOAS.search(text_msg):
+        if _PBF.search(text_msg) and re.search(r"\bbairros?\b", text_msg, re.I):
+            return True
+    return False
+
+
 @dataclass
 class ResolvedBairroItem:
     input_name: str
@@ -214,6 +256,7 @@ def _count_pessoas_pbf_multi(
 def try_multi_bairro_pbf_metric(
     conn: Connection,
     message: str,
+    transcript: list[dict[str, str]] | None = None,
     *,
     user_first_name: str = "",
 ) -> dict[str, Any] | None:
@@ -226,7 +269,7 @@ def try_multi_bairro_pbf_metric(
     if not _PBF.search(text_msg) and not _FAMILIAS.search(text_msg):
         return None
 
-    names = extract_bairro_list(text_msg)
+    names = find_bairro_list_in_conversation(text_msg, transcript)
     if len(names) < 2:
         return None
 

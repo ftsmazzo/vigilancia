@@ -55,11 +55,13 @@ _CADU_ACAO = re.compile(
 _PBF_DESBLOQUEIO = re.compile(
     r"desbloque|"
     r"a[cç][ãa]o.*(?:bloque|bolsa\s+fam[ií]lia|pbf)|"
-    r"(?:bloque|bolsa\s+fam[ií]lia|pbf).*(?:a[cç][ãa]o|territ[oó]rio|bairro|prioriz)|"
+    r"(?:bloque|pbf).*(?:a[cç][ãa]o|prioriz|desbloque)|"
+    r"bolsa\s+fam[ií]lia.*(?:a[cç][ãa]o|prioriz|desbloque)|"
     r"benef[ií]cio\s+bloquead|"
     r"manuten[cç][ãa]o.*bolsa|bolsa.*manuten[cç]",
     re.I,
 )
+_SIMPLE_COUNT = re.compile(r"\bquantas?\b|\bquantos?\b|\btotal\b|\bn[uú]mero\b", re.I)
 _BAIRRO_FOLLOWUP = re.compile(
     r"\bbairro\b.*(?:desse|nesse|deste|dese|do)\s+cras|"
     r"(?:desse|nesse|deste|dese|do)\s+cras.*\bbairro\b|"
@@ -145,12 +147,22 @@ def is_cadu_acao_turn(message: str, transcript: list[dict[str, str]] | None) -> 
 
 def is_pbf_desbloqueio_acao_turn(message: str, transcript: list[dict[str, str]] | None) -> bool:
     """Ação territorial de desbloqueio / manutenção PBF (SIBEC bloqueios)."""
+    from .multi_bairro_metrics import is_simple_territorial_count, message_has_bairro_list_scope
+
     text_msg = message.strip()
     if not text_msg:
+        return False
+    if is_simple_territorial_count(text_msg, transcript) or message_has_bairro_list_scope(text_msg):
         return False
     if is_territorial_comparison_turn(text_msg, transcript) and _SIBEC_TOPIC.search(text_msg):
         return True
     if _PBF_DESBLOQUEIO.search(text_msg):
+        if _SIMPLE_COUNT.search(text_msg) and not re.search(
+            r"desbloque|prioriz|a[cç][ãa]o|indic|suger|recomend",
+            text_msg,
+            re.I,
+        ):
+            return False
         return True
     blob = user_messages_blob(transcript, text_msg)
     return bool(_PBF_DESBLOQUEIO.search(blob) and _BAIRRO_SUGGEST.search(text_msg))
@@ -174,8 +186,12 @@ def is_territorial_comparison_turn(message: str, transcript: list[dict[str, str]
 
 
 def is_planning_turn(message: str, transcript: list[dict[str, str]] | None) -> bool:
+    from .multi_bairro_metrics import is_simple_territorial_count
+
     text_msg = message.strip()
     if not text_msg:
+        return False
+    if is_simple_territorial_count(text_msg, transcript):
         return False
     if is_planning_followup(text_msg, transcript):
         return True

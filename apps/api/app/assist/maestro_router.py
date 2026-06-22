@@ -12,6 +12,7 @@ from .conversation_intent import (
 )
 from .municipio_agent import is_municipio_turn
 from .policy_agent import is_policy_turn
+from .multi_bairro_metrics import is_simple_territorial_count
 from .session_context import SessionContext
 
 
@@ -33,6 +34,16 @@ def resolve_turn_route(
 ) -> TurnRoute:
     eff = (effective_message or message).strip()
     brief = build_thread_brief(eff, transcript, session_context=session_context)
+
+    if is_simple_territorial_count(message, transcript) or is_simple_territorial_count(eff, transcript):
+        return TurnRoute(
+            primary="data",
+            skip_bairro_preprocess=False,
+            block_sisc=False,
+            thread_brief=brief,
+            effective_message=eff,
+        )
+
     coverage = is_planning_coverage_followup(message, transcript)
     planning = is_planning_turn(message, transcript) or coverage
     followup = is_planning_followup(message, transcript)
