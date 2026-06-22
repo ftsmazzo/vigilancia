@@ -36,8 +36,8 @@ async def geo_apply_creas_bairros(
     file: UploadFile = File(..., description="Matriz bairros_creas.csv (delimitador ;)"),
     dry_run: bool = Query(False, description="Se true, só simula sem gravar creas na tbl_geo"),
     refresh_familia: bool = Query(
-        True,
-        description="Regenera vig.mvw_familia após aplicar (recomendado para filtros CREAS)",
+        False,
+        description="Se true, regenera vig.mvw_familia após aplicar (pode demorar minutos)",
     ),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
@@ -86,6 +86,8 @@ async def geo_apply_creas_bairros(
             }
         except ValueError as exc:
             familia_refresh = {"skipped": True, "motivo": str(exc)}
+        except Exception as exc:
+            familia_refresh = {"skipped": True, "motivo": str(exc)[:300]}
 
     payload: dict = {
         "status": "preview" if dry_run else "success",
@@ -115,8 +117,8 @@ async def geo_apply_creas_bairros(
 @router.post("/reapply-territorial-maps")
 def geo_reapply_territorial_maps(
     refresh_familia: bool = Query(
-        True,
-        description="Regenera vig.mvw_familia após reaplicar mapas CRAS/CREAS",
+        False,
+        description="Se true, regenera vig.mvw_familia após reaplicar (pode demorar minutos)",
     ),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
@@ -145,6 +147,8 @@ def geo_reapply_territorial_maps(
             }
         except ValueError as exc:
             familia_refresh = {"skipped": True, "motivo": str(exc)}
+        except Exception as exc:
+            familia_refresh = {"skipped": True, "motivo": str(exc)[:300]}
 
     out = {
         "status": "success" if result.get("reaplicado") else "skipped",

@@ -469,11 +469,6 @@ export default function VigilanciaPage({ token }: Props) {
                 família aparece nesse recorte. O indicador do CADU fica em <strong>marc_pbf_cadu</strong>. Tabela:{" "}
                 <strong>vig.mvw_familia</strong>.
               </p>
-              <p className="ingestao-desc vig-warnings" style={{ marginTop: "0.5rem" }}>
-                <strong>CREAS territorial:</strong> se você aplicou <code className="inline-code">bairros_creas.csv</code>{" "}
-                em Ingestão → Geo, regenere esta visão <em>depois</em> do CREAS. O filtro CREAS nos painéis lê{" "}
-                <code className="inline-code">num_creas</code> daqui — se regenerar antes do CREAS, o dropdown fica vazio.
-              </p>
 
               <div className="vig-actions">
                 <button type="button" onClick={() => void refreshFamilia()} disabled={busy}>

@@ -43,6 +43,32 @@ def _geo_has_creas_column(conn: Connection) -> bool:
     return _column_exists(conn, "raw", "geo__tbl_geo", "creas")
 
 
+def _geo_creas_cte() -> str:
+    return """
+    geo_creas AS (
+      SELECT
+        btrim(g.cep_norm::text) AS cep_norm,
+        mode() WITHIN GROUP (
+          ORDER BY NULLIF(btrim(g.creas::text), '')
+        )::text AS creas
+      FROM raw."geo__tbl_geo" g
+      WHERE g.cep_norm IS NOT NULL
+        AND length(btrim(g.cep_norm::text)) = 8
+      GROUP BY 1
+    )"""
+
+
+def _familia_creas_resolution(conn: Connection) -> tuple[str, str, str]:
+    """Retorna (expr creas, CTE geo_creas, JOIN)."""
+    cte = _geo_creas_cte()
+    join = "LEFT JOIN geo_creas gc ON gc.cep_norm = btrim(f.cep::text)"
+    if _column_exists(conn, "vig", "mvw_familia", "num_creas"):
+        val = "COALESCE(NULLIF(btrim(f.num_creas::text), ''), NULLIF(btrim(gc.creas::text), ''))"
+    else:
+        val = "NULLIF(btrim(gc.creas::text), '')"
+    return val, cte, join
+
+
 def _geo_creas_subquery(alias: str = "f") -> str:
     p = alias
     return f"""(
@@ -124,14 +150,9 @@ def creas_catalog_diagnostic(conn: Connection) -> dict:
         diag["familias_com_num_creas_na_mvw"] = int(fam_com or 0)
     else:
         diag["familias_com_num_creas_na_mvw"] = 0
-        diag["acao_sugerida"] = (
-            "Regenere a visão Família em Vigilância (API desatualizada ou MV antiga). "
-            "Enquanto isso, o catálogo usa creas da geo via CEP."
-        )
     if diag["geo_preenchimento"].get("linhas_com_creas", 0) == 0:
         diag["acao_sugerida"] = (
-            "Aplique bairros_creas.csv em Ingestão → Geo (ou Reaplicar mapas salvos) "
-            "e depois regenere a visão Família."
+            "Aplique bairros_creas.csv em Ingestão → Geo (botão Aplicar, não só Prévia)."
         )
     return diag
 
@@ -159,14 +180,16 @@ def bairros_por_creas_from_views(conn: Connection, creas_cod: str) -> list[dict]
     if not cod or cod in ("__todos__", "__sem_creas__"):
         return []
 
-    val = _creas_val_sql(conn, "f")
+    val, geo_cte, join = _familia_creas_resolution(conn)
     rows = conn.execute(
         text(
             f"""
+            WITH {geo_cte}
             SELECT
               btrim(f.bairro::text) AS bairro,
               COUNT(DISTINCT f.codigo_familiar)::bigint AS familias
             FROM vig.mvw_familia f
+            {join}
             WHERE btrim({val}::text) = :creas_cod
               AND f.bairro IS NOT NULL
               AND btrim(f.bairro::text) <> ''
@@ -189,12 +212,20 @@ def bairros_por_creas_from_views(conn: Connection, creas_cod: str) -> list[dict]
 
 def creas_catalog_from_views(conn: Connection) -> tuple[list[dict], dict]:
     _require_views(conn)
-    ck = _creas_key_sql(conn, "f")
-    cn = _creas_nome_sql(conn, "f")
+    val, geo_cte, join = _familia_creas_resolution(conn)
+    ck = f"""CASE
+      WHEN {val} IS NULL OR btrim({val}::text) = '' THEN ''
+      ELSE btrim({val}::text)
+    END"""
+    cn = f"""CASE
+      WHEN {val} IS NULL OR btrim({val}::text) = '' THEN '(sem CREAS na geo)'
+      ELSE 'CREAS ' || btrim({val}::text)
+    END"""
     rows = conn.execute(
         text(
             f"""
-            WITH fam AS (
+            WITH {geo_cte},
+            fam AS (
               SELECT
                 {ck} AS creas_cod,
                 {cn} AS creas_nome,
@@ -202,6 +233,7 @@ def creas_catalog_from_views(conn: Connection) -> tuple[list[dict], dict]:
                 COALESCE(f.marc_pbf, FALSE) AS na_folha_pbf,
                 f.renda_per_capita
               FROM vig.mvw_familia f
+              {join}
             ),
             pes AS (
               SELECT
@@ -253,19 +285,12 @@ def creas_catalog_from_views(conn: Connection) -> tuple[list[dict], dict]:
     unidades = [x for x in out if x.get("creas_cod") not in ("", "__sem_creas__")]
     linhas_creas = int((diagnostic.get("geo_preenchimento") or {}).get("linhas_com_creas") or 0)
     if not unidades and linhas_creas > 0:
-        diagnostic["acao_sugerida"] = (
-            "A tbl_geo já tem CREAS preenchido, mas a visão Família está desatualizada. "
-            "Em Vigilância → Família, clique «Gerar / atualizar visão Família» (ou use refresh em cadeia)."
-        )
-    elif not unidades and linhas_creas == 0 and diagnostic.get("mapas_persistidos", {}).get("creas_bairros", 0) > 0:
-        diagnostic["acao_sugerida"] = (
-            "Mapa CREAS salvo, mas a tbl_geo está sem códigos. "
-            "Em Ingestão → Geo, clique «Reaplicar mapas salvos»."
-        )
+        diagnostic.pop("acao_sugerida", None)
     elif not unidades and linhas_creas == 0:
         diagnostic["acao_sugerida"] = (
-            "Em Ingestão → Geo, envie bairros_creas.csv e clique «Aplicar CREAS na tbl_geo» "
-            "(não use só a Prévia). Depois regenere a visão Família."
+            "Em Ingestão → Geo, envie bairros_creas.csv e clique «Aplicar CREAS na tbl_geo»."
         )
-    fonte = "mvw_num_creas+geo_cep" if diagnostic.get("geo_tem_coluna_creas") else "indisponivel"
+    elif unidades:
+        diagnostic.pop("acao_sugerida", None)
+    fonte = "geo_cep_join" if diagnostic.get("geo_tem_coluna_creas") else "indisponivel"
     return _sort_creas_items(out), {**diagnostic, "fonte_catalogo": fonte}

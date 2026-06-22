@@ -2632,17 +2632,6 @@ p.success {
   margin-bottom: 1.25rem;
 }
 
-.caract-filtro-aviso {
-  margin: 0 0 0.75rem;
-  padding: 0.65rem 0.85rem;
-  border-radius: 8px;
-  font-size: 0.875rem;
-  line-height: 1.45;
-  color: var(--fx-text-muted, #b8c0cc);
-  background: rgba(245, 158, 11, 0.12);
-  border: 1px solid rgba(245, 158, 11, 0.35);
-}
-
 .caract-filtros-grid {
   display: grid;
   grid-template-columns: 1fr 1fr auto;

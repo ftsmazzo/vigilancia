@@ -210,7 +210,6 @@ async def import_raw_table(
     db.refresh(run)
 
     territorial_reapply = None
-    familia_refresh = None
     try:
         with db.bind.begin() as connection:
             connection.execute(text("CREATE SCHEMA IF NOT EXISTS raw"))
@@ -305,7 +304,6 @@ async def import_raw_table(
                 connection.execute(insert_stmt, payload_rows)
 
             territorial_reapply = None
-            familia_refresh = None
             if target_table == "geo__tbl_geo":
                 from ..vigilance.geo_territorial_maps import reapply_persisted_territorial_maps
 
@@ -316,19 +314,6 @@ async def import_raw_table(
         run.finished_at = datetime.utcnow()
         db.add(run)
         db.commit()
-
-        if target_table == "geo__tbl_geo" and territorial_reapply and territorial_reapply.get("reaplicado"):
-            try:
-                with db.bind.begin() as connection:
-                    from ..vigilance.familia_mview import refresh_familia_mview
-
-                    fr = refresh_familia_mview(connection)
-                familia_refresh = {
-                    "familias": fr.row_count,
-                    "warnings": fr.warnings,
-                }
-            except ValueError as exc:
-                familia_refresh = {"skipped": True, "motivo": str(exc)}
     except HTTPException as exc:
         run.status = "failed"
         run.error_message = str(exc.detail)[:500]
@@ -354,5 +339,4 @@ async def import_raw_table(
         "row_count": len(rows),
         "columns_count": len(normalized_map),
         "territorial_reapply": territorial_reapply if target_table == "geo__tbl_geo" else None,
-        "familia_refresh": familia_refresh if target_table == "geo__tbl_geo" else None,
     }

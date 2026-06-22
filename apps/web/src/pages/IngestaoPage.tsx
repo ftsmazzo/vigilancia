@@ -501,7 +501,7 @@ export default function IngestaoPage({ token }: Props) {
     try {
       const fd = new FormData();
       fd.append("file", bairrosCreasFile);
-      const q = dryRun ? "?dry_run=true" : "";
+      const q = dryRun ? "?dry_run=true" : "?refresh_familia=false";
       const response = await fetch(`${API_URL}/api/v1/geo/apply-creas-bairros${q}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
@@ -523,20 +523,16 @@ export default function IngestaoPage({ token }: Props) {
         );
       } else {
         const linhas = Number(data.linhas_geo_atualizadas ?? 0);
-        const fr = data.familia_refresh as { familias?: number; skipped?: boolean; motivo?: string } | undefined;
-        let msg = `CREAS gravado em ${String(linhas)} linhas de raw.geo__tbl_geo.`;
         if (linhas === 0) {
-          msg =
-            "ATENÇÃO: 0 linhas receberam CREAS. Confira se selecionou bairros_creas.csv e clicou «Aplicar» (não só Prévia). " +
-            "Se a Prévia mostrar linhas > 0 e o Aplicar mostrar 0, recarregue a página e tente de novo.";
-        } else if (fr?.familias != null) {
-          msg += ` Visão Família regenerada (${fr.familias.toLocaleString("pt-BR")} famílias).`;
-        } else if (fr?.skipped) {
-          msg += ` Visão Família não regenerada: ${fr.motivo ?? "CADU ausente"}. Vá em Vigilância → Família.`;
+          setGeoCreasStatus(
+            "ATENÇÃO: 0 linhas receberam CREAS. Use «Aplicar» (não só Prévia) com bairros_creas.csv selecionado.",
+          );
         } else {
-          msg += " Agora vá em Vigilância → Família e regenere a visão.";
+          setGeoCreasStatus(
+            `CREAS gravado em ${linhas.toLocaleString("pt-BR")} linhas. ` +
+              "Depois vá em Vigilância → Família → Gerar visão (separado, quando quiser).",
+          );
         }
-        setGeoCreasStatus(msg);
       }
     } catch (e) {
       setGeoCreasStatus(e instanceof Error ? e.message : "Erro inesperado.");
@@ -549,7 +545,7 @@ export default function IngestaoPage({ token }: Props) {
     setGeoMapsLoading(true);
     setGeoMapsStatus("");
     try {
-      const response = await fetch(`${API_URL}/api/v1/geo/reapply-territorial-maps`, {
+      const response = await fetch(`${API_URL}/api/v1/geo/reapply-territorial-maps?refresh_familia=false`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -567,16 +563,9 @@ export default function IngestaoPage({ token }: Props) {
         return;
       }
       const pos = (data.geo_apos_reaplicar ?? {}) as Record<string, unknown>;
-      const fr = data.familia_refresh as { familias?: number; skipped?: boolean; motivo?: string } | undefined;
-      let msg = `Mapas reaplicados. Linhas com CRAS: ${String(pos.linhas_com_cras ?? "—")}, CREAS: ${String(pos.linhas_com_creas ?? "—")}.`;
-      if (fr?.familias != null) {
-        msg += ` Visão Família regenerada (${fr.familias.toLocaleString("pt-BR")} famílias).`;
-      } else if (fr?.skipped) {
-        msg += ` Visão Família não regenerada: ${fr.motivo ?? "CADU ausente"}.`;
-      } else {
-        msg += " Regenere a visão Família em Vigilância.";
-      }
-      setGeoMapsStatus(msg);
+      setGeoMapsStatus(
+        `Mapas reaplicados. Linhas com CRAS: ${String(pos.linhas_com_cras ?? "—")}, CREAS: ${String(pos.linhas_com_creas ?? "—")}.`,
+      );
     } catch (e) {
       setGeoMapsStatus(e instanceof Error ? e.message : "Erro inesperado.");
     } finally {
@@ -1279,8 +1268,8 @@ export default function IngestaoPage({ token }: Props) {
                   Envie <code className="inline-code">bairros_creas.csv</code> (matriz CREAS 1–5 × bairros, delimitador{" "}
                   <strong>;</strong>). Preenche <code className="inline-code">creas</code> em{" "}
                   <code className="inline-code">raw.geo__tbl_geo</code> pelo <strong>bairro</strong>.
-                  <strong> Ordem:</strong> aplique CRAS → aplique CREAS → depois Vigilância (visão Família).
-                  Use «Aplicar», não só «Prévia».
+                  <strong> Ordem:</strong> aplique CRAS → aplique CREAS → Vigilância (visão Família, separado).
+                  Use «Aplicar», não só «Prévia». O CREAS aparece nos filtros pela geo (CEP) sem precisar regenerar Família.
                 </p>
                 <label>
                   Arquivo bairros_creas.csv
