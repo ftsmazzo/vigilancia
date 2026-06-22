@@ -522,9 +522,21 @@ export default function IngestaoPage({ token }: Props) {
             `(mapa com ${String(data.bairros_no_mapa ?? 0)} bairros).`,
         );
       } else {
-        setGeoCreasStatus(
-          `CREAS gravado em ${String(data.linhas_geo_atualizadas ?? 0)} linhas de raw.geo__tbl_geo. Regenere a visão Família em Vigilância.`,
-        );
+        const linhas = Number(data.linhas_geo_atualizadas ?? 0);
+        const fr = data.familia_refresh as { familias?: number; skipped?: boolean; motivo?: string } | undefined;
+        let msg = `CREAS gravado em ${String(linhas)} linhas de raw.geo__tbl_geo.`;
+        if (linhas === 0) {
+          msg =
+            "ATENÇÃO: 0 linhas receberam CREAS. Confira se selecionou bairros_creas.csv e clicou «Aplicar» (não só Prévia). " +
+            "Se a Prévia mostrar linhas > 0 e o Aplicar mostrar 0, recarregue a página e tente de novo.";
+        } else if (fr?.familias != null) {
+          msg += ` Visão Família regenerada (${fr.familias.toLocaleString("pt-BR")} famílias).`;
+        } else if (fr?.skipped) {
+          msg += ` Visão Família não regenerada: ${fr.motivo ?? "CADU ausente"}. Vá em Vigilância → Família.`;
+        } else {
+          msg += " Agora vá em Vigilância → Família e regenere a visão.";
+        }
+        setGeoCreasStatus(msg);
       }
     } catch (e) {
       setGeoCreasStatus(e instanceof Error ? e.message : "Erro inesperado.");
@@ -555,9 +567,16 @@ export default function IngestaoPage({ token }: Props) {
         return;
       }
       const pos = (data.geo_apos_reaplicar ?? {}) as Record<string, unknown>;
-      setGeoMapsStatus(
-        `Mapas reaplicados. Linhas com CRAS: ${String(pos.linhas_com_cras ?? "—")}, CREAS: ${String(pos.linhas_com_creas ?? "—")}. Regenere a visão Família.`,
-      );
+      const fr = data.familia_refresh as { familias?: number; skipped?: boolean; motivo?: string } | undefined;
+      let msg = `Mapas reaplicados. Linhas com CRAS: ${String(pos.linhas_com_cras ?? "—")}, CREAS: ${String(pos.linhas_com_creas ?? "—")}.`;
+      if (fr?.familias != null) {
+        msg += ` Visão Família regenerada (${fr.familias.toLocaleString("pt-BR")} famílias).`;
+      } else if (fr?.skipped) {
+        msg += ` Visão Família não regenerada: ${fr.motivo ?? "CADU ausente"}.`;
+      } else {
+        msg += " Regenere a visão Família em Vigilância.";
+      }
+      setGeoMapsStatus(msg);
     } catch (e) {
       setGeoMapsStatus(e instanceof Error ? e.message : "Erro inesperado.");
     } finally {
@@ -1259,8 +1278,9 @@ export default function IngestaoPage({ token }: Props) {
                 <p className="ingestao-desc" style={{ marginBottom: "0.75rem" }}>
                   Envie <code className="inline-code">bairros_creas.csv</code> (matriz CREAS 1–5 × bairros, delimitador{" "}
                   <strong>;</strong>). Preenche <code className="inline-code">creas</code> em{" "}
-                  <code className="inline-code">raw.geo__tbl_geo</code> pelo <strong>bairro</strong>. Depois regenere a
-                  visão Família em Vigilância.
+                  <code className="inline-code">raw.geo__tbl_geo</code> pelo <strong>bairro</strong>.
+                  <strong> Ordem:</strong> aplique CRAS → aplique CREAS → depois Vigilância (visão Família).
+                  Use «Aplicar», não só «Prévia».
                 </p>
                 <label>
                   Arquivo bairros_creas.csv
@@ -1287,7 +1307,11 @@ export default function IngestaoPage({ token }: Props) {
                 {geoCreasStatus && (
                   <p
                     className={
-                      geoCreasStatus.includes("Prévia") || geoCreasStatus.includes("gravado") ? "status-ok" : "error"
+                      geoCreasStatus.startsWith("ATENÇÃO")
+                        ? "error"
+                        : geoCreasStatus.includes("Prévia") || geoCreasStatus.includes("gravado") || geoCreasStatus.includes("regenerada")
+                          ? "status-ok"
+                          : "error"
                     }
                     style={{ marginTop: "0.75rem" }}
                   >

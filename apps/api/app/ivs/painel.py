@@ -6,16 +6,31 @@ from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from ..vigilance.cras_analytics import _cras_key_sql, _cras_nome_sql, _cras_numero_ordem, _sort_cras_items
+from ..vigilance.creas_analytics import _creas_filter_clause
 from .catalog import DIMENSOES, DIM_POR_SIGLA, DimensaoMeta
 
 
-def ivs_filter_clause(*, num_cras: str | None, num_creas: str | None, bairro: str | None) -> tuple[str, dict]:
+def ivs_filter_clause(
+    *,
+    conn: Connection,
+    num_cras: str | None,
+    num_creas: str | None,
+    bairro: str | None,
+) -> tuple[str, dict]:
     """Filtro territorial sobre família (alias f) + elegível (alias i)."""
-    terr, params = territorio_filter_clause(num_cras=num_cras, num_creas=num_creas, bairro=bairro)
+    terr, params = territorio_filter_clause(
+        conn=conn, num_cras=num_cras, num_creas=num_creas, bairro=bairro
+    )
     return f"i.elegivel_ivs AND {terr}", params
 
 
-def territorio_filter_clause(*, num_cras: str | None, num_creas: str | None, bairro: str | None) -> tuple[str, dict]:
+def territorio_filter_clause(
+    *,
+    conn: Connection,
+    num_cras: str | None,
+    num_creas: str | None,
+    bairro: str | None,
+) -> tuple[str, dict]:
     """Somente recorte CRAS/CREAS/bairro (alias f)."""
     clauses = ["TRUE"]
     params: dict = {}
@@ -28,11 +43,14 @@ def territorio_filter_clause(*, num_cras: str | None, num_creas: str | None, bai
             params["num_cras"] = cod
     if num_creas is not None:
         cod = num_creas.strip()
-        if cod == "__sem_creas__":
-            clauses.append("(f.num_creas IS NULL OR btrim(f.num_creas::text) = '')")
-        elif cod and cod != "__todos__":
-            clauses.append("btrim(f.num_creas::text) = :num_creas")
-            params["num_creas"] = cod
+        if cod and cod != "__todos__":
+            extra, p = _creas_filter_clause(cod, conn=conn)
+            part = extra.strip()
+            if part.upper().startswith("AND "):
+                part = part[4:].strip()
+            if part:
+                clauses.append(part)
+            params.update(p)
     if bairro is not None and bairro.strip():
         clauses.append("btrim(f.bairro::text) = :bairro")
         params["bairro"] = bairro.strip()
@@ -57,9 +75,19 @@ def _pct_acima_sql(idx_col: str) -> str:
     )"""
 
 
-def build_painel_sql(*, num_cras: str | None, num_creas: str | None, bairro: str | None) -> tuple[str, dict]:
-    where, params = ivs_filter_clause(num_cras=num_cras, num_creas=num_creas, bairro=bairro)
-    cadu_where, _ = territorio_filter_clause(num_cras=num_cras, num_creas=num_creas, bairro=bairro)
+def build_painel_sql(
+    *,
+    conn: Connection,
+    num_cras: str | None,
+    num_creas: str | None,
+    bairro: str | None,
+) -> tuple[str, dict]:
+    where, params = ivs_filter_clause(
+        conn=conn, num_cras=num_cras, num_creas=num_creas, bairro=bairro
+    )
+    cadu_where, _ = territorio_filter_clause(
+        conn=conn, num_cras=num_cras, num_creas=num_creas, bairro=bairro
+    )
     flag_cols = [ind.col for dim in DIMENSOES for ind in dim.indicadores]
     flag_select = ",\n          ".join(f"{_flag_avg_sql(c)} AS {c}_pct" for c in flag_cols)
     idx_cols = [dim.idx_col for dim in DIMENSOES]
@@ -129,7 +157,9 @@ def fetch_ivs_painel(
     bairro: str | None,
     dimensao: str | None,
 ) -> dict:
-    sql, params = build_painel_sql(num_cras=num_cras, num_creas=num_creas, bairro=bairro)
+    sql, params = build_painel_sql(
+        conn=conn, num_cras=num_cras, num_creas=num_creas, bairro=bairro
+    )
     row = conn.execute(text(sql), params).mappings().first() or {}
 
     elegiveis = int(row.get("familias_elegiveis") or 0)

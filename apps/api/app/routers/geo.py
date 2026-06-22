@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..deps import get_current_user
 from ..models import User
-from ..vigilance.familia_mview import ensure_vig_functions
+from ..vigilance.familia_mview import ensure_vig_functions, refresh_familia_mview
 from ..vigilance.geo_cras import apply_cras_bairros_to_geo, parse_bairros_cras_csv
 from ..vigilance.geo_creas import apply_creas_bairros_to_geo, parse_bairros_creas_csv
 from ..vigilance.geo_territorial_maps import (
@@ -35,6 +35,10 @@ GEO_TABLE = "geo__tbl_geo"
 async def geo_apply_creas_bairros(
     file: UploadFile = File(..., description="Matriz bairros_creas.csv (delimitador ;)"),
     dry_run: bool = Query(False, description="Se true, só simula sem gravar creas na tbl_geo"),
+    refresh_familia: bool = Query(
+        True,
+        description="Regenera vig.mvw_familia após aplicar (recomendado para filtros CREAS)",
+    ),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
@@ -68,10 +72,20 @@ async def geo_apply_creas_bairros(
             conflicts=conflicts,
             dry_run=dry_run,
         )
+        familia_refresh: dict | None = None
         if not dry_run:
             persist_creas_map(conn, mapping)
+            if refresh_familia:
+                try:
+                    fr = refresh_familia_mview(conn)
+                    familia_refresh = {
+                        "familias": fr.row_count,
+                        "warnings": fr.warnings,
+                    }
+                except ValueError as exc:
+                    familia_refresh = {"skipped": True, "motivo": str(exc)}
 
-    return {
+    payload: dict = {
         "status": "preview" if dry_run else "success",
         "metodo": "bairro",
         "nota_rua": (
@@ -91,10 +105,17 @@ async def geo_apply_creas_bairros(
         "amostra_atualizacoes": result.amostra_atualizacoes,
         "amostra_renomes_bairro": result.amostra_renomes_bairro,
     }
+    if familia_refresh is not None:
+        payload["familia_refresh"] = familia_refresh
+    return payload
 
 
 @router.post("/reapply-territorial-maps")
 def geo_reapply_territorial_maps(
+    refresh_familia: bool = Query(
+        True,
+        description="Regenera vig.mvw_familia após reaplicar mapas CRAS/CREAS",
+    ),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
@@ -110,11 +131,24 @@ def geo_reapply_territorial_maps(
     with db.bind.begin() as conn:
         result = reapply_persisted_territorial_maps(conn)
         counts = map_counts(conn)
-    return {
+        familia_refresh: dict | None = None
+        if refresh_familia and result.get("reaplicado"):
+            try:
+                fr = refresh_familia_mview(conn)
+                familia_refresh = {
+                    "familias": fr.row_count,
+                    "warnings": fr.warnings,
+                }
+            except ValueError as exc:
+                familia_refresh = {"skipped": True, "motivo": str(exc)}
+    out = {
         "status": "success" if result.get("reaplicado") else "skipped",
         **result,
         "mapas_cadastrados": counts,
     }
+    if familia_refresh is not None:
+        out["familia_refresh"] = familia_refresh
+    return out
 
 
 @router.get("/territorial-maps-status")

@@ -21,7 +21,7 @@ def get_creas_catalog(
     """Lista CREAS distintos no CADU com totais de famílias e pessoas."""
     try:
         with db.bind.connect() as conn:
-            items = creas_catalog_from_views(conn)
+            items, diagnostic = creas_catalog_from_views(conn)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:
@@ -29,7 +29,12 @@ def get_creas_catalog(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Falha ao listar CREAS: {exc}",
         ) from exc
-    return {"total_unidades": len(items), "items": items}
+    unidades = [x for x in items if x.get("creas_cod") not in ("", "__sem_creas__")]
+    return {
+        "total_unidades": len(unidades),
+        "items": items,
+        "diagnostic": diagnostic,
+    }
 
 
 @router.get("/bairros")

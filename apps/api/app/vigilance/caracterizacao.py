@@ -207,11 +207,12 @@ def _territorio_filter_clause(
     cras_cod: str | None,
     bairro: str | None = None,
     creas_cod: str | None = None,
+    conn: Connection | None = None,
 ) -> tuple[str, dict]:
     cras_sel = (cras_cod or "").strip() or "__todos__"
     creas_sel = (creas_cod or "").strip() or "__todos__"
     where_extra, params = _cras_filter_clause(cras_sel)
-    creas_extra, creas_params = _creas_filter_clause(creas_sel)
+    creas_extra, creas_params = _creas_filter_clause(creas_sel, conn=conn)
     where_extra += creas_extra
     params.update(creas_params)
     if bairro and bairro.strip():
@@ -230,9 +231,9 @@ def caracterizacao_painel_from_views(
     _require_views(conn)
     cras_sel = (cras_cod or "").strip() or "__todos__"
     creas_sel = (creas_cod or "").strip() or "__todos__"
-    where_extra, params = _territorio_filter_clause(cras_sel, bairro, creas_sel)
+    where_extra, params = _territorio_filter_clause(cras_sel, bairro, creas_sel, conn)
     cn = _cras_nome_sql("fam")
-    cren = _creas_nome_sql("fam")
+    cren = _creas_nome_sql(conn, "fam")
 
     base = conn.execute(
         text(

@@ -392,12 +392,12 @@ def cras_painel_from_views(
 ) -> dict:
     _require_views(conn)
     where_extra, params = _cras_filter_clause(cras_cod)
-    creas_extra, creas_params = _creas_filter_clause(creas_cod)
+    creas_extra, creas_params = _creas_filter_clause(creas_cod, conn=conn)
     where_extra += creas_extra
     params.update(creas_params)
     ck = _cras_key_sql("fam")
     cn = _cras_nome_sql("fam")
-    cren = _creas_nome_sql("fam")
+    cren = _creas_nome_sql(conn, "fam")
 
     base = conn.execute(
         text(

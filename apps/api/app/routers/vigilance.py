@@ -40,8 +40,16 @@ def _require_ivs_mview(conn) -> None:
         )
 
 
-def _ivs_resumo_sql(*, num_cras: str | None, num_creas: str | None, bairro: str | None) -> tuple[str, dict]:
-    where, params = ivs_filter_clause(num_cras=num_cras, num_creas=num_creas, bairro=bairro)
+def _ivs_resumo_sql(
+    conn,
+    *,
+    num_cras: str | None,
+    num_creas: str | None,
+    bairro: str | None,
+) -> tuple[str, dict]:
+    where, params = ivs_filter_clause(
+        conn=conn, num_cras=num_cras, num_creas=num_creas, bairro=bairro
+    )
     sql = f"""
         SELECT
           COUNT(*) FILTER (WHERE i.elegivel_ivs)::bigint AS familias_elegiveis,
@@ -971,7 +979,9 @@ def get_ivs_resumo(
     """Médias IVS e dimensões no universo elegível (requer refresh prévio)."""
     with db.bind.begin() as conn:
         _require_ivs_mview(conn)
-        sql, params = _ivs_resumo_sql(num_cras=num_cras, num_creas=num_creas, bairro=bairro)
+        sql, params = _ivs_resumo_sql(
+            conn, num_cras=num_cras, num_creas=num_creas, bairro=bairro
+        )
         row = conn.execute(text(sql), params).mappings().first()
     out = dict(row or {})
     if num_cras is not None:

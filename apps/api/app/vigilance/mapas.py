@@ -79,7 +79,7 @@ def mapas_heatmap_from_views(
 
     cras_sel = (cras_cod or "").strip() or "__todos__"
     creas_sel = (creas_cod or "").strip() or "__todos__"
-    where_extra, params = _territorio_filter_clause(cras_sel, bairro, creas_sel)
+    where_extra, params = _territorio_filter_clause(cras_sel, bairro, creas_sel, conn)
 
     lat_expr = _lat_sql("fam.lat_num")
     lng_expr = _lng_sql("fam.long_num")
