@@ -14,6 +14,7 @@ from .cras_breakdown import (
 )
 from .cadu_pessoas_metrics import try_cadu_pessoas_recorte_metric
 from .geo_territorial import try_geo_contextual_followup, try_geo_territorial_metric
+from .multi_bairro_metrics import message_has_bairro_list_scope
 from .ivs_metrics import try_ivs_cras_compare, try_ivs_metric
 from .planning_metrics import try_planning_demand_metric
 from .sibec_metrics import try_sibec_manut_metric
@@ -198,6 +199,8 @@ def try_canonical_metric(
     )
 
     if _FOLHA_PBF.search(text_msg) and not _MARCADOR_CADU.search(text_msg):
+        if message_has_bairro_list_scope(text_msg):
+            return None
         bolsa = bolsa_folha_kpis_from_raw(conn)
         n_folha = bolsa.total_familias_folha
         pct = round(100.0 * n_folha / total_familias_cadu, 2) if total_familias_cadu else 0.0
@@ -270,6 +273,8 @@ def try_canonical_metric(
     if re.search(r"\bpbf\b", text_msg, re.I) and re.search(
         r"quantas|quantos|total|n[uú]mero", text_msg, re.I
     ):
+        if message_has_bairro_list_scope(text_msg):
+            return None
         row = conn.execute(
             text(
                 """

@@ -59,6 +59,7 @@ Regras obrigatórias:
 - **Bairro territorial (geo)**: f.bairro via CEP × raw.geo__tbl_geo (f.tem_geo). NUNCA filtre f.bairro_cadu salvo pedido explícito de "bairro no CADU".
 - Filtro por bairro: btrim(f.bairro::text) ILIKE '%termo%' (parcial, case-insensitive).
 - Filtro por CRAS territorial: btrim(f.num_cras::text) = '1' (texto '1' a '12').
+- **Lista de bairros** (usuário cola vários nomes): lower(btrim(f.bairro::text)) = ANY(ARRAY[...]) ou IN (...); GROUP BY f.bairro para detalhar; marc_pbf para folha PBF.
 - Desdobramento por CRAS (CADU): GROUP BY f.num_cras, f.nom_cras; ORDER BY num_cras numérico 1→12 (NULL por último).
 - CRAS 1 = Central (Centro) — matrícula SISC "CRAS Centro" equivale ao CRAS 1 territorial.
 - CRAS 9 = Bonfim Paulista. Famílias com num_cras vazio/null = sem referência territorial (informe aparte).

@@ -45,6 +45,7 @@ from .llm import chat_completion
 from .maestro_router import resolve_turn_route
 from .municipio_agent import run_municipio_agent
 from .planning_metrics import try_planning_demand_metric
+from .multi_bairro_metrics import try_multi_bairro_pbf_metric
 from .policy_agent import run_policy_agent
 from .query_task_spec import (
     QueryTaskSpec,
@@ -221,6 +222,30 @@ def _run_sql_agent_turn(
     bairro_resolution: Any = None,
 ) -> dict[str, Any] | None:
     """AgenteSQL para cruzamentos livres (SIBEC×CADU, raça, etc.)."""
+    multi_bairro = try_multi_bairro_pbf_metric(
+        conn, data_message, user_first_name=user_first_name
+    )
+    if multi_bairro:
+        answer = _answer_via_analyst(
+            data_message,
+            multi_bairro,
+            conn=conn,
+            db=db,
+            transcript=transcript,
+            user_first_name=user_first_name,
+            thread_brief=thread_brief,
+            municipio_block=municipio_block,
+            rag_block=rag_block,
+        )
+        return {
+            "answer": _trim_answer_boilerplate(answer),
+            "sql": multi_bairro.get("sql"),
+            "row_count": multi_bairro.get("row_count", 0),
+            "preview": multi_bairro.get("preview") or [],
+            "mode": "data",
+            "filters_applied": multi_bairro.get("filters_applied"),
+        }
+
     task_spec_block = task_spec.to_sql_agent_block()
     sql_result = run_sql_agent(
         conn,

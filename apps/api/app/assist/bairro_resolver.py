@@ -667,6 +667,10 @@ def preprocess_bairro_turn(
 
     if skips_bairro_preprocess(message, transcript):
         return BairroPreprocess(message=message)
+    from .multi_bairro_metrics import message_has_bairro_list_scope
+
+    if message_has_bairro_list_scope(message):
+        return BairroPreprocess(message=message)
     if should_skip_bairro_resolution(message, transcript):
         return BairroPreprocess(message=message)
 

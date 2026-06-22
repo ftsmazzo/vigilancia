@@ -12,6 +12,7 @@ from enum import Enum
 from typing import Any
 
 from .bairro_resolver import extract_location_term
+from .multi_bairro_metrics import message_has_bairro_list_scope
 from .cadu_pessoas_metrics import PersonRecorte, detect_person_recorte
 from .response_mode import infer_response_mode
 from .session_context import SessionContext
@@ -175,6 +176,8 @@ class QueryTaskSpec:
         if self.wants_cras_breakdown() or self.requires_pbf_folha:
             return True
         if self.mentions_sibec() or _RACA.search(msg):
+            return True
+        if message_has_bairro_list_scope(msg):
             return True
         if _CRAS_NUM.search(msg) and ctx and ctx.has_data_thread():
             return True

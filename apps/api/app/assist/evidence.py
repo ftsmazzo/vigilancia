@@ -198,6 +198,49 @@ def pack_from_canonical(question: str, result: dict[str, Any], *, thread_brief: 
                             detail=filters,
                         )
                     )
+    elif metric in ("multi_bairro_pbf_familias", "multi_bairro_pbf_pessoas"):
+        filters = str(result.get("filters_applied") or "")
+        for row in preview:
+            if not isinstance(row, dict):
+                continue
+            if row.get("label") == "Total nos bairros listados":
+                facts.append(
+                    EvidenceFact(
+                        label=str(row.get("label", "Total")),
+                        value=str(row.get("value", "")),
+                        source=str(row.get("source", "CADU")),
+                        detail=str(row.get("detail", "")),
+                    )
+                )
+            elif row.get("bairro"):
+                if metric == "multi_bairro_pbf_pessoas":
+                    val = row.get("pessoas_em_familia_pbf")
+                    total = row.get("total_pessoas")
+                    unit = "pessoas em família PBF"
+                else:
+                    val = row.get("familias_pbf")
+                    total = row.get("total_familias")
+                    unit = "famílias PBF"
+                if val is not None:
+                    detail = f"de {total} no bairro" if total is not None else filters
+                    facts.append(
+                        EvidenceFact(
+                            label=str(row["bairro"]),
+                            value=str(val),
+                            source="vig.mvw_familia (marc_pbf)",
+                            detail=detail,
+                        )
+                    )
+        unresolved = result.get("unresolved_bairros") or []
+        if unresolved:
+            facts.append(
+                EvidenceFact(
+                    label="Bairros não localizados no CADU",
+                    value=", ".join(str(u) for u in unresolved[:10]),
+                    source="resolução territorial",
+                    detail="informados pelo usuário",
+                )
+            )
     elif metric == "geo_pessoas_por_bairro":
         for row in preview[:3]:
             if isinstance(row, dict) and row.get("pessoas") is not None:
