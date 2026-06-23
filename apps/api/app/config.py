@@ -1,9 +1,17 @@
+from pathlib import Path
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(
+        env_file=(_REPO_ROOT / ".env", ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     database_url: str = "postgresql+psycopg://vigsocial:vigsocial_dev@localhost:5432/vigsocial"
     redis_url: str = "redis://localhost:6379/0"
@@ -56,6 +64,9 @@ class Settings(BaseSettings):
 
     # Dicionário CADU (dicionariotudo.csv) para o assistente
     cadu_dictionary_path: str | None = None
+
+    # CSVs RMA (CRAS/CREAS/Centro POP). No Docker use /DadosBrutos/RMA com volume montado.
+    rma_data_dir: str | None = None
 
     # n8n — orquestrador VigIA opcional (webhook production: .../webhook/vigia/chat)
     assist_n8n_vigia_url: str | None = None

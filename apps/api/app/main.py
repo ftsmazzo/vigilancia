@@ -16,6 +16,7 @@ from .routers.vigilance import router as vigilance_router
 from .routers.assist import router as assist_router
 from .routers.municipio import router as municipio_router
 from .routers.caracterizacao import router as caracterizacao_router
+from .routers.rma import router as rma_router
 from .security import hash_password
 
 app = FastAPI(title="VigSocial API", version="0.1.0")
@@ -87,3 +88,4 @@ app.include_router(creas_router, prefix="/api/v1")
 app.include_router(assist_router, prefix="/api/v1")
 app.include_router(municipio_router, prefix="/api/v1")
 app.include_router(caracterizacao_router, prefix="/api/v1")
+app.include_router(rma_router, prefix="/api/v1")

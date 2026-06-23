@@ -250,6 +250,9 @@ export default function IngestaoPage({ token }: Props) {
   const [geoCreasPreview, setGeoCreasPreview] = useState<Record<string, unknown> | null>(null);
   const [geoMapsLoading, setGeoMapsLoading] = useState(false);
   const [geoMapsStatus, setGeoMapsStatus] = useState("");
+  const [rmaLoading, setRmaLoading] = useState(false);
+  const [rmaStatus, setRmaStatus] = useState("");
+  const [rmaIntegridade, setRmaIntegridade] = useState<Record<string, unknown> | null>(null);
   const [geoMissingLoading, setGeoMissingLoading] = useState(false);
   const [geoMissingCeps, setGeoMissingCeps] = useState<Array<Record<string, unknown>>>([]);
   const [geoViaCepLoading, setGeoViaCepLoading] = useState(false);
@@ -570,6 +573,54 @@ export default function IngestaoPage({ token }: Props) {
       setGeoMapsStatus(e instanceof Error ? e.message : "Erro inesperado.");
     } finally {
       setGeoMapsLoading(false);
+    }
+  }
+
+  async function runRmaBootstrap() {
+    setRmaLoading(true);
+    setRmaStatus("");
+    setRmaIntegridade(null);
+    try {
+      const response = await fetch(`${API_URL}/api/v1/rma/bootstrap`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = (await response.json().catch(() => ({}))) as Record<string, unknown> & { detail?: unknown };
+      if (!response.ok) {
+        throw new Error(typeof data.detail === "string" ? data.detail : "Falha no bootstrap RMA.");
+      }
+      const integ = (data.integridade ?? null) as Record<string, unknown> | null;
+      setRmaIntegridade(integ);
+      const fato = (data.fato ?? {}) as Record<string, unknown>;
+      const mv = (data.resumo_mview ?? {}) as Record<string, unknown>;
+      setRmaStatus(
+        `RMA carregado: fato ${String(fato.rows ?? "—")} linhas, resumo ${String(mv.row_count ?? "—")} linhas. ` +
+          `Integridade: ${integ?.ok === true ? "OK" : "ver avisos/erros"}.`,
+      );
+    } catch (e) {
+      setRmaStatus(e instanceof Error ? e.message : "Erro inesperado.");
+    } finally {
+      setRmaLoading(false);
+    }
+  }
+
+  async function runRmaIntegridade() {
+    setRmaLoading(true);
+    setRmaStatus("");
+    try {
+      const response = await fetch(`${API_URL}/api/v1/rma/integridade`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = (await response.json().catch(() => ({}))) as Record<string, unknown> & { detail?: unknown };
+      if (!response.ok) {
+        throw new Error(typeof data.detail === "string" ? data.detail : "Falha na auditoria RMA.");
+      }
+      setRmaIntegridade(data);
+      setRmaStatus(data.ok === true ? "Integridade RMA: OK." : "Integridade RMA: há pendências (veja lista).");
+    } catch (e) {
+      setRmaStatus(e instanceof Error ? e.message : "Erro inesperado.");
+    } finally {
+      setRmaLoading(false);
     }
   }
 
@@ -1333,6 +1384,47 @@ export default function IngestaoPage({ token }: Props) {
                   <p className={geoMapsStatus.includes("reaplicados") ? "status-ok" : "error"} style={{ marginTop: "0.75rem" }}>
                     {geoMapsStatus}
                   </p>
+                )}
+              </div>
+
+              <div
+                className="auth-form"
+                style={{ marginTop: "1.25rem", padding: "0.75rem 0", borderTop: "1px solid var(--color-border, #333)" }}
+              >
+                <h2 style={{ fontSize: "1.05rem", margin: "0 0 0.5rem" }}>RMA — produção mensal SUAS</h2>
+                <p className="ingestao-desc" style={{ marginBottom: "0.75rem" }}>
+                  Carrega <code className="inline-code">DadosBrutos/RMA</code> (CRAS, CREAS, Centro POP), cria ids
+                  oficiais SUAS, ponte territorial 1–12 / 1–5 e MV analítica. Independente do CADU; cruza com família
+                  só no comparativo carga×demanda.
+                </p>
+                <div className="vig-actions" style={{ flexWrap: "wrap", gap: "0.5rem" }}>
+                  <button type="button" onClick={() => void runRmaBootstrap()} disabled={rmaLoading}>
+                    {rmaLoading ? "Processando…" : "Bootstrap RMA (servidor)"}
+                  </button>
+                  <button type="button" className="btn btn-secondary" onClick={() => void runRmaIntegridade()} disabled={rmaLoading}>
+                    Auditar integridade
+                  </button>
+                </div>
+                {rmaStatus && (
+                  <p
+                    className={rmaStatus.includes("OK") || rmaStatus.includes("carregado") ? "status-ok" : "error"}
+                    style={{ marginTop: "0.75rem" }}
+                  >
+                    {rmaStatus}
+                  </p>
+                )}
+                {rmaIntegridade && (
+                  <ul className="vig-warnings" style={{ listStyle: "disc", marginTop: "0.5rem" }}>
+                    <li>Equipamentos: {String(rmaIntegridade.dim_equipamentos ?? "—")}</li>
+                    <li>Fato: {String(rmaIntegridade.fato_rows ?? "—")} (PSR excluídos: {String(rmaIntegridade.fato_psr_excluidos ?? "—")})</li>
+                    <li>Resumo MV: {String(rmaIntegridade.resumo_rows ?? "—")}</li>
+                    {Array.isArray(rmaIntegridade.erros) && (rmaIntegridade.erros as string[]).length > 0 && (
+                      <li>Erros: {(rmaIntegridade.erros as string[]).join(" · ")}</li>
+                    )}
+                    {Array.isArray(rmaIntegridade.avisos) && (rmaIntegridade.avisos as string[]).length > 0 && (
+                      <li>Avisos: {(rmaIntegridade.avisos as string[]).join(" · ")}</li>
+                    )}
+                  </ul>
                 )}
               </div>
 
