@@ -678,6 +678,19 @@ def refresh_familia_mview(conn: Connection) -> FamiliaRefreshResult:
             "CREATE UNIQUE INDEX IF NOT EXISTS mvw_familia_codigo_uq ON vig.mvw_familia (codigo_familiar)"
         )
     )
+    mview_cols = _columns(conn, "vig", "mvw_familia")
+    if "num_cras" in mview_cols:
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS mvw_familia_num_cras_idx ON vig.mvw_familia (num_cras)"
+            )
+        )
+    if "num_creas" in mview_cols:
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS mvw_familia_num_creas_idx ON vig.mvw_familia (num_creas)"
+            )
+        )
 
     row_count = conn.execute(text("SELECT COUNT(*) FROM vig.mvw_familia")).scalar() or 0
 

@@ -152,8 +152,8 @@ def fetch_sibec_painel(
             "mensagem": "Nenhuma competência encontrada na MV SIBEC Manutenções.",
         }
 
-    where_cras, cras_params = _territorio_filter_clause(cras_cod, creas_cod)
-    params = {"comp": comp, **cras_params}
+    where_territorio, territorio_params = _territorio_filter_clause(cras_cod, creas_cod)
+    params = {"comp": comp, **territorio_params}
 
     resumo_row = conn.execute(
         text(
@@ -171,7 +171,7 @@ def fetch_sibec_painel(
               COUNT(*) FILTER (WHERE acao_grupo = 'Cancelar')::bigint AS situacao_cancelar,
               COUNT(*) FILTER (WHERE acao_grupo = 'Bloquear')::bigint AS situacao_bloquear
             FROM vig.mvw_sibec_manut_familia_mes
-            WHERE competencia = :comp AND {where_cras}
+            WHERE competencia = :comp AND {where_territorio}
             """
         ),
         params,
@@ -182,7 +182,7 @@ def fetch_sibec_painel(
             f"""
             SELECT acao_grupo, COUNT(*)::bigint AS n_fam
             FROM vig.mvw_sibec_manut_familia_mes
-            WHERE competencia = :comp AND {where_cras}
+            WHERE competencia = :comp AND {where_territorio}
             GROUP BY acao_grupo
             ORDER BY n_fam DESC, acao_grupo
             """
@@ -199,7 +199,7 @@ def fetch_sibec_painel(
               COUNT(*)::bigint AS n_fam
             FROM vig.mvw_sibec_manut_familia_mes
             WHERE competencia = :comp
-              AND {where_cras}
+              AND {where_territorio}
               AND teve_cancelamento
               AND btrim(COALESCE(motivo_txt, '')) <> ''
             GROUP BY 1, 2
@@ -246,10 +246,10 @@ def fetch_sibec_painel(
                   COUNT(*) FILTER (WHERE teve_bloqueio)::bigint AS bloqueios,
                   COUNT(*) FILTER (WHERE teve_reversao)::bigint AS reversoes
                 FROM vig.mvw_sibec_manut_familia_mes
-                WHERE competencia = :comp AND {where_cras}
+                WHERE competencia = :comp AND {where_territorio}
                 """
             ),
-            {"comp": comp_ant, **cras_params},
+            {"comp": comp_ant, **territorio_params},
         ).mappings().first() or {}
         comparacao = {
             "competencia_anterior": comp_ant,
@@ -368,9 +368,9 @@ def fetch_sibec_serie(
     if ate:
         where_parts.append("competencia <= :ate")
         params["ate"] = ate.strip()
-    where_cras, cras_params = _territorio_filter_clause(cras_cod, creas_cod)
-    where_parts.append(where_cras)
-    params.update(cras_params)
+    where_territorio, territorio_params = _territorio_filter_clause(cras_cod, creas_cod)
+    where_parts.append(where_territorio)
+    params.update(territorio_params)
     where_sql = " AND ".join(where_parts)
 
     rows = conn.execute(

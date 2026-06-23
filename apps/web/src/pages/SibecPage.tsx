@@ -3,6 +3,12 @@ import { Link } from "react-router-dom";
 import BarChartPanel, { type BarItem } from "../components/charts/BarChartPanel";
 import LineChartPanel, { type LineChartPoint } from "../components/charts/LineChartPanel";
 import StackedBarChartPanel, { type StackedBarItem } from "../components/charts/StackedBarChart";
+import {
+  filterCrasCatalog,
+  filterCreasCatalog,
+  useResetInvalidTerritorialSelection,
+  useTerritorialVinculos,
+} from "../hooks/useTerritorialVinculos";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -134,6 +140,26 @@ export default function SibecPage({ token }: Props) {
   const [creasCatalog, setCreasCatalog] = useState<CreasOption[]>([]);
   const [painel, setPainel] = useState<Painel | null>(null);
   const [serie, setSerie] = useState<SerieItem[]>([]);
+  const vinculos = useTerritorialVinculos(token);
+
+  const catalogFiltrado = useMemo(
+    () => filterCrasCatalog(catalog, creasCod, vinculos, { keepSemCras: true }),
+    [catalog, creasCod, vinculos],
+  );
+
+  const creasFiltrado = useMemo(
+    () => filterCreasCatalog(creasCatalog, crasCod, vinculos, { keepSemCreas: true }),
+    [creasCatalog, crasCod, vinculos],
+  );
+
+  useResetInvalidTerritorialSelection(
+    crasCod,
+    creasCod,
+    catalogFiltrado,
+    creasFiltrado,
+    setCrasCod,
+    setCreasCod,
+  );
 
   useEffect(() => {
     fetch(`${API_URL}/api/v1/cras/catalog`, {
@@ -320,7 +346,7 @@ export default function SibecPage({ token }: Props) {
             >
               <option value="__todos__">Município inteiro</option>
               <option value="__sem_cras__">Sem CRAS de referência</option>
-              {catalog.map((c) => (
+              {catalogFiltrado.map((c) => (
                 <option key={c.cras_cod} value={c.cras_cod}>
                   {c.rotulo_ordenado || c.cras_nome}
                 </option>
@@ -337,7 +363,7 @@ export default function SibecPage({ token }: Props) {
             >
               <option value="__todos__">Todos os CREAS</option>
               <option value="__sem_creas__">Sem CREAS de referência</option>
-              {creasCatalog.map((c) => (
+              {creasFiltrado.map((c) => (
                 <option key={c.creas_cod} value={c.creas_cod}>
                   {c.rotulo_ordenado || c.creas_nome}
                 </option>

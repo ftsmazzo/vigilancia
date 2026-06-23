@@ -162,7 +162,9 @@ def _creas_filter_clause(creas_cod: str | None, *, alias: str = "f", conn: Conne
         return "", {}
     cod = creas_cod.strip()
     p = alias
-    if conn is None:
+
+    # Caminho rápido: num_creas já materializado em vig.mvw_familia (evita subquery geo por linha).
+    if conn is None or _column_exists(conn, "vig", "mvw_familia", "num_creas"):
         if cod == "__sem_creas__":
             return f" AND ({p}.num_creas IS NULL OR btrim({p}.num_creas::text) = '') ", {}
         return f" AND btrim({p}.num_creas::text) = :creas_cod ", {"creas_cod": cod}

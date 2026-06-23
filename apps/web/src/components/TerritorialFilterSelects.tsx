@@ -1,4 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
+import {
+  filterCrasCatalog,
+  filterCreasCatalog,
+  isCrasAtivo,
+  isCreasAtivo,
+  useResetInvalidTerritorialSelection,
+  useTerritorialVinculos,
+} from "../hooks/useTerritorialVinculos";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -16,13 +24,6 @@ export type TerritorialUnitOption = {
 export type BairroOption = {
   bairro: string;
   familias: number;
-};
-
-type TerritorialVinculos = {
-  disponivel: boolean;
-  cras_to_creas: Record<string, string[]>;
-  creas_to_cras: Record<string, string[]>;
-  mensagem?: string;
 };
 
 type Props = {
@@ -56,14 +57,6 @@ function unitOptionTitle(rotulo: string | undefined, familias: number): string {
   return `${short} · ${compactFamilias(familias)} fam.`;
 }
 
-function isCrasAtivo(crasCod: string): boolean {
-  return Boolean(crasCod && crasCod !== "__todos__" && crasCod !== "__sem_cras__");
-}
-
-function isCreasAtivo(creasCod: string): boolean {
-  return Boolean(creasCod && creasCod !== "__todos__" && creasCod !== "__sem_creas__");
-}
-
 export default function TerritorialFilterSelects({
   token,
   crasCod,
@@ -78,7 +71,7 @@ export default function TerritorialFilterSelects({
   const [creasCatalog, setCreasCatalog] = useState<TerritorialUnitOption[]>([]);
   const [bairrosOptions, setBairrosOptions] = useState<BairroOption[]>([]);
   const [loadingBairros, setLoadingBairros] = useState(false);
-  const [vinculos, setVinculos] = useState<TerritorialVinculos | null>(null);
+  const vinculos = useTerritorialVinculos(token);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -114,53 +107,29 @@ export default function TerritorialFilterSelects({
     return () => ctrl.abort();
   }, [token]);
 
-  useEffect(() => {
-    const ctrl = new AbortController();
-    fetch(`${API_URL}/api/v1/geo/territorial-vinculos`, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: ctrl.signal,
-    })
-      .then(async (res) => {
-        if (!res.ok) throw new Error();
-        const data = (await res.json()) as TerritorialVinculos;
-        setVinculos(data);
-      })
-      .catch(() => {
-        if (!ctrl.signal.aborted) setVinculos(null);
-      });
-    return () => ctrl.abort();
-  }, [token]);
-
   const creasUnidades = useMemo(
     () => creasCatalog.filter((c) => c.creas_cod && c.creas_cod !== "__sem_creas__"),
     [creasCatalog],
   );
 
-  const crasFiltrado = useMemo(() => {
-    if (!vinculos?.disponivel || !isCreasAtivo(creasCod)) return crasCatalog;
-    const allowed = new Set(vinculos.creas_to_cras[creasCod] ?? []);
-    if (allowed.size === 0) return crasCatalog;
-    return crasCatalog.filter((c) => c.cras_cod === "__sem_cras__" || allowed.has(c.cras_cod ?? ""));
-  }, [crasCatalog, creasCod, vinculos]);
+  const crasFiltrado = useMemo(
+    () => filterCrasCatalog(crasCatalog, creasCod, vinculos, { keepSemCras: true }),
+    [crasCatalog, creasCod, vinculos],
+  );
 
-  const creasFiltrado = useMemo(() => {
-    if (!vinculos?.disponivel || !isCrasAtivo(crasCod)) return creasUnidades;
-    const allowed = new Set(vinculos.cras_to_creas[crasCod] ?? []);
-    if (allowed.size === 0) return creasUnidades;
-    return creasUnidades.filter((c) => allowed.has(c.creas_cod ?? ""));
-  }, [creasUnidades, crasCod, vinculos]);
+  const creasFiltrado = useMemo(
+    () => filterCreasCatalog(creasUnidades, crasCod, vinculos),
+    [creasUnidades, crasCod, vinculos],
+  );
 
-  useEffect(() => {
-    if (!isCreasAtivo(creasCod)) return;
-    if (creasFiltrado.some((c) => c.creas_cod === creasCod)) return;
-    onCreasChange("__todos__");
-  }, [creasCod, creasFiltrado, onCreasChange]);
-
-  useEffect(() => {
-    if (!isCrasAtivo(crasCod)) return;
-    if (crasFiltrado.some((c) => c.cras_cod === crasCod)) return;
-    onCrasChange("__todos__");
-  }, [crasCod, crasFiltrado, onCrasChange]);
+  useResetInvalidTerritorialSelection(
+    crasCod,
+    creasCod,
+    crasFiltrado,
+    creasFiltrado,
+    onCrasChange,
+    onCreasChange,
+  );
 
   useEffect(() => {
     const crasAtivo = isCrasAtivo(crasCod);
@@ -192,9 +161,7 @@ export default function TerritorialFilterSelects({
     return () => ctrl.abort();
   }, [token, crasCod, creasCod]);
 
-  const bairroSelectDisabled =
-    loadingBairros ||
-    ((!isCrasAtivo(crasCod) && !isCreasAtivo(creasCod)));
+  const bairroSelectDisabled = loadingBairros || (!isCrasAtivo(crasCod) && !isCreasAtivo(creasCod));
 
   const bairroPlaceholder = (() => {
     const crasAtivo = isCrasAtivo(crasCod);
