@@ -138,34 +138,36 @@ export default function IvsPage({ token }: Props) {
       </header>
 
       <section className="ivs-filtros fx-card">
-        <TerritorialFilterSelects
-          token={token}
-          crasCod={crasCod}
-          creasCod={creasCod}
-          bairroFiltro={bairroFiltro}
-          onCrasChange={(v) => {
-            setCrasCod(v);
-            setBairroFiltro("");
-          }}
-          onCreasChange={(v) => {
-            setCreasCod(v);
-            setBairroFiltro("");
-          }}
-          onBairroChange={setBairroFiltro}
-          className="ivs-filtros-grid"
-        />
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={() => {
-            setCrasCod("__todos__");
-            setCreasCod("__todos__");
-            setBairroFiltro("");
-            setDimAtiva(null);
-          }}
-        >
-          Limpar filtros
-        </button>
+        <div className="territorial-filtros-toolbar">
+          <TerritorialFilterSelects
+            token={token}
+            crasCod={crasCod}
+            creasCod={creasCod}
+            bairroFiltro={bairroFiltro}
+            onCrasChange={(v) => {
+              setCrasCod(v);
+              setBairroFiltro("");
+            }}
+            onCreasChange={(v) => {
+              setCreasCod(v);
+              setBairroFiltro("");
+            }}
+            onBairroChange={setBairroFiltro}
+            className="ivs-filtros-grid"
+          />
+          <button
+            type="button"
+            className="btn btn-secondary territorial-filtros-clear"
+            onClick={() => {
+              setCrasCod("__todos__");
+              setCreasCod("__todos__");
+              setBairroFiltro("");
+              setDimAtiva(null);
+            }}
+          >
+            Limpar filtros
+          </button>
+        </div>
         <p className="ivs-recorte-label">
           Exibindo: <strong>{tituloRecorte}</strong>
         </p>

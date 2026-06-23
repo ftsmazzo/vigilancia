@@ -2662,6 +2662,27 @@ p.success {
   margin-bottom: 1.25rem;
 }
 
+.territorial-filtros-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.65rem;
+  align-items: end;
+  width: 100%;
+  min-width: 0;
+}
+
+.territorial-filtros-toolbar .caract-filtros-grid,
+.territorial-filtros-toolbar .ivs-filtros-grid {
+  min-width: 0;
+}
+
+.territorial-filtros-clear,
+.caract-filtros-clear {
+  align-self: end;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .caract-filtros-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2695,11 +2716,8 @@ p.success {
   box-sizing: border-box;
   font-size: 0.8rem;
   padding: 0.42rem 0.45rem;
-}
-
-.caract-filtros-clear {
-  align-self: end;
-  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .caract-recorte-label {
@@ -2946,6 +2964,14 @@ p.success {
 }
 
 @media (max-width: 900px) {
+  .territorial-filtros-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .territorial-filtros-clear {
+    justify-self: start;
+  }
+
   .caract-filtros-grid {
     grid-template-columns: 1fr;
   }

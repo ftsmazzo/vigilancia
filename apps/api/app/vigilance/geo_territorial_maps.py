@@ -121,6 +121,40 @@ def map_counts(conn: Connection) -> dict[str, int]:
     return {"cras_bairros": len(cras), "creas_bairros": len(creas)}
 
 
+def territorial_vinculos(conn: Connection) -> dict:
+    """Bairros em comum entre mapas CRAS e CREAS → opções compatíveis nos filtros."""
+    cras_map = load_cras_map(conn)
+    creas_map = load_creas_map(conn)
+    if not cras_map or not creas_map:
+        return {
+            "disponivel": False,
+            "cras_to_creas": {},
+            "creas_to_cras": {},
+            "mensagem": "Mapas bairros×CRAS e bairros×CREAS não aplicados. Use Ingestão → Geo.",
+        }
+
+    cras_to_creas: dict[str, set[str]] = {}
+    creas_to_cras: dict[str, set[str]] = {}
+
+    for bairro_key, cras_num in cras_map.items():
+        creas_num = creas_map.get(bairro_key)
+        if creas_num is None:
+            continue
+        ck = str(cras_num)
+        ek = str(creas_num)
+        cras_to_creas.setdefault(ck, set()).add(ek)
+        creas_to_cras.setdefault(ek, set()).add(ck)
+
+    def _sort_nums(d: dict[str, set[str]]) -> dict[str, list[str]]:
+        return {k: sorted(v, key=lambda x: int(x) if x.isdigit() else 999) for k, v in d.items()}
+
+    return {
+        "disponivel": True,
+        "cras_to_creas": _sort_nums(cras_to_creas),
+        "creas_to_cras": _sort_nums(creas_to_cras),
+    }
+
+
 def geo_has_territorial_columns(conn: Connection) -> dict[str, bool]:
     rows = conn.execute(
         text(

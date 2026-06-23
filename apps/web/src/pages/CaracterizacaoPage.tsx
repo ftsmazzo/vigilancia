@@ -129,32 +129,34 @@ export default function CaracterizacaoPage({ token }: Props) {
       </header>
 
       <section className="caract-filtros fx-card">
-        <TerritorialFilterSelects
-          token={token}
-          crasCod={crasCod}
-          creasCod={creasCod}
-          bairroFiltro={bairroFiltro}
-          onCrasChange={(v) => {
-            setCrasCod(v);
-            setBairroFiltro("");
-          }}
-          onCreasChange={(v) => {
-            setCreasCod(v);
-            setBairroFiltro("");
-          }}
-          onBairroChange={setBairroFiltro}
-        />
-        <button
-          type="button"
-          className="btn btn-secondary caract-filtros-clear"
-          onClick={() => {
-            setCrasCod("__todos__");
-            setCreasCod("__todos__");
-            setBairroFiltro("");
-          }}
-        >
-          Limpar filtros
-        </button>
+        <div className="territorial-filtros-toolbar">
+          <TerritorialFilterSelects
+            token={token}
+            crasCod={crasCod}
+            creasCod={creasCod}
+            bairroFiltro={bairroFiltro}
+            onCrasChange={(v) => {
+              setCrasCod(v);
+              setBairroFiltro("");
+            }}
+            onCreasChange={(v) => {
+              setCreasCod(v);
+              setBairroFiltro("");
+            }}
+            onBairroChange={setBairroFiltro}
+          />
+          <button
+            type="button"
+            className="btn btn-secondary territorial-filtros-clear"
+            onClick={() => {
+              setCrasCod("__todos__");
+              setCreasCod("__todos__");
+              setBairroFiltro("");
+            }}
+          >
+            Limpar filtros
+          </button>
+        </div>
         <p className="caract-recorte-label">
           Exibindo: <strong>{tituloRecorte}</strong>
         </p>

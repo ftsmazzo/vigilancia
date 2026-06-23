@@ -21,6 +21,7 @@ from ..vigilance.geo_territorial_maps import (
     persist_cras_map,
     persist_creas_map,
     reapply_persisted_territorial_maps,
+    territorial_vinculos,
 )
 from ..vigilance.geo_viacep import list_missing_ceps_from_cadu, supplement_geo_from_viacep
 from ..municipio_context import get_or_create_context
@@ -171,6 +172,19 @@ def geo_territorial_maps_status(
             "mapas": map_counts(conn),
             "geo_preenchimento": geo_territorial_fill_stats(conn),
         }
+
+
+@router.get("/territorial-vinculos")
+def geo_territorial_vinculos(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """
+    CRAS ↔ CREAS que compartilham bairros nos mapas territoriais persistidos.
+    Usado pelos filtros da Caracterização/IVS para restringir opções cruzadas.
+    """
+    with db.bind.connect() as conn:
+        return territorial_vinculos(conn)
 
 
 @router.post("/apply-cras-bairros")
