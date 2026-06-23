@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
-type TabId = "cadu" | "pbf" | "bpc" | "sibec" | "sisc" | "geo";
+type TabId = "cadu" | "pbf" | "bpc" | "sibec" | "sisc" | "geo" | "rma";
 
 type UploadResult = { ok: boolean; data: Record<string, unknown>; errorText?: string };
 
@@ -86,6 +86,9 @@ const TARGET_LABELS: Record<string, string> = {
   sibec__manutencoes: "SIBEC — Manutenções mensais",
   geo__tbl_geo: "Geo — logradouros (Ribeirão / CEP)",
   sisc__sisc: "SISC — Serviço de Convivência",
+  rma__cras: "RMA — CRAS (produção mensal)",
+  rma__creas: "RMA — CREAS (produção mensal)",
+  rma__centro_pop: "RMA — Centro POP",
 };
 
 function humanBaseTitle(run: IngestionRunRow): string {
@@ -107,6 +110,7 @@ function formatSourceLabel(source: string): string {
     bpc: "BPC",
     sisc: "SISC",
     geo: "Geo",
+    rma: "RMA",
   };
   return map[source.toLowerCase()] ?? source.toUpperCase();
 }
@@ -250,9 +254,18 @@ export default function IngestaoPage({ token }: Props) {
   const [geoCreasPreview, setGeoCreasPreview] = useState<Record<string, unknown> | null>(null);
   const [geoMapsLoading, setGeoMapsLoading] = useState(false);
   const [geoMapsStatus, setGeoMapsStatus] = useState("");
-  const [rmaLoading, setRmaLoading] = useState(false);
-  const [rmaStatus, setRmaStatus] = useState("");
+
+  // RMA — produção mensal SUAS (mesmo fluxo de ingestão RAW)
+  const [rmaCrasFile, setRmaCrasFile] = useState<File | null>(null);
+  const [rmaCreasFile, setRmaCreasFile] = useState<File | null>(null);
+  const [rmaPopFile, setRmaPopFile] = useState<File | null>(null);
+  const [rmaUploading, setRmaUploading] = useState(false);
+  const [rmaUploadStatus, setRmaUploadStatus] = useState("");
+  const [rmaUploadProgress, setRmaUploadProgress] = useState(0);
+  const [rmaRefreshLoading, setRmaRefreshLoading] = useState(false);
+  const [rmaRefreshStatus, setRmaRefreshStatus] = useState("");
   const [rmaIntegridade, setRmaIntegridade] = useState<Record<string, unknown> | null>(null);
+
   const [geoMissingLoading, setGeoMissingLoading] = useState(false);
   const [geoMissingCeps, setGeoMissingCeps] = useState<Array<Record<string, unknown>>>([]);
   const [geoViaCepLoading, setGeoViaCepLoading] = useState(false);
@@ -576,37 +589,68 @@ export default function IngestaoPage({ token }: Props) {
     }
   }
 
-  async function runRmaBootstrap() {
-    setRmaLoading(true);
-    setRmaStatus("");
+  async function submitRmaFile(dataset: "cras" | "creas" | "centro_pop", file: File | null, label: string) {
+    if (!file) {
+      setRmaUploadStatus(`Selecione o arquivo ${label}.`);
+      return;
+    }
+    setRmaUploadStatus("");
+    setRmaUploadProgress(0);
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("source", "rma");
+    fd.append("dataset", dataset);
+    fd.append("strategy", "replace");
+    fd.append("csv_delimiter", ";");
+    setRmaUploading(true);
+    const res = await runIngestionUpload(fd, token, setRmaUploadProgress);
+    setRmaUploading(false);
+    if (res.ok) {
+      setRmaUploadProgress(100);
+      setRmaUploadStatus(
+        `${label}: ${String(res.data.row_count ?? 0)} linhas em raw.${String(res.data.target_table ?? "")}. ` +
+          "Quando os três arquivos estiverem carregados, clique em «Gerar visão RMA».",
+      );
+      if (dataset === "cras") setRmaCrasFile(null);
+      if (dataset === "creas") setRmaCreasFile(null);
+      if (dataset === "centro_pop") setRmaPopFile(null);
+      await loadRuns();
+    } else {
+      setRmaUploadStatus(res.errorText || `Falha ao carregar ${label}.`);
+    }
+  }
+
+  async function runRmaRefresh() {
+    setRmaRefreshLoading(true);
+    setRmaRefreshStatus("");
     setRmaIntegridade(null);
     try {
-      const response = await fetch(`${API_URL}/api/v1/rma/bootstrap`, {
+      const response = await fetch(`${API_URL}/api/v1/rma/refresh`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = (await response.json().catch(() => ({}))) as Record<string, unknown> & { detail?: unknown };
       if (!response.ok) {
-        throw new Error(typeof data.detail === "string" ? data.detail : "Falha no bootstrap RMA.");
+        throw new Error(typeof data.detail === "string" ? data.detail : "Falha ao gerar visão RMA.");
       }
       const integ = (data.integridade ?? null) as Record<string, unknown> | null;
       setRmaIntegridade(integ);
       const fato = (data.fato ?? {}) as Record<string, unknown>;
       const mv = (data.resumo_mview ?? {}) as Record<string, unknown>;
-      setRmaStatus(
-        `RMA carregado: fato ${String(fato.rows ?? "—")} linhas, resumo ${String(mv.row_count ?? "—")} linhas. ` +
-          `Integridade: ${integ?.ok === true ? "OK" : "ver avisos/erros"}.`,
+      setRmaRefreshStatus(
+        `Visão RMA gerada: fato ${String(fato.rows ?? "—")} indicadores, resumo ${String(mv.row_count ?? "—")} linhas. ` +
+          `Integridade: ${integ?.ok === true ? "OK" : "ver pendências"}.`,
       );
     } catch (e) {
-      setRmaStatus(e instanceof Error ? e.message : "Erro inesperado.");
+      setRmaRefreshStatus(e instanceof Error ? e.message : "Erro inesperado.");
     } finally {
-      setRmaLoading(false);
+      setRmaRefreshLoading(false);
     }
   }
 
   async function runRmaIntegridade() {
-    setRmaLoading(true);
-    setRmaStatus("");
+    setRmaRefreshLoading(true);
+    setRmaRefreshStatus("");
     try {
       const response = await fetch(`${API_URL}/api/v1/rma/integridade`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -616,11 +660,11 @@ export default function IngestaoPage({ token }: Props) {
         throw new Error(typeof data.detail === "string" ? data.detail : "Falha na auditoria RMA.");
       }
       setRmaIntegridade(data);
-      setRmaStatus(data.ok === true ? "Integridade RMA: OK." : "Integridade RMA: há pendências (veja lista).");
+      setRmaRefreshStatus(data.ok === true ? "Integridade RMA: OK." : "Integridade RMA: há pendências.");
     } catch (e) {
-      setRmaStatus(e instanceof Error ? e.message : "Erro inesperado.");
+      setRmaRefreshStatus(e instanceof Error ? e.message : "Erro inesperado.");
     } finally {
-      setRmaLoading(false);
+      setRmaRefreshLoading(false);
     }
   }
 
@@ -885,6 +929,7 @@ export default function IngestaoPage({ token }: Props) {
     { id: "sibec", label: "SIBEC Manutenções", hint: "Analíticos mensais por competência" },
     { id: "sisc", label: "SISC Convivência", hint: "Atendidos — vínculo por NIS" },
     { id: "geo", label: "Geo / CEP", hint: "Logradouros e teste de cruzamento" },
+    { id: "rma", label: "RMA SUAS", hint: "Produção mensal CRAS / CREAS / POP" },
   ];
 
   return (
@@ -1194,6 +1239,134 @@ export default function IngestaoPage({ token }: Props) {
             </section>
           )}
 
+          {tab === "rma" && (
+            <section className="ingestao-panel">
+              <h1>RMA — produção mensal SUAS</h1>
+              <p className="ingestao-desc">
+                Mesmo fluxo das outras fontes: envie os CSVs exportados do sistema municipal (delimitador{" "}
+                <strong>ponto e vírgula</strong>). Grava em{" "}
+                <code className="inline-code">raw.rma__cras</code>,{" "}
+                <code className="inline-code">raw.rma__creas</code> e{" "}
+                <code className="inline-code">raw.rma__centro_pop</code>. Depois clique em{" "}
+                <strong>Gerar visão RMA</strong> (como Família na Vigilância). Dado independente do CADU.
+              </p>
+
+              <div className="auth-form" style={{ marginBottom: "1rem" }}>
+                <h2 style={{ fontSize: "1.05rem", margin: "0 0 0.5rem" }}>CRAS</h2>
+                <label>
+                  Arquivo <code className="inline-code">cras.csv</code>
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={(ev) => setRmaCrasFile(ev.target.files?.[0] || null)}
+                    disabled={rmaUploading}
+                  />
+                </label>
+                <button
+                  type="button"
+                  disabled={rmaUploading || !rmaCrasFile}
+                  onClick={() => void submitRmaFile("cras", rmaCrasFile, "CRAS")}
+                >
+                  {rmaUploading ? "Enviando…" : "Carregar CRAS"}
+                </button>
+              </div>
+
+              <div className="auth-form" style={{ marginBottom: "1rem" }}>
+                <h2 style={{ fontSize: "1.05rem", margin: "0 0 0.5rem" }}>CREAS</h2>
+                <label>
+                  Arquivo <code className="inline-code">creas.csv</code>
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={(ev) => setRmaCreasFile(ev.target.files?.[0] || null)}
+                    disabled={rmaUploading}
+                  />
+                </label>
+                <button
+                  type="button"
+                  disabled={rmaUploading || !rmaCreasFile}
+                  onClick={() => void submitRmaFile("creas", rmaCreasFile, "CREAS")}
+                >
+                  {rmaUploading ? "Enviando…" : "Carregar CREAS"}
+                </button>
+              </div>
+
+              <div className="auth-form" style={{ marginBottom: "1rem" }}>
+                <h2 style={{ fontSize: "1.05rem", margin: "0 0 0.5rem" }}>Centro POP</h2>
+                <label>
+                  Arquivo <code className="inline-code">centro_pop.csv</code>
+                  <input
+                    type="file"
+                    accept=".csv"
+                    onChange={(ev) => setRmaPopFile(ev.target.files?.[0] || null)}
+                    disabled={rmaUploading}
+                  />
+                </label>
+                <button
+                  type="button"
+                  disabled={rmaUploading || !rmaPopFile}
+                  onClick={() => void submitRmaFile("centro_pop", rmaPopFile, "Centro POP")}
+                >
+                  {rmaUploading ? "Enviando…" : "Carregar Centro POP"}
+                </button>
+              </div>
+
+              <div className="progress-wrap" aria-live="polite">
+                <div className="progress-track">
+                  <div className="progress-fill" style={{ width: `${rmaUploadProgress}%` }} />
+                </div>
+                <small>{rmaUploading ? `Enviando: ${rmaUploadProgress}%` : "Aguardando envio"}</small>
+              </div>
+              {rmaUploadStatus && (
+                <p className={rmaUploadStatus.includes("linhas") ? "status-ok" : "error"}>{rmaUploadStatus}</p>
+              )}
+
+              <div
+                className="auth-form"
+                style={{ marginTop: "1.25rem", paddingTop: "0.75rem", borderTop: "1px solid var(--color-border, #333)" }}
+              >
+                <h2 style={{ fontSize: "1.05rem", margin: "0 0 0.5rem" }}>Visão analítica</h2>
+                <p className="ingestao-desc" style={{ marginBottom: "0.75rem" }}>
+                  Monta equipamentos oficiais, ponte territorial CRAS 1–12 / CREAS 1–5 e indicadores mensais.
+                </p>
+                <div className="vig-actions" style={{ flexWrap: "wrap", gap: "0.5rem" }}>
+                  <button type="button" onClick={() => void runRmaRefresh()} disabled={rmaRefreshLoading}>
+                    {rmaRefreshLoading ? "Processando…" : "Gerar visão RMA"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => void runRmaIntegridade()}
+                    disabled={rmaRefreshLoading}
+                  >
+                    Auditar integridade
+                  </button>
+                </div>
+                {rmaRefreshStatus && (
+                  <p
+                    className={rmaRefreshStatus.includes("OK") || rmaRefreshStatus.includes("gerada") ? "status-ok" : "error"}
+                    style={{ marginTop: "0.75rem" }}
+                  >
+                    {rmaRefreshStatus}
+                  </p>
+                )}
+                {rmaIntegridade && (
+                  <ul className="vig-warnings" style={{ listStyle: "disc", marginTop: "0.5rem" }}>
+                    <li>Equipamentos: {String(rmaIntegridade.dim_equipamentos ?? "—")}</li>
+                    <li>Fato: {String(rmaIntegridade.fato_rows ?? "—")} (PSR excluídos: {String(rmaIntegridade.fato_psr_excluidos ?? "—")})</li>
+                    <li>Resumo MV: {String(rmaIntegridade.resumo_rows ?? "—")}</li>
+                    {Array.isArray(rmaIntegridade.erros) && (rmaIntegridade.erros as string[]).length > 0 && (
+                      <li>Erros: {(rmaIntegridade.erros as string[]).join(" · ")}</li>
+                    )}
+                    {Array.isArray(rmaIntegridade.avisos) && (rmaIntegridade.avisos as string[]).length > 0 && (
+                      <li>Avisos: {(rmaIntegridade.avisos as string[]).join(" · ")}</li>
+                    )}
+                  </ul>
+                )}
+              </div>
+            </section>
+          )}
+
           {tab === "geo" && (
             <section className="ingestao-panel">
               <h1>Geo — base local (tbl_geo)</h1>
@@ -1384,47 +1557,6 @@ export default function IngestaoPage({ token }: Props) {
                   <p className={geoMapsStatus.includes("reaplicados") ? "status-ok" : "error"} style={{ marginTop: "0.75rem" }}>
                     {geoMapsStatus}
                   </p>
-                )}
-              </div>
-
-              <div
-                className="auth-form"
-                style={{ marginTop: "1.25rem", padding: "0.75rem 0", borderTop: "1px solid var(--color-border, #333)" }}
-              >
-                <h2 style={{ fontSize: "1.05rem", margin: "0 0 0.5rem" }}>RMA — produção mensal SUAS</h2>
-                <p className="ingestao-desc" style={{ marginBottom: "0.75rem" }}>
-                  Carrega <code className="inline-code">DadosBrutos/RMA</code> (CRAS, CREAS, Centro POP), cria ids
-                  oficiais SUAS, ponte territorial 1–12 / 1–5 e MV analítica. Independente do CADU; cruza com família
-                  só no comparativo carga×demanda.
-                </p>
-                <div className="vig-actions" style={{ flexWrap: "wrap", gap: "0.5rem" }}>
-                  <button type="button" onClick={() => void runRmaBootstrap()} disabled={rmaLoading}>
-                    {rmaLoading ? "Processando…" : "Bootstrap RMA (servidor)"}
-                  </button>
-                  <button type="button" className="btn btn-secondary" onClick={() => void runRmaIntegridade()} disabled={rmaLoading}>
-                    Auditar integridade
-                  </button>
-                </div>
-                {rmaStatus && (
-                  <p
-                    className={rmaStatus.includes("OK") || rmaStatus.includes("carregado") ? "status-ok" : "error"}
-                    style={{ marginTop: "0.75rem" }}
-                  >
-                    {rmaStatus}
-                  </p>
-                )}
-                {rmaIntegridade && (
-                  <ul className="vig-warnings" style={{ listStyle: "disc", marginTop: "0.5rem" }}>
-                    <li>Equipamentos: {String(rmaIntegridade.dim_equipamentos ?? "—")}</li>
-                    <li>Fato: {String(rmaIntegridade.fato_rows ?? "—")} (PSR excluídos: {String(rmaIntegridade.fato_psr_excluidos ?? "—")})</li>
-                    <li>Resumo MV: {String(rmaIntegridade.resumo_rows ?? "—")}</li>
-                    {Array.isArray(rmaIntegridade.erros) && (rmaIntegridade.erros as string[]).length > 0 && (
-                      <li>Erros: {(rmaIntegridade.erros as string[]).join(" · ")}</li>
-                    )}
-                    {Array.isArray(rmaIntegridade.avisos) && (rmaIntegridade.avisos as string[]).length > 0 && (
-                      <li>Avisos: {(rmaIntegridade.avisos as string[]).join(" · ")}</li>
-                    )}
-                  </ul>
                 )}
               </div>
 

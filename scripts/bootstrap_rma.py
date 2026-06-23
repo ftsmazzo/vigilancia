@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bootstrap RMA local (sem subir a API). Uso: python scripts/bootstrap_rma.py"""
+"""Bootstrap RMA local a partir de DadosBrutos (dev). Produção: use Ingestão → RMA na UI."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from sqlalchemy import create_engine
 from app.config import settings
 from app.vigilance.rma_integridade import auditar_rma_integridade
 from app.vigilance.rma_loader import bootstrap_rma_from_dados_brutos
-from app.vigilance.rma_mview import refresh_rma_resumo_mview
+from app.vigilance.rma_pipeline import refresh_rma_pipeline
 
 
 def main() -> int:
@@ -24,20 +24,16 @@ def main() -> int:
         url = url.replace("@postgres:", "@127.0.0.1:")
     engine = create_engine(url)
     with engine.connect() as conn:
-        result = bootstrap_rma_from_dados_brutos(conn)
-        mv = refresh_rma_resumo_mview(conn)
+        bootstrap_rma_from_dados_brutos(conn)
+        result = refresh_rma_pipeline(conn)
         report = auditar_rma_integridade(conn)
         conn.commit()
 
-    print("RAW:", [(r.table, r.rows) for r in result.raw])
-    print("DIM:", result.dim)
     print("FATO:", result.fato)
-    print("MV:", mv.row_count)
+    print("MV:", result.resumo_mview)
     print("INTEGRIDADE ok=", report.ok)
     for e in report.erros:
         print(" ERRO:", e)
-    for a in report.avisos:
-        print(" AVISO:", a)
     return 0 if report.ok else 1
 
 

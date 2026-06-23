@@ -9,7 +9,6 @@ from sqlalchemy.engine import Connection
 
 from .familia_mview import _table_exists
 from .geo_territorial_maps import MAP_CRAS_TABLE, MAP_CREAS_TABLE, load_cras_map, load_creas_map
-from .rma_catalogo import resolve_rma_data_dir
 from .rma_equipamento import (
     CENTRO_POP_ID_OFICIAL,
     DIM_TABLE,
@@ -38,20 +37,17 @@ class IntegridadeReport:
     fato_rows: int = 0
     fato_psr_excluidos: int = 0
     resumo_rows: int = 0
-    data_dir: str = ""
     familia_mview: bool = False
 
 
 def auditar_rma_integridade(conn: Connection) -> IntegridadeReport:
-    report = IntegridadeReport(ok=True, data_dir=str(resolve_rma_data_dir()))
-
-    if not resolve_rma_data_dir().is_dir():
-        report.erros.append(f"Pasta RMA não encontrada: {report.data_dir}")
-        report.ok = False
+    report = IntegridadeReport(ok=True)
 
     for table in _RAW_TABLES:
         if not _table_exists(conn, "raw", table):
-            report.erros.append(f"Tabela raw.{table} ausente — execute bootstrap RMA.")
+            report.erros.append(
+                f"Tabela raw.{table} ausente — envie o CSV na aba Ingestão → RMA."
+            )
             report.ok = False
             report.raw[table] = 0
         else:
@@ -204,7 +200,9 @@ def auditar_rma_integridade(conn: Connection) -> IntegridadeReport:
             report.erros.append("MV resumo RMA vazia.")
             report.ok = False
     else:
-        report.erros.append(f"MV vig.{RESUMO_MVIEW} ausente — execute refresh.")
+        report.erros.append(
+            f"MV vig.{RESUMO_MVIEW} ausente — clique em «Gerar visão RMA» na Ingestão."
+        )
         report.ok = False
 
     report.familia_mview = _table_exists(conn, "vig", "mvw_familia")

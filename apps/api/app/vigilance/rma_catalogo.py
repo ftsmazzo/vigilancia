@@ -27,21 +27,23 @@ def _monorepo_rma_dir() -> Path | None:
     return None
 
 
+def _bundled_rma_dict_dir() -> Path:
+    bundled = Path(__file__).resolve().parent.parent / "data" / "rma"
+    return bundled
+
+
 def resolve_rma_data_dir() -> Path:
+    """Legado/dev: pasta local com CSVs. Produção usa ingestão RAW pela UI."""
     from ..config import settings
 
-    configured: Path | None = None
     if settings.rma_data_dir and settings.rma_data_dir.strip():
         configured = Path(settings.rma_data_dir.strip())
         if configured.is_dir():
             return configured
-    docker = Path("/DadosBrutos/RMA")
-    if docker.is_dir():
-        return docker
     monorepo = _monorepo_rma_dir()
     if monorepo:
         return monorepo
-    return configured or docker
+    return _bundled_rma_dict_dir()
 
 
 def default_rma_data_dir() -> Path:
@@ -142,7 +144,9 @@ def refresh_catalogo_from_dicionarios(
     data_dir: Path | None = None,
 ) -> CatalogoRefreshResult:
     ensure_rma_indicador_catalogo(conn)
-    base = data_dir or default_rma_data_dir()
+    base = data_dir or _bundled_rma_dict_dir()
+    if not base.is_dir():
+        base = resolve_rma_data_dir()
     specs = [
         ("CRAS", base / "CRAS" / "dicionario.csv"),
         ("CREAS", base / "CREAS" / "dicionario.csv"),

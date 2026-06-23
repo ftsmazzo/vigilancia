@@ -35,6 +35,8 @@ _META_COLS = frozenset(
         "codigoibge",
         "ibge",
         "oferta_serv_blocoii",
+        "id",
+        "competencia",
     }
 )
 

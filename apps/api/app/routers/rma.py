@@ -13,14 +13,8 @@ from ..vigilance.rma_analytics import (
     equipamento_catalog,
     resumo_serie,
 )
-from ..vigilance.rma_catalogo import refresh_catalogo_from_dicionarios
-from ..vigilance.rma_equipamento import refresh_dim_from_raw_rma
-from ..vigilance.rma_loader import (
-    bootstrap_rma_from_dados_brutos,
-    refresh_fato_rma_mensal,
-)
 from ..vigilance.rma_integridade import auditar_rma_integridade
-from ..vigilance.rma_mview import refresh_rma_resumo_mview
+from ..vigilance.rma_pipeline import refresh_rma_pipeline
 
 router = APIRouter(prefix="/rma", tags=["rma"])
 
@@ -40,37 +34,6 @@ def _integridade_dict(report) -> dict:
         "fato_psr_excluidos": report.fato_psr_excluidos,
         "resumo_rows": report.resumo_rows,
         "familia_mview": report.familia_mview,
-        "data_dir": report.data_dir,
-    }
-
-
-@router.post("/bootstrap")
-def bootstrap_rma(
-    db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
-):
-    """
-    Carga inicial: CSVs em DadosBrutos/RMA → raw → catálogo → dim equipamento → fato → MV resumo.
-    """
-    try:
-        with db.bind.connect() as conn:
-            result = bootstrap_rma_from_dados_brutos(conn)
-            mv = refresh_rma_resumo_mview(conn)
-            integridade = auditar_rma_integridade(conn)
-            conn.commit()
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Falha no bootstrap RMA: {exc}",
-        ) from exc
-
-    return {
-        "raw": [{"table": r.table, "rows": r.rows} for r in result.raw],
-        "catalogo": result.catalogo,
-        "dim_equipamento": result.dim,
-        "fato": result.fato,
-        "resumo_mview": {"row_count": mv.row_count},
-        "integridade": _integridade_dict(integridade),
     }
 
 
@@ -79,26 +42,26 @@ def refresh_rma(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    """Reprocessa dim, fato e MV a partir das tabelas raw já ingeridas."""
+    """
+    Gera visão RMA a partir das tabelas raw já ingeridas pela UI
+    (source=rma → rma__cras, rma__creas, rma__centro_pop).
+    """
     try:
         with db.bind.connect() as conn:
-            refresh_catalogo_from_dicionarios(conn)
-            dim = refresh_dim_from_raw_rma(conn)
-            fato = refresh_fato_rma_mensal(conn)
-            mv = refresh_rma_resumo_mview(conn)
-            integridade = auditar_rma_integridade(conn)
+            result = refresh_rma_pipeline(conn)
             conn.commit()
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Falha ao atualizar RMA: {exc}",
+            detail=f"Falha ao gerar visão RMA: {exc}",
         ) from exc
 
     return {
-        "dim_equipamento": {"upserted": dim.upserted, "total": dim.total},
-        "fato": fato,
-        "resumo_mview": {"row_count": mv.row_count},
-        "integridade": _integridade_dict(integridade),
+        "catalogo": result.catalogo,
+        "dim_equipamento": result.dim,
+        "fato": result.fato,
+        "resumo_mview": result.resumo_mview,
+        "integridade": result.integridade,
     }
 
 

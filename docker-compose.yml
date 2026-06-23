@@ -35,7 +35,6 @@ services:
       - "${API_PORT:-8000}:8000"
     volumes:
       - ./apps/api:/app
-      - ./DadosBrutos:/DadosBrutos:ro
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   web:
