@@ -79,7 +79,8 @@ def mapas_heatmap_from_views(
 
     cras_sel = (cras_cod or "").strip() or "__todos__"
     creas_sel = (creas_cod or "").strip() or "__todos__"
-    where_extra, params = _territorio_filter_clause(cras_sel, bairro, creas_sel, conn)
+    where_extra, params, lead_cte, fam_join = _territorio_filter_clause(cras_sel, bairro, creas_sel, conn)
+    with_kw = f"WITH {lead_cte},\n            " if lead_cte else "WITH "
 
     lat_expr = _lat_sql("fam.lat_num")
     lng_expr = _lng_sql("fam.long_num")
@@ -87,9 +88,10 @@ def mapas_heatmap_from_views(
     row = conn.execute(
         text(
             f"""
-            WITH fam AS (
+            {with_kw}fam AS (
               SELECT f.*
               FROM vig.mvw_familia f
+              {fam_join}
               WHERE TRUE {where_extra}
             ),
             pes AS (

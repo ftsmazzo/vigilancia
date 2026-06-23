@@ -2634,12 +2634,20 @@ p.success {
 
 .caract-filtros-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr auto;
-  gap: 1rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
   align-items: end;
+  width: 100%;
 }
 
-.caract-filtros-grid label span {
+.territorial-filter-field {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.caract-filtros-grid label span,
+.territorial-filter-field span {
   display: block;
   margin-bottom: 0.35rem;
   font-size: 0.72rem;
@@ -2647,6 +2655,16 @@ p.success {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--fx-subtle);
+}
+
+.territorial-select,
+.caract-filtros-grid .cras-select {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  font-size: 0.8rem;
+  padding: 0.42rem 0.45rem;
 }
 
 .caract-filtros-clear {
@@ -2698,9 +2716,16 @@ p.success {
 }
 
 .caract-loading {
-  opacity: 0.75;
-  padding: 2rem;
-  text-align: center;
+  opacity: 0.85;
+  padding: 0.75rem 0;
+  text-align: left;
+  color: var(--fx-muted);
+  font-size: 0.88rem;
+}
+
+.caract-loading--inline {
+  padding: 0 0 0.5rem;
+  font-size: 0.82rem;
 }
 
 .caracterizacao-erro {

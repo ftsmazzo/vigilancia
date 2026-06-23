@@ -59,7 +59,7 @@ function fmtBairro(nome: string): string {
 }
 
 export default function CaracterizacaoPage({ token }: Props) {
-  const [loading, setLoading] = useState(true);
+  const [painelLoading, setPainelLoading] = useState(true);
   const [error, setError] = useState("");
   const [crasCod, setCrasCod] = useState("__todos__");
   const [creasCod, setCreasCod] = useState("__todos__");
@@ -67,13 +67,15 @@ export default function CaracterizacaoPage({ token }: Props) {
   const [painel, setPainel] = useState<Painel | null>(null);
 
   useEffect(() => {
-    setLoading(true);
+    setPainelLoading(true);
     setError("");
+    const ctrl = new AbortController();
     const params = new URLSearchParams();
     appendTerritorialParams(params, crasCod, creasCod, bairroFiltro);
     const qs = params.toString();
     fetch(`${API_URL}/api/v1/caracterizacao/painel${qs ? `?${qs}` : ""}`, {
       headers: { Authorization: `Bearer ${token}` },
+      signal: ctrl.signal,
     })
       .then(async (res) => {
         const data = (await res.json()) as Painel & { detail?: string };
@@ -81,10 +83,14 @@ export default function CaracterizacaoPage({ token }: Props) {
         setPainel(data);
       })
       .catch((e) => {
+        if (ctrl.signal.aborted) return;
         setError(e instanceof Error ? e.message : "Erro ao carregar caracterização.");
         setPainel(null);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!ctrl.signal.aborted) setPainelLoading(false);
+      });
+    return () => ctrl.abort();
   }, [token, crasCod, creasCod, bairroFiltro]);
 
   const r = painel?.resumo;
@@ -125,7 +131,6 @@ export default function CaracterizacaoPage({ token }: Props) {
       <section className="caract-filtros fx-card">
         <TerritorialFilterSelects
           token={token}
-          loading={loading}
           crasCod={crasCod}
           creasCod={creasCod}
           bairroFiltro={bairroFiltro}
@@ -157,15 +162,16 @@ export default function CaracterizacaoPage({ token }: Props) {
 
       {error && <p className="error caracterizacao-erro">{error}</p>}
 
-      {loading && <p className="caract-loading">Carregando perfil do CADU…</p>}
+      {painelLoading && !painel && <p className="caract-loading">Carregando perfil do CADU…</p>}
+      {painelLoading && painel && <p className="caract-loading caract-loading--inline">Atualizando recorte…</p>}
 
-      {!loading && painel && !painel.disponivel && (
+      {!painelLoading && painel && !painel.disponivel && (
         <p className="convivencia-alerta convivencia-alerta--aviso">
           {painel.mensagem || "Gere as visões Família e Pessoas em Vigilância."}
         </p>
       )}
 
-      {!loading && r && painel?.disponivel && (
+      {painel && painel.disponivel && r && (
         <>
           <div className="caract-kpi-strip" aria-label="Resumo">
             <article className="kpi-card caract-kpi">

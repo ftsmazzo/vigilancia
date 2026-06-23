@@ -8,20 +8,29 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..deps import get_current_user
 from ..models import User
-from ..vigilance.creas_analytics import bairros_por_creas_from_views, creas_catalog_from_views
+from ..vigilance.creas_analytics import (
+    bairros_por_creas_from_views,
+    creas_catalog_from_views,
+    creas_catalog_lite_from_views,
+)
 
 router = APIRouter(prefix="/creas", tags=["creas"])
 
 
 @router.get("/catalog")
 def get_creas_catalog(
+    lite: bool = Query(True, description="Versão leve para filtros (só famílias)"),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
     """Lista CREAS distintos no CADU com totais de famílias e pessoas."""
     try:
         with db.bind.connect() as conn:
-            items, diagnostic = creas_catalog_from_views(conn)
+            if lite:
+                items = creas_catalog_lite_from_views(conn)
+                diagnostic = {}
+            else:
+                items, diagnostic = creas_catalog_from_views(conn)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except Exception as exc:

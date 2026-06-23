@@ -140,7 +140,6 @@ export default function IvsPage({ token }: Props) {
       <section className="ivs-filtros fx-card">
         <TerritorialFilterSelects
           token={token}
-          loading={loading}
           crasCod={crasCod}
           creasCod={creasCod}
           bairroFiltro={bairroFiltro}

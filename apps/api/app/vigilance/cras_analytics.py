@@ -129,6 +129,41 @@ def _cras_filter_clause(cras_cod: str | None) -> tuple[str, dict]:
     return " AND btrim(f.num_cras::text) = :cras_cod ", {"cras_cod": cod}
 
 
+def cras_catalog_lite_from_views(conn: Connection) -> list[dict]:
+    """Catálogo CRAS leve (só famílias) para filtros territoriais."""
+    if not _table_exists(conn, "vig", "mvw_familia"):
+        raise ValueError(
+            "Visão vig.mvw_familia ausente. Gere a visão Família em Vigilância antes de usar o painel por CRAS."
+        )
+    ck = _cras_key_sql("f")
+    rows = conn.execute(
+        text(
+            f"""
+            SELECT
+              {ck} AS cras_cod,
+              COUNT(DISTINCT f.codigo_familiar)::bigint AS familias
+            FROM vig.mvw_familia f
+            GROUP BY 1
+            """
+        )
+    ).mappings().all()
+    out: list[dict] = []
+    for r in rows:
+        cod = (r["cras_cod"] or "").strip()
+        num_ordem = _cras_numero_ordem(cod, f"CRAS {cod}" if cod else "")
+        rotulo = f"CRAS {num_ordem}" if num_ordem < 999 and cod else "(sem CRAS na geo)"
+        out.append(
+            {
+                "cras_cod": cod if cod else "__sem_cras__",
+                "cras_codigo_exibicao": cod if cod else "—",
+                "cras_nome": rotulo,
+                "rotulo_ordenado": rotulo,
+                "familias": int(r["familias"] or 0),
+            }
+        )
+    return _sort_cras_items(out)
+
+
 def cras_catalog_from_views(conn: Connection) -> list[dict]:
     _require_views(conn)
     ck = _cras_key_sql("f")
@@ -197,10 +232,13 @@ def cras_catalog_from_views(conn: Connection) -> list[dict]:
     return _sort_cras_items(out)
 
 
-def _fam_pes_cte(where_extra: str) -> str:
+def _fam_pes_cte(where_extra: str, *, lead_cte: str = "", fam_join: str = "") -> str:
+    with_kw = f"WITH {lead_cte},\n    " if lead_cte else "WITH "
     return f"""
-    WITH fam AS (
-      SELECT f.* FROM vig.mvw_familia f WHERE TRUE {where_extra}
+    {with_kw}fam AS (
+      SELECT f.* FROM vig.mvw_familia f
+      {fam_join}
+      WHERE TRUE {where_extra}
     ),
     pes AS (
       SELECT p.* FROM vig.mvw_pessoas p
@@ -215,9 +253,12 @@ def _pessoas_bucket(
     params: dict,
     group_expr: str,
     limit: int = 12,
+    *,
+    lead_cte: str = "",
+    fam_join: str = "",
 ) -> list[dict]:
     sql = f"""
-    {_fam_pes_cte(where_extra)}
+    {_fam_pes_cte(where_extra, lead_cte=lead_cte, fam_join=fam_join)}
     SELECT
       bucket AS rotulo,
       COUNT(*)::bigint AS total,

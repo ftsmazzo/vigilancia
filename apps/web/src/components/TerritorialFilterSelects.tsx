@@ -20,7 +20,6 @@ export type BairroOption = {
 
 type Props = {
   token: string;
-  loading?: boolean;
   crasCod: string;
   creasCod: string;
   bairroFiltro: string;
@@ -34,9 +33,20 @@ export function fmtBairro(nome: string): string {
   return nome.toLocaleUpperCase("pt-BR");
 }
 
+function compactFamilias(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(".", ",")}M`;
+  if (n >= 10_000) return `${Math.round(n / 1000)}k`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1).replace(".", ",")}k`;
+  return n.toLocaleString("pt-BR");
+}
+
+function unitOptionLabel(rotulo: string | undefined, familias: number): string {
+  const short = (rotulo ?? "").split(" — ")[0].trim() || rotulo || "—";
+  return `${short} · ${compactFamilias(familias)} fam.`;
+}
+
 export default function TerritorialFilterSelects({
   token,
-  loading = false,
   crasCod,
   creasCod,
   bairroFiltro,
@@ -51,27 +61,37 @@ export default function TerritorialFilterSelects({
   const [loadingBairros, setLoadingBairros] = useState(false);
 
   useEffect(() => {
-    fetch(`${API_URL}/api/v1/cras/catalog`, {
+    const ctrl = new AbortController();
+    fetch(`${API_URL}/api/v1/cras/catalog?lite=true`, {
       headers: { Authorization: `Bearer ${token}` },
+      signal: ctrl.signal,
     })
       .then(async (res) => {
         if (!res.ok) throw new Error();
         const data = (await res.json()) as { items: TerritorialUnitOption[] };
         setCrasCatalog(data.items || []);
       })
-      .catch(() => setCrasCatalog([]));
+      .catch(() => {
+        if (!ctrl.signal.aborted) setCrasCatalog([]);
+      });
+    return () => ctrl.abort();
   }, [token]);
 
   useEffect(() => {
-    fetch(`${API_URL}/api/v1/creas/catalog`, {
+    const ctrl = new AbortController();
+    fetch(`${API_URL}/api/v1/creas/catalog?lite=true`, {
       headers: { Authorization: `Bearer ${token}` },
+      signal: ctrl.signal,
     })
       .then(async (res) => {
         if (!res.ok) throw new Error();
         const data = (await res.json()) as { items: TerritorialUnitOption[] };
         setCreasCatalog(data.items || []);
       })
-      .catch(() => setCreasCatalog([]));
+      .catch(() => {
+        if (!ctrl.signal.aborted) setCreasCatalog([]);
+      });
+    return () => ctrl.abort();
   }, [token]);
 
   useEffect(() => {
@@ -82,25 +102,31 @@ export default function TerritorialFilterSelects({
       return;
     }
 
+    const ctrl = new AbortController();
     setLoadingBairros(true);
     const url = creasAtivo
       ? `${API_URL}/api/v1/creas/bairros?num_creas=${encodeURIComponent(creasCod)}`
       : `${API_URL}/api/v1/cras/bairros?num_cras=${encodeURIComponent(crasCod)}`;
 
-    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: ctrl.signal })
       .then(async (res) => {
         if (!res.ok) throw new Error();
         const data = (await res.json()) as { items: BairroOption[] };
         setBairrosOptions(data.items ?? []);
       })
-      .catch(() => setBairrosOptions([]))
-      .finally(() => setLoadingBairros(false));
+      .catch(() => {
+        if (!ctrl.signal.aborted) setBairrosOptions([]);
+      })
+      .finally(() => {
+        if (!ctrl.signal.aborted) setLoadingBairros(false);
+      });
+
+    return () => ctrl.abort();
   }, [token, crasCod, creasCod]);
 
   const creasUnidades = creasCatalog.filter((c) => c.creas_cod && c.creas_cod !== "__sem_creas__");
 
   const bairroSelectDisabled =
-    loading ||
     loadingBairros ||
     ((crasCod === "__todos__" || crasCod === "__sem_cras__") &&
       (creasCod === "__todos__" || creasCod === "__sem_creas__"));
@@ -116,54 +142,38 @@ export default function TerritorialFilterSelects({
 
   return (
     <div className={className}>
-      <label>
+      <label className="territorial-filter-field">
         <span>CRAS territorial</span>
-        <select
-          className="cras-select"
-          value={crasCod}
-          onChange={(e) => onCrasChange(e.target.value)}
-          disabled={loading}
-        >
+        <select className="cras-select territorial-select" value={crasCod} onChange={(e) => onCrasChange(e.target.value)}>
           <option value="__todos__">Município inteiro</option>
           <option value="__sem_cras__">Sem CRAS na geo</option>
           {crasCatalog.map((c) => (
             <option key={c.cras_cod} value={c.cras_cod}>
-              {(c.rotulo_ordenado ?? c.cras_nome) +
-                (c.cras_codigo_exibicao && c.cras_codigo_exibicao !== "—"
-                  ? ` [${c.cras_codigo_exibicao}]`
-                  : "")}
-              {" · "}
-              {c.familias.toLocaleString("pt-BR")} fam.
+              {unitOptionLabel(c.rotulo_ordenado ?? c.cras_nome, c.familias)}
             </option>
           ))}
         </select>
       </label>
-      <label>
+      <label className="territorial-filter-field">
         <span>CREAS territorial</span>
         <select
-          className="cras-select"
+          className="cras-select territorial-select"
           value={creasCod}
           onChange={(e) => onCreasChange(e.target.value)}
-          disabled={loading}
         >
           <option value="__todos__">Todos os CREAS</option>
           <option value="__sem_creas__">Sem CREAS na geo</option>
           {creasUnidades.map((c) => (
             <option key={c.creas_cod} value={c.creas_cod}>
-              {(c.rotulo_ordenado ?? c.creas_nome) +
-                (c.creas_codigo_exibicao && c.creas_codigo_exibicao !== "—"
-                  ? ` [${c.creas_codigo_exibicao}]`
-                  : "")}
-              {" · "}
-              {c.familias.toLocaleString("pt-BR")} fam.
+              {unitOptionLabel(c.rotulo_ordenado ?? c.creas_nome, c.familias)}
             </option>
           ))}
         </select>
       </label>
-      <label>
+      <label className="territorial-filter-field">
         <span>Bairro</span>
         <select
-          className="cras-select"
+          className="cras-select territorial-select"
           value={bairroFiltro}
           onChange={(e) => onBairroChange(e.target.value)}
           disabled={bairroSelectDisabled}
@@ -171,7 +181,7 @@ export default function TerritorialFilterSelects({
           <option value="">{bairroPlaceholder}</option>
           {bairrosOptions.map((b) => (
             <option key={b.bairro} value={b.bairro}>
-              {fmtBairro(b.bairro)} · {b.familias.toLocaleString("pt-BR")} fam.
+              {fmtBairro(b.bairro)} · {compactFamilias(b.familias)} fam.
             </option>
           ))}
         </select>

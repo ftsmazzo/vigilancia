@@ -210,6 +210,98 @@ def bairros_por_creas_from_views(conn: Connection, creas_cod: str) -> list[dict]
     ]
 
 
+def build_familia_territorio_ctx(
+    conn: Connection,
+    *,
+    cras_cod: str | None,
+    creas_cod: str | None,
+    bairro: str | None,
+) -> dict:
+    """Monta CTE/join/WHERE para filtrar vig.mvw_familia por CRAS/CREAS/bairro."""
+    from .cras_analytics import _cras_filter_clause
+
+    cras_sel = (cras_cod or "").strip() or "__todos__"
+    creas_sel = (creas_cod or "").strip() or "__todos__"
+    params: dict = {}
+    parts: list[str] = []
+
+    cras_extra, cras_params = _cras_filter_clause(cras_sel)
+    if cras_extra.strip():
+        clause = cras_extra.strip()
+        if clause.upper().startswith("AND "):
+            clause = clause[4:].strip()
+        parts.append(clause)
+    params.update(cras_params)
+
+    lead_cte = ""
+    fam_join = ""
+    if creas_sel not in ("", "__todos__"):
+        val, geo_cte, join = _familia_creas_resolution(conn)
+        lead_cte = geo_cte
+        fam_join = join
+        if creas_sel == "__sem_creas__":
+            parts.append(f"({val} IS NULL OR btrim({val}::text) = '')")
+        else:
+            parts.append(f"btrim({val}::text) = :creas_cod")
+            params["creas_cod"] = creas_sel
+
+    if bairro and bairro.strip():
+        parts.append("btrim(f.bairro::text) = :bairro")
+        params["bairro"] = bairro.strip()
+
+    where_sql = f" AND {' AND '.join(parts)}" if parts else ""
+
+    return {
+        "lead_cte": lead_cte,
+        "fam_join": fam_join,
+        "where_sql": where_sql,
+        "params": params,
+        "cras_sel": cras_sel,
+        "creas_sel": creas_sel,
+    }
+
+
+def creas_catalog_lite_from_views(conn: Connection) -> list[dict]:
+    """Catálogo CREAS leve (só famílias) para filtros territoriais."""
+    if not _table_exists(conn, "vig", "mvw_familia"):
+        raise ValueError(
+            "Visão vig.mvw_familia ausente. Gere a visão Família em Vigilância antes de usar o painel por CREAS."
+        )
+    val, geo_cte, join = _familia_creas_resolution(conn)
+    ck = f"""CASE
+      WHEN {val} IS NULL OR btrim({val}::text) = '' THEN ''
+      ELSE btrim({val}::text)
+    END"""
+    rows = conn.execute(
+        text(
+            f"""
+            WITH {geo_cte}
+            SELECT
+              {ck} AS creas_cod,
+              COUNT(DISTINCT f.codigo_familiar)::bigint AS familias
+            FROM vig.mvw_familia f
+            {join}
+            GROUP BY 1
+            """
+        )
+    ).mappings().all()
+    out: list[dict] = []
+    for r in rows:
+        cod = (r["creas_cod"] or "").strip()
+        num_ordem = _creas_numero_ordem(cod, f"CREAS {cod}" if cod else "")
+        rotulo = f"CREAS {num_ordem}" if num_ordem < 999 and cod else "(sem CREAS na geo)"
+        out.append(
+            {
+                "creas_cod": cod if cod else "__sem_creas__",
+                "creas_codigo_exibicao": cod if cod else "—",
+                "creas_nome": rotulo,
+                "rotulo_ordenado": rotulo,
+                "familias": int(r["familias"] or 0),
+            }
+        )
+    return _sort_creas_items(out)
+
+
 def creas_catalog_from_views(conn: Connection) -> tuple[list[dict], dict]:
     _require_views(conn)
     val, geo_cte, join = _familia_creas_resolution(conn)

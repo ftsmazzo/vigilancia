@@ -21,7 +21,7 @@ from .cras_analytics import (
     _pessoas_bucket,
     _require_views,
 )
-from .creas_analytics import _creas_filter_clause, _creas_nome_sql
+from .creas_analytics import build_familia_territorio_ctx
 from .familia_mview import _table_exists
 
 PAINEL_CARACTERIZACAO_VERSAO = 3
@@ -52,12 +52,17 @@ def _familia_renda_per_capita_buckets(
     conn: Connection,
     where_extra: str,
     params: dict,
+    *,
+    lead_cte: str = "",
+    fam_join: str = "",
 ) -> list[dict]:
     """Contagem de famílias por faixa de renda per capita (ordem fixa para o gráfico)."""
+    with_kw = f"WITH {lead_cte},\n    " if lead_cte else "WITH "
     sql = f"""
-    WITH fam AS (
+    {with_kw}fam AS (
       SELECT f.codigo_familiar, f.renda_per_capita
       FROM vig.mvw_familia f
+      {fam_join}
       WHERE TRUE {where_extra}
     ),
     classified AS (
@@ -106,6 +111,8 @@ def _ranking_bairros_geo(
     where_extra: str,
     params: dict,
     *,
+    lead_cte: str = "",
+    fam_join: str = "",
     limit: int = 10,
 ) -> dict:
     """
@@ -118,8 +125,9 @@ def _ranking_bairros_geo(
             "items": [],
         }
 
+    with_kw = f"WITH {lead_cte},\n    " if lead_cte else "WITH "
     sql = f"""
-    WITH fam AS (
+    {with_kw}fam AS (
       SELECT
         f.codigo_familiar,
         COALESCE(
@@ -129,6 +137,7 @@ def _ranking_bairros_geo(
         COALESCE(f.tem_geo, FALSE) AS bairro_via_geo,
         COALESCE(f.marc_pbf, FALSE) AS na_folha_pbf
       FROM vig.mvw_familia f
+      {fam_join}
       WHERE TRUE {where_extra}
     ),
     agg AS (
@@ -208,17 +217,13 @@ def _territorio_filter_clause(
     bairro: str | None = None,
     creas_cod: str | None = None,
     conn: Connection | None = None,
-) -> tuple[str, dict]:
-    cras_sel = (cras_cod or "").strip() or "__todos__"
-    creas_sel = (creas_cod or "").strip() or "__todos__"
-    where_extra, params = _cras_filter_clause(cras_sel)
-    creas_extra, creas_params = _creas_filter_clause(creas_sel, conn=conn)
-    where_extra += creas_extra
-    params.update(creas_params)
-    if bairro and bairro.strip():
-        where_extra += " AND btrim(f.bairro::text) = :bairro "
-        params["bairro"] = bairro.strip()
-    return where_extra, params
+) -> tuple[str, dict, str, str]:
+    if conn is None:
+        raise ValueError("Conexão obrigatória para filtro territorial.")
+    ctx = build_familia_territorio_ctx(
+        conn, cras_cod=cras_cod, creas_cod=creas_cod, bairro=bairro
+    )
+    return ctx["where_sql"], ctx["params"], ctx["lead_cte"], ctx["fam_join"]
 
 
 def caracterizacao_painel_from_views(
@@ -229,17 +234,25 @@ def caracterizacao_painel_from_views(
 ) -> dict:
     """Demografia de pessoas no CADU (fonte verdade), com filtro territorial opcional."""
     _require_views(conn)
-    cras_sel = (cras_cod or "").strip() or "__todos__"
-    creas_sel = (creas_cod or "").strip() or "__todos__"
-    where_extra, params = _territorio_filter_clause(cras_sel, bairro, creas_sel, conn)
+    ctx = build_familia_territorio_ctx(
+        conn, cras_cod=cras_cod, creas_cod=creas_cod, bairro=bairro
+    )
+    where_extra = ctx["where_sql"]
+    params = ctx["params"]
+    lead_cte = ctx["lead_cte"]
+    fam_join = ctx["fam_join"]
+    cras_sel = ctx["cras_sel"]
+    creas_sel = ctx["creas_sel"]
     cn = _cras_nome_sql("fam")
-    cren = _creas_nome_sql(conn, "fam")
+    with_kw = f"WITH {lead_cte},\n      " if lead_cte else "WITH "
 
     base = conn.execute(
         text(
             f"""
-            WITH fam AS (
-              SELECT f.* FROM vig.mvw_familia f WHERE TRUE {where_extra}
+            {with_kw}fam AS (
+              SELECT f.* FROM vig.mvw_familia f
+              {fam_join}
+              WHERE TRUE {where_extra}
             ),
             pes AS (
               SELECT p.* FROM vig.mvw_pessoas p
@@ -250,8 +263,7 @@ def caracterizacao_painel_from_views(
               COUNT(pes.cadu_row_id)::bigint AS pessoas,
               COUNT(pes.cadu_row_id) FILTER (WHERE {SEXO_MASC})::bigint AS homens,
               COUNT(pes.cadu_row_id) FILTER (WHERE {SEXO_FEM})::bigint AS mulheres,
-              MAX({cn}) AS cras_nome,
-              MAX({cren}) AS creas_nome
+              MAX({cn}) AS cras_nome
             FROM fam
             LEFT JOIN pes ON pes.codigo_familiar = fam.codigo_familiar
             """
@@ -268,6 +280,12 @@ def caracterizacao_painel_from_views(
     mulheres = int(base["mulheres"] or 0)
     denom_sexo = homens + mulheres
 
+    creas_nome_titulo = None
+    if creas_sel == "__sem_creas__":
+        creas_nome_titulo = "Sem CREAS na geo"
+    elif creas_sel not in ("", "__todos__"):
+        creas_nome_titulo = f"CREAS {creas_sel}"
+
     return {
         "disponivel": True,
         "painel_versao": PAINEL_CARACTERIZACAO_VERSAO,
@@ -279,7 +297,7 @@ def caracterizacao_painel_from_views(
             base.get("cras_nome"),
             bairro,
             creas_sel=creas_sel,
-            creas_nome=base.get("creas_nome"),
+            creas_nome=creas_nome_titulo,
         ),
         "fonte": "Cadastro Único — vig.mvw_familia + vig.mvw_pessoas",
         "resumo": {
@@ -291,12 +309,28 @@ def caracterizacao_painel_from_views(
             "pct_mulheres": round(100.0 * mulheres / denom_sexo, 2) if denom_sexo else 0.0,
             "nao_informado_sexo": max(0, pessoas - denom_sexo),
         },
-        "por_sexo": _pessoas_bucket(conn, where_extra, params, SEXO_EXPR, 5),
-        "por_deficiencia_binario": _pessoas_bucket(conn, where_extra, params, DEF_BINARIA_EXPR, 3),
-        "por_raca": _pessoas_bucket(conn, where_extra, params, RACA_EXPR, 8),
-        "por_escolaridade": _pessoas_bucket(conn, where_extra, params, ESCOLARIDADE_EXPR, 10),
-        "por_deficiencia": _pessoas_bucket(conn, where_extra, params, DEFICIENCIA_EXPR, 10),
-        "por_faixa_idade": _pessoas_bucket(conn, where_extra, params, IDADE_EXPR, 8),
-        "por_renda_per_capita": _familia_renda_per_capita_buckets(conn, where_extra, params),
-        "ranking_bairros": _ranking_bairros_geo(conn, where_extra, params),
+        "por_sexo": _pessoas_bucket(
+            conn, where_extra, params, SEXO_EXPR, 5, lead_cte=lead_cte, fam_join=fam_join
+        ),
+        "por_deficiencia_binario": _pessoas_bucket(
+            conn, where_extra, params, DEF_BINARIA_EXPR, 3, lead_cte=lead_cte, fam_join=fam_join
+        ),
+        "por_raca": _pessoas_bucket(
+            conn, where_extra, params, RACA_EXPR, 8, lead_cte=lead_cte, fam_join=fam_join
+        ),
+        "por_escolaridade": _pessoas_bucket(
+            conn, where_extra, params, ESCOLARIDADE_EXPR, 10, lead_cte=lead_cte, fam_join=fam_join
+        ),
+        "por_deficiencia": _pessoas_bucket(
+            conn, where_extra, params, DEFICIENCIA_EXPR, 10, lead_cte=lead_cte, fam_join=fam_join
+        ),
+        "por_faixa_idade": _pessoas_bucket(
+            conn, where_extra, params, IDADE_EXPR, 8, lead_cte=lead_cte, fam_join=fam_join
+        ),
+        "por_renda_per_capita": _familia_renda_per_capita_buckets(
+            conn, where_extra, params, lead_cte=lead_cte, fam_join=fam_join
+        ),
+        "ranking_bairros": _ranking_bairros_geo(
+            conn, where_extra, params, lead_cte=lead_cte, fam_join=fam_join
+        ),
     }
