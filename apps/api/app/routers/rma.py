@@ -11,7 +11,10 @@ from ..models import User
 from ..vigilance.rma_analytics import (
     comparativo_cras_carga_demanda,
     equipamento_catalog,
+    list_competencias,
+    painel_rma,
     resumo_serie,
+    serie_rma,
 )
 from ..vigilance.rma_integridade import auditar_rma_integridade
 from ..vigilance.rma_pipeline import refresh_rma_pipeline
@@ -74,6 +77,54 @@ def get_rma_integridade(
     with db.bind.connect() as conn:
         report = auditar_rma_integridade(conn)
     return _integridade_dict(report)
+
+
+@router.get("/competencias")
+def get_competencias(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    with db.bind.connect() as conn:
+        items = list_competencias(conn)
+    return {"total": len(items), "items": items}
+
+
+@router.get("/painel")
+def get_painel_rma(
+    competencia: str = Query(..., description="Primeiro dia do mês, ex. 2025-01-01"),
+    tipo_equipamento: str = Query("CRAS", description="CRAS | CREAS | CENTRO_POP"),
+    id_equipamento: str | None = Query(None, description="Id oficial SUAS (opcional)"),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    with db.bind.connect() as conn:
+        return painel_rma(
+            conn,
+            competencia=competencia,
+            tipo_equipamento=tipo_equipamento,
+            id_equipamento=id_equipamento,
+        )
+
+
+@router.get("/serie")
+def get_serie_rma(
+    tipo_equipamento: str = Query("CRAS", description="CRAS | CREAS | CENTRO_POP"),
+    id_equipamento: str | None = Query(None),
+    meses: int = Query(24, ge=1, le=120),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    try:
+        with db.bind.connect() as conn:
+            items = serie_rma(
+                conn,
+                tipo_equipamento=tipo_equipamento,
+                id_equipamento=id_equipamento,
+                meses=meses,
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {"total": len(items), "items": items}
 
 
 @router.get("/equipamentos")

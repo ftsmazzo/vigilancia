@@ -16,6 +16,7 @@ import {
   Map,
   ShieldAlert,
   X,
+  ClipboardList,
 } from "lucide-react";
 import IngestaoPage from "./pages/IngestaoPage";
 import PainelIndicadoresInicio from "./pages/PainelIndicadoresInicio";
@@ -29,6 +30,7 @@ import VigilanciaPage from "./pages/VigilanciaPage";
 import IvsPage from "./pages/IvsPage";
 import MapasPage from "./pages/MapasPage";
 import SibecPage from "./pages/SibecPage";
+import RmaPage from "./pages/RmaPage";
 import MobileBottomNav from "./components/MobileBottomNav";
 import { useIsMobile } from "./hooks/useMediaQuery";
 
@@ -147,6 +149,10 @@ function AppShell({
             <NavLink to="/sibec" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
               <ShieldAlert className="nav-icon" size={18} />
               <span>SIBEC</span>
+            </NavLink>
+            <NavLink to="/producao" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+              <ClipboardList className="nav-icon" size={18} />
+              <span>Produção SUAS</span>
             </NavLink>
             <NavLink to="/ivs" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
               <Gauge className="nav-icon" size={18} />
@@ -506,6 +512,18 @@ export default function App() {
               token ? (
                 <AppShell loadingMe={loadingMe} me={me} onLogout={handleLogout}>
                   <VigilanciaPage token={token} />
+                </AppShell>
+              ) : (
+                <Navigate to="/" replace />
+              )
+            }
+          />
+          <Route
+            path="/producao"
+            element={
+              token ? (
+                <AppShell loadingMe={loadingMe} me={me} onLogout={handleLogout}>
+                  <RmaPage token={token} />
                 </AppShell>
               ) : (
                 <Navigate to="/" replace />
