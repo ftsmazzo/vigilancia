@@ -14,6 +14,7 @@ from ..vigilance.rma_analytics import (
     list_competencias,
     painel_rma,
     resumo_serie,
+    rma_page_data,
     serie_rma,
 )
 from ..vigilance.rma_integridade import auditar_rma_integridade
@@ -77,6 +78,32 @@ def get_rma_integridade(
     with db.bind.connect() as conn:
         report = auditar_rma_integridade(conn)
     return _integridade_dict(report)
+
+
+@router.get("/page")
+def get_rma_page(
+    competencia: str | None = Query(None, description="Primeiro dia do mês; omita para a mais recente"),
+    tipo_equipamento: str = Query("CRAS", description="CRAS | CREAS | CENTRO_POP"),
+    id_equipamento: str | None = Query(None, description="Id oficial SUAS (opcional)"),
+    meses: int = Query(24, ge=1, le=120),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Competências + painel + série em uma única resposta (menos round-trips)."""
+    try:
+        with db.bind.connect() as conn:
+            return rma_page_data(
+                conn,
+                competencia=competencia,
+                tipo_equipamento=tipo_equipamento,
+                id_equipamento=id_equipamento,
+                meses=meses,
+            )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Falha ao carregar painel RMA: {exc}",
+        ) from exc
 
 
 @router.get("/competencias")
@@ -181,4 +208,9 @@ def get_comparativo_cras_demanda(
             items = comparativo_cras_carga_demanda(conn, competencia=competencia)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Comparativo CRAS×CADU indisponível: {exc}",
+        ) from exc
     return {"competencia": competencia, "total": len(items), "items": items}

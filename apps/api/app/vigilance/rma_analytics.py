@@ -2,11 +2,29 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from .familia_mview import _table_exists
 from .rma_mview import RESUMO_MVIEW
+
+
+def _jsonify_value(value):
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()[:10]
+    if isinstance(value, Decimal):
+        if value == value.to_integral_value():
+            return int(value)
+        return float(value)
+    return value
+
+
+def _jsonify_row(row: dict) -> dict:
+    return {k: _jsonify_value(v) for k, v in row.items()}
 
 
 def _qi(ident: str) -> str:
@@ -89,40 +107,6 @@ def list_competencias(conn: Connection) -> list[str]:
     return [_comp_str(r) for r in rows]
 
 
-def serie_rma(
-    conn: Connection,
-    *,
-    tipo_equipamento: str,
-    id_equipamento: str | None = None,
-    meses: int = 24,
-) -> list[dict]:
-    tipo = tipo_equipamento.strip().upper()
-    competencias = list_competencias(conn)
-    if not competencias:
-        return []
-
-    limite = max(1, min(meses, len(competencias)))
-    ate = competencias[0]
-    desde = competencias[limite - 1]
-    rows = resumo_serie(
-        conn,
-        id_equipamento=id_equipamento,
-        tipo_equipamento=tipo,
-        desde=desde,
-        ate=ate,
-    )
-    campo = _ranking_field(tipo)
-    por_mes: dict[str, int] = {}
-    for row in rows:
-        comp = _comp_str(row["competencia"])
-        por_mes[comp] = por_mes.get(comp, 0) + _num(row.get(campo))
-
-    return [
-        {"competencia": comp, "valor": por_mes.get(comp, 0)}
-        for comp in sorted(por_mes.keys())
-    ]
-
-
 def painel_rma(
     conn: Connection,
     *,
@@ -196,6 +180,97 @@ def painel_rma(
     }
 
 
+def serie_rma(
+    conn: Connection,
+    *,
+    tipo_equipamento: str,
+    id_equipamento: str | None = None,
+    meses: int = 24,
+) -> list[dict]:
+    tipo = tipo_equipamento.strip().upper()
+    competencias = list_competencias(conn)
+    if not competencias:
+        return []
+
+    limite = max(1, min(meses, len(competencias)))
+    ate = competencias[0]
+    desde = competencias[limite - 1]
+    campo = _ranking_field(tipo)
+    clauses = [
+        "tipo_equipamento = :tipo_equipamento",
+        "competencia >= :desde::date",
+        "competencia <= :ate::date",
+    ]
+    params: dict = {
+        "tipo_equipamento": tipo,
+        "desde": desde,
+        "ate": ate,
+    }
+    if id_equipamento:
+        clauses.append("id_equipamento = :id_equipamento")
+        params["id_equipamento"] = id_equipamento.strip()
+
+    rows = conn.execute(
+        text(
+            f"""
+            SELECT
+              competencia,
+              SUM(COALESCE({_qi(campo)}, 0))::bigint AS valor
+            FROM vig.{_qi(RESUMO_MVIEW)}
+            WHERE {" AND ".join(clauses)}
+            GROUP BY competencia
+            ORDER BY competencia
+            """
+        ),
+        params,
+    ).mappings()
+
+    return [
+        {"competencia": _comp_str(r["competencia"]), "valor": int(r["valor"] or 0)}
+        for r in rows
+    ]
+
+
+def rma_page_data(
+    conn: Connection,
+    *,
+    competencia: str | None = None,
+    tipo_equipamento: str = "CRAS",
+    id_equipamento: str | None = None,
+    meses: int = 24,
+) -> dict:
+    """Uma ida ao banco: competências + painel + série (evita várias requisições HTTP)."""
+    competencias = list_competencias(conn)
+    if not competencias:
+        return {
+            "disponivel": False,
+            "competencias": [],
+            "mensagem": "Visão RMA não encontrada. Gere a visão na aba Ingestão → RMA SUAS.",
+        }
+
+    comp = (competencia or competencias[0]).strip()[:10]
+    if comp not in competencias:
+        comp = competencias[0]
+
+    return {
+        "disponivel": True,
+        "competencias": competencias,
+        "competencia": comp,
+        "painel": painel_rma(
+            conn,
+            competencia=comp,
+            tipo_equipamento=tipo_equipamento,
+            id_equipamento=id_equipamento,
+        ),
+        "serie": serie_rma(
+            conn,
+            tipo_equipamento=tipo_equipamento,
+            id_equipamento=id_equipamento,
+            meses=meses,
+        ),
+    }
+
+
 def equipamento_catalog(conn: Connection) -> list[dict]:
     if not _table_exists(conn, "vig", "dim_equipamento_suas"):
         return []
@@ -217,7 +292,7 @@ def equipamento_catalog(conn: Connection) -> list[dict]:
             """
         )
     ).mappings()
-    return [dict(r) for r in rows]
+    return [_jsonify_row(dict(r)) for r in rows]
 
 
 def resumo_serie(
@@ -265,7 +340,7 @@ def resumo_serie(
         ),
         params,
     ).mappings()
-    return [dict(r) for r in rows]
+    return [_jsonify_row(dict(r)) for r in rows]
 
 
 def comparativo_cras_carga_demanda(
@@ -325,4 +400,4 @@ def comparativo_cras_carga_demanda(
         ),
         {"competencia": competencia},
     ).mappings()
-    return [dict(r) for r in rows]
+    return [_jsonify_row(dict(r)) for r in rows]

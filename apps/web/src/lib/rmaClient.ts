@@ -186,7 +186,7 @@ export async function apiGetJson<T>(url: string, token: string, timeoutMs = 90_0
       );
     }
     throw new Error(
-      "Falha de rede ao consultar a API. Se as outras páginas funcionam, a consulta RMA provavelmente excedeu o tempo limite do proxy.",
+      "A requisição não completou. Atualize a página; se persistir, redeploy da API com a versão mais recente.",
     );
   } finally {
     clearTimeout(timer);
