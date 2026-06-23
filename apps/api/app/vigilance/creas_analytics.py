@@ -166,8 +166,8 @@ def _creas_filter_clause(creas_cod: str | None, *, alias: str = "f", conn: Conne
     # Caminho rápido: num_creas já materializado em vig.mvw_familia (evita subquery geo por linha).
     if conn is None or _column_exists(conn, "vig", "mvw_familia", "num_creas"):
         if cod == "__sem_creas__":
-            return f" AND ({p}.num_creas IS NULL OR btrim({p}.num_creas::text) = '') ", {}
-        return f" AND btrim({p}.num_creas::text) = :creas_cod ", {"creas_cod": cod}
+            return f" AND ({p}.num_creas IS NULL OR {p}.num_creas = '') ", {}
+        return f" AND {p}.num_creas = :creas_cod ", {"creas_cod": cod}
 
     val = _creas_val_sql(conn, p)
     if cod == "__sem_creas__":

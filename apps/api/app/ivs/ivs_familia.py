@@ -61,10 +61,26 @@ def _build_bpc_nis_cte(conn: Connection) -> str:
     """
 
 
-def build_ivs_familia_sql(*, bpc_nis_cte: str) -> str:
+def build_ivs_familia_sql(
+    *,
+    bpc_nis_cte: str,
+    territorial_cols: frozenset[str] | None = None,
+) -> str:
     sm = IVS_PARAMS["salario_minimo"]
     pobreza = IVS_PARAMS["limiar_pobreza"]
     teto_bpc = IVS_PARAMS["teto_bpc"]
+    territorial = territorial_cols or frozenset()
+
+    fam_territorial_select = ""
+    flags_territorial_select = ""
+    indices_territorial_select = ""
+    final_territorial_select = ""
+    for col in ("num_cras", "num_creas", "bairro"):
+        if col in territorial:
+            fam_territorial_select += f"        f.{col},\n"
+            flags_territorial_select += f"        f.{col},\n"
+            indices_territorial_select += f"        {col},\n"
+            final_territorial_select += f"      {col},\n"
 
     sql = f"""
     CREATE MATERIALIZED VIEW core.mvw_ivs_familia AS
@@ -73,7 +89,7 @@ def build_ivs_familia_sql(*, bpc_nis_cte: str) -> str:
     fam AS (
       SELECT
         f.codigo_familiar,
-        f.renda_per_capita,
+{fam_territorial_select}        f.renda_per_capita,
         COALESCE(f.marc_pbf, FALSE) AS marc_pbf,
         f.marc_pbf_cadu,
         COALESCE(f.vlrtotal, 0)::numeric AS pbf_total,
@@ -248,7 +264,7 @@ def build_ivs_familia_sql(*, bpc_nis_cte: str) -> str:
     flags AS (
       SELECT
         f.codigo_familiar,
-        {sql_universo_ivs_elegivel(alias="f")} AS elegivel_ivs,
+{flags_territorial_select}        {sql_universo_ivs_elegivel(alias="f")} AS elegivel_ivs,
         nc.nc1, nc.nc2, nc.nc3, nc.nc4, nc.nc5, nc.nc6, nc.nc7,
         pa.dpi1, pa.dpi2, pa.dpi3,
         pa.dca1, pa.dca2, pa.dca3, pa.dca4, pa.dca5,
@@ -382,7 +398,7 @@ def build_ivs_familia_sql(*, bpc_nis_cte: str) -> str:
     indices AS (
       SELECT
         codigo_familiar,
-        elegivel_ivs,
+{indices_territorial_select}        elegivel_ivs,
         nc1, nc2, nc3, nc4, nc5, nc6, nc7,
         dpi1, dpi2, dpi3,
         dca1, dca2, dca3, dca4, dca5,
@@ -399,7 +415,7 @@ def build_ivs_familia_sql(*, bpc_nis_cte: str) -> str:
     )
     SELECT
       codigo_familiar,
-      elegivel_ivs,
+{final_territorial_select}      elegivel_ivs,
       nc1, nc2, nc3, nc4, nc5, nc6, nc7,
       dpi1, dpi2, dpi3,
       dca1, dca2, dca3, dca4, dca5,
@@ -449,7 +465,12 @@ def refresh_ivs_familia(conn: Connection) -> IvsRefreshResult:
             "Tabela BPC (Maciça) não encontrada ou sem NIS/CPF — DR4 usa proxy por faixa aposentadoria."
         )
 
-    mview_sql = build_ivs_familia_sql(bpc_nis_cte=bpc_cte)
+    mview_sql = build_ivs_familia_sql(
+        bpc_nis_cte=bpc_cte,
+        territorial_cols=frozenset(
+            c for c in ("num_cras", "num_creas", "bairro") if c in _columns(conn, "vig", "mvw_familia")
+        ),
+    )
 
     conn.execute(text("DROP MATERIALIZED VIEW IF EXISTS core.mvw_ivs_familia CASCADE"))
     conn.execute(text(mview_sql))
@@ -465,6 +486,21 @@ def refresh_ivs_familia(conn: Connection) -> IvsRefreshResult:
             "ON core.mvw_ivs_familia (elegivel_ivs) WHERE elegivel_ivs"
         )
     )
+    ivs_cols = _columns(conn, "core", "mvw_ivs_familia")
+    if "num_cras" in ivs_cols:
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS mvw_ivs_familia_num_cras_idx "
+                "ON core.mvw_ivs_familia (num_cras)"
+            )
+        )
+    if "num_creas" in ivs_cols:
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS mvw_ivs_familia_num_creas_idx "
+                "ON core.mvw_ivs_familia (num_creas)"
+            )
+        )
 
     stats = conn.execute(
         text(

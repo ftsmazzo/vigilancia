@@ -701,3 +701,22 @@ def refresh_familia_mview(conn: Connection) -> FamiliaRefreshResult:
         pbf_valor_column=pbf_valor,
         pbf_ref_column=pbf_ref,
     )
+
+
+def ensure_familia_territorial_indexes(conn: Connection) -> None:
+    """Índices territoriais (idempotente) — acelera IVS/Caracterização sem refresh completo."""
+    if not _table_exists(conn, "vig", "mvw_familia"):
+        return
+    mview_cols = _columns(conn, "vig", "mvw_familia")
+    if "num_cras" in mview_cols:
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS mvw_familia_num_cras_idx ON vig.mvw_familia (num_cras)"
+            )
+        )
+    if "num_creas" in mview_cols:
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS mvw_familia_num_creas_idx ON vig.mvw_familia (num_creas)"
+            )
+        )
