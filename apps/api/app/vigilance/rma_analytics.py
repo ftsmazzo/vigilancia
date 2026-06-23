@@ -198,8 +198,8 @@ def serie_rma(
     campo = _ranking_field(tipo)
     clauses = [
         "tipo_equipamento = :tipo_equipamento",
-        "competencia >= :desde::date",
-        "competencia <= :ate::date",
+        "competencia >= CAST(:desde AS date)",
+        "competencia <= CAST(:ate AS date)",
     ]
     params: dict = {
         "tipo_equipamento": tipo,
@@ -315,10 +315,10 @@ def resumo_serie(
         clauses.append("tipo_equipamento = :tipo_equipamento")
         params["tipo_equipamento"] = tipo_equipamento.strip().upper()
     if desde:
-        clauses.append("competencia >= :desde::date")
+        clauses.append("competencia >= CAST(:desde AS date)")
         params["desde"] = desde
     if ate:
-        clauses.append("competencia <= :ate::date")
+        clauses.append("competencia <= CAST(:ate AS date)")
         params["ate"] = ate
     if not desde and not ate:
         clauses.append(
@@ -367,7 +367,7 @@ def comparativo_cras_carga_demanda(
                 cras_visitas_domiciliares,
                 cras_novas_familias_paif
               FROM vig.{_qi(RESUMO_MVIEW)}
-              WHERE competencia = :competencia::date
+              WHERE competencia = CAST(:competencia AS date)
                 AND tipo_equipamento = 'CRAS'
                 AND cras_num_territorial IS NOT NULL
             ),
