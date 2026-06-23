@@ -97,13 +97,19 @@ def get_painel_rma(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    with db.bind.connect() as conn:
-        return painel_rma(
-            conn,
-            competencia=competencia,
-            tipo_equipamento=tipo_equipamento,
-            id_equipamento=id_equipamento,
-        )
+    try:
+        with db.bind.connect() as conn:
+            return painel_rma(
+                conn,
+                competencia=competencia,
+                tipo_equipamento=tipo_equipamento,
+                id_equipamento=id_equipamento,
+            )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Falha ao montar painel RMA: {exc}",
+        ) from exc
 
 
 @router.get("/serie")

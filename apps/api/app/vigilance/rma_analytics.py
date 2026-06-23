@@ -142,6 +142,8 @@ def painel_rma(
         conn,
         id_equipamento=id_equipamento,
         tipo_equipamento=tipo,
+        desde=comp,
+        ate=comp,
     )
     month_rows = [r for r in rows if _comp_str(r["competencia"]) == comp]
     if not rows:

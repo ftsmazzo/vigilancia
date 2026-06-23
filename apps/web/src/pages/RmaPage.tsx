@@ -2,6 +2,15 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import BarChartPanel, { type BarItem } from "../components/charts/BarChartPanel";
 import LineChartPanel, { type LineChartPoint } from "../components/charts/LineChartPanel";
+import {
+  apiGetJson,
+  buildPainelFromResumo,
+  buildSerieFromResumo,
+  competenciasFromResumo,
+  type PainelRma,
+  type ResumoRow,
+  type TipoEquip,
+} from "../lib/rmaClient";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -9,35 +18,12 @@ type Props = {
   token: string;
 };
 
-type TipoEquip = "CRAS" | "CREAS" | "CENTRO_POP";
-
 type Equipamento = {
   id_equipamento: string;
   tipo_equipamento: string;
   nome_oficial: string;
   cras_num_territorial: number | null;
   creas_num_territorial: number | null;
-};
-
-type MetricaDef = {
-  chave: string;
-  rotulo: string;
-};
-
-type Painel = {
-  disponivel: boolean;
-  mensagem?: string;
-  competencia?: string;
-  tipo_equipamento?: TipoEquip;
-  titulo_recorte?: string;
-  resumo?: Record<string, number>;
-  metricas?: MetricaDef[];
-  ranking?: BarItem[];
-};
-
-type SerieItem = {
-  competencia: string;
-  valor: number;
 };
 
 type ComparativoItem = {
@@ -84,43 +70,78 @@ function rotuloEquipamento(e: Equipamento): string {
   return e.nome_oficial;
 }
 
+async function fetchResumo(
+  token: string,
+  tipo: TipoEquip,
+  idEquipamento: string | null,
+  competencia?: string,
+): Promise<ResumoRow[]> {
+  const params = new URLSearchParams({ tipo_equipamento: tipo });
+  if (idEquipamento) params.set("id_equipamento", idEquipamento);
+  if (competencia) {
+    params.set("desde", competencia);
+    params.set("ate", competencia);
+  }
+  const data = await apiGetJson<{ items: ResumoRow[] }>(
+    `${API_URL}/api/v1/rma/resumo?${params}`,
+    token,
+    API_URL,
+  );
+  return data.items ?? [];
+}
+
 export default function RmaPage({ token }: Props) {
   const [aba, setAba] = useState<"producao" | "comparativo">("producao");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [competencias, setCompetencias] = useState<string[]>([]);
   const [competencia, setCompetencia] = useState("");
   const [tipo, setTipo] = useState<TipoEquip>("CRAS");
   const [idEquipamento, setIdEquipamento] = useState("__todos__");
   const [equipamentos, setEquipamentos] = useState<Equipamento[]>([]);
-  const [painel, setPainel] = useState<Painel | null>(null);
-  const [serie, setSerie] = useState<SerieItem[]>([]);
+  const [painel, setPainel] = useState<PainelRma | null>(null);
+  const [serie, setSerie] = useState<Array<{ competencia: string; valor: number }>>([]);
   const [comparativo, setComparativo] = useState<ComparativoItem[]>([]);
 
   useEffect(() => {
-    fetch(`${API_URL}/api/v1/rma/equipamentos`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(async (res) => {
-        if (!res.ok) return;
-        const data = (await res.json()) as { items: Equipamento[] };
-        setEquipamentos(data.items ?? []);
-      })
+    apiGetJson<{ items: Equipamento[] }>(`${API_URL}/api/v1/rma/equipamentos`, token, API_URL)
+      .then((data) => setEquipamentos(data.items ?? []))
       .catch(() => setEquipamentos([]));
   }, [token]);
 
   useEffect(() => {
-    fetch(`${API_URL}/api/v1/rma/competencias`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(async (res) => {
-        if (!res.ok) return;
-        const data = (await res.json()) as { items: string[] };
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await apiGetJson<{ items: string[] }>(
+          `${API_URL}/api/v1/rma/competencias`,
+          token,
+          API_URL,
+        );
+        if (cancelled) return;
         const items = data.items ?? [];
+        if (items.length > 0) {
+          setCompetencias(items);
+          setCompetencia((prev) => prev || items[0]);
+          return;
+        }
+      } catch {
+        /* fallback abaixo */
+      }
+
+      try {
+        const rows = await fetchResumo(token, "CRAS", null);
+        if (cancelled) return;
+        const items = competenciasFromResumo(rows);
         setCompetencias(items);
         if (items.length > 0) setCompetencia((prev) => prev || items[0]);
-      })
-      .catch(() => setCompetencias([]));
+      } catch {
+        if (!cancelled) setCompetencias([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [token]);
 
   const equipamentosFiltrados = useMemo(
@@ -129,43 +150,20 @@ export default function RmaPage({ token }: Props) {
   );
 
   const loadProducao = useCallback(async () => {
-    if (!competencia) return;
+    if (!competencia) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError("");
     try {
-      const params = new URLSearchParams({
-        competencia,
-        tipo_equipamento: tipo,
-      });
-      if (idEquipamento && idEquipamento !== "__todos__") {
-        params.set("id_equipamento", idEquipamento);
-      }
-      const serieParams = new URLSearchParams({ tipo_equipamento: tipo });
-      if (idEquipamento && idEquipamento !== "__todos__") {
-        serieParams.set("id_equipamento", idEquipamento);
-      }
-
-      const [painelRes, serieRes] = await Promise.all([
-        fetch(`${API_URL}/api/v1/rma/painel?${params}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-        fetch(`${API_URL}/api/v1/rma/serie?${serieParams}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
+      const id = idEquipamento !== "__todos__" ? idEquipamento : null;
+      const [monthRows, serieRows] = await Promise.all([
+        fetchResumo(token, tipo, id, competencia),
+        fetchResumo(token, tipo, id),
       ]);
-
-      const painelData = (await painelRes.json().catch(() => ({}))) as Painel & { detail?: unknown };
-      if (!painelRes.ok) {
-        throw new Error(typeof painelData.detail === "string" ? painelData.detail : "Não foi possível carregar o painel.");
-      }
-      setPainel(painelData);
-
-      if (serieRes.ok) {
-        const serieData = (await serieRes.json()) as { items?: SerieItem[] };
-        setSerie(serieData.items ?? []);
-      } else {
-        setSerie([]);
-      }
+      setPainel(buildPainelFromResumo(monthRows, competencia, tipo, id));
+      setSerie(buildSerieFromResumo(serieRows, tipo));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro inesperado.");
       setPainel(null);
@@ -176,21 +174,19 @@ export default function RmaPage({ token }: Props) {
   }, [token, competencia, tipo, idEquipamento]);
 
   const loadComparativo = useCallback(async () => {
-    if (!competencia) return;
+    if (!competencia) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError("");
     try {
       const params = new URLSearchParams({ competencia });
-      const res = await fetch(`${API_URL}/api/v1/rma/comparativo/cras-demanda?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = (await res.json().catch(() => ({}))) as {
-        items?: ComparativoItem[];
-        detail?: unknown;
-      };
-      if (!res.ok) {
-        throw new Error(typeof data.detail === "string" ? data.detail : "Não foi possível carregar o comparativo.");
-      }
+      const data = await apiGetJson<{ items: ComparativoItem[] }>(
+        `${API_URL}/api/v1/rma/comparativo/cras-demanda?${params}`,
+        token,
+        API_URL,
+      );
       setComparativo(data.items ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro inesperado.");
@@ -368,6 +364,12 @@ export default function RmaPage({ token }: Props) {
         )}
       </section>
 
+      {!competencia && !loading && (
+        <section className="fx-card" style={{ marginTop: "1rem", padding: "1.25rem" }}>
+          <p>Nenhuma competência disponível. Gere a visão RMA na Ingestão antes de consultar este painel.</p>
+        </section>
+      )}
+
       {loading && <p className="caract-loading">Carregando…</p>}
       {error && <p className="error">{error}</p>}
 
@@ -411,7 +413,7 @@ export default function RmaPage({ token }: Props) {
         </>
       )}
 
-      {!loading && aba === "comparativo" && (
+      {!loading && aba === "comparativo" && !error && (
         <>
           <p className="ingestao-desc" style={{ marginTop: "1rem" }}>
             Produção RMA (atendimentos individuais) comparada ao estoque de famílias no CADU por território CRAS — base
