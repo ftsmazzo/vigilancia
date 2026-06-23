@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-from .familia_mview import _table_exists
+from .familia_mview import _columns, _table_exists
 
 DIM_TABLE = "dim_equipamento_suas"
 
@@ -153,6 +153,19 @@ class DimEquipamentoRefreshResult:
     total: int
 
 
+def _ibge_select_expr(cols: set[str]) -> str:
+    parts: list[str] = []
+    if "codigoibge" in cols:
+        parts.append(f"NULLIF(btrim({_qi('codigoibge')}::text), '')")
+    if "ibge" in cols:
+        parts.append(f"NULLIF(btrim({_qi('ibge')}::text), '')")
+    if not parts:
+        return "NULL::text"
+    if len(parts) == 1:
+        return parts[0]
+    return f"COALESCE({parts[0]}, {parts[1]})"
+
+
 def refresh_dim_from_raw_rma(conn: Connection) -> DimEquipamentoRefreshResult:
     """Atualiza catálogo a partir das três tabelas RAW do RMA (último nome por id)."""
     ensure_dim_equipamento_suas(conn)
@@ -167,6 +180,8 @@ def refresh_dim_from_raw_rma(conn: Connection) -> DimEquipamentoRefreshResult:
     for tipo_form, table, id_col, date_col in sources:
         if not _table_exists(conn, "raw", table):
             continue
+        cols = _columns(conn, "raw", table)
+        ibge_expr = _ibge_select_expr(cols)
         rows = conn.execute(
             text(
                 f"""
@@ -176,10 +191,7 @@ def refresh_dim_from_raw_rma(conn: Connection) -> DimEquipamentoRefreshResult:
                   btrim({_qi("endereco")}::text) AS endereco,
                   btrim({_qi("municipio")}::text) AS municipio,
                   btrim({_qi("uf")}::text) AS uf,
-                  COALESCE(
-                    NULLIF(btrim({_qi("codigoibge")}::text), ''),
-                    NULLIF(btrim({_qi("ibge")}::text), '')
-                  ) AS codigo_ibge,
+                  {ibge_expr} AS codigo_ibge,
                   {_qi(date_col)}::date AS ref_date
                 FROM raw.{_qi(table)}
                 WHERE btrim(COALESCE({_qi(id_col)}::text, '')) <> ''
