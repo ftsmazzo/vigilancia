@@ -64,6 +64,15 @@ export function compStr(value: string | Date): string {
   return String(value).slice(0, 10);
 }
 
+/** Primeiro dia do mês, N meses antes de competencia (inclusive). */
+export function monthRangeStart(competencia: string, meses: number): string {
+  const base = compStr(competencia);
+  const [y, m] = base.slice(0, 7).split("-").map((v) => parseInt(v, 10));
+  const d = new Date(Date.UTC(y, m - 1, 1));
+  d.setUTCMonth(d.getUTCMonth() - (meses - 1));
+  return d.toISOString().slice(0, 10);
+}
+
 function num(value: unknown): number {
   if (value == null) return 0;
   const n = Number(value);
@@ -161,18 +170,26 @@ export function buildSerieFromResumo(
   return comps.map((comp) => ({ competencia: comp, valor: porMes.get(comp) ?? 0 }));
 }
 
-export async function apiGetJson<T>(
-  url: string,
-  token: string,
-  apiUrl: string,
-): Promise<T> {
+export async function apiGetJson<T>(url: string, token: string, timeoutMs = 90_000): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   let res: Response;
   try {
-    res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  } catch {
+    res = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: controller.signal,
+    });
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") {
+      throw new Error(
+        "A consulta demorou demais e foi interrompida. O histórico RMA é grande — tente recarregar; se persistir, redeploy da API com a versão mais recente.",
+      );
+    }
     throw new Error(
-      `Não foi possível contactar a API em ${apiUrl}. Verifique VITE_API_URL, CORS_ORIGINS e se a API está no ar.`,
+      "Falha de rede ao consultar a API. Se as outras páginas funcionam, a consulta RMA provavelmente excedeu o tempo limite do proxy.",
     );
+  } finally {
+    clearTimeout(timer);
   }
   const data = (await res.json().catch(() => ({}))) as T & { detail?: unknown };
   if (!res.ok) {

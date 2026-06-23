@@ -7,6 +7,7 @@ import {
   buildPainelFromResumo,
   buildSerieFromResumo,
   competenciasFromResumo,
+  monthRangeStart,
   type PainelRma,
   type ResumoRow,
   type TipoEquip,
@@ -74,18 +75,17 @@ async function fetchResumo(
   token: string,
   tipo: TipoEquip,
   idEquipamento: string | null,
-  competencia?: string,
+  range: { desde: string; ate: string },
 ): Promise<ResumoRow[]> {
-  const params = new URLSearchParams({ tipo_equipamento: tipo });
+  const params = new URLSearchParams({
+    tipo_equipamento: tipo,
+    desde: range.desde,
+    ate: range.ate,
+  });
   if (idEquipamento) params.set("id_equipamento", idEquipamento);
-  if (competencia) {
-    params.set("desde", competencia);
-    params.set("ate", competencia);
-  }
   const data = await apiGetJson<{ items: ResumoRow[] }>(
     `${API_URL}/api/v1/rma/resumo?${params}`,
     token,
-    API_URL,
   );
   return data.items ?? [];
 }
@@ -104,7 +104,7 @@ export default function RmaPage({ token }: Props) {
   const [comparativo, setComparativo] = useState<ComparativoItem[]>([]);
 
   useEffect(() => {
-    apiGetJson<{ items: Equipamento[] }>(`${API_URL}/api/v1/rma/equipamentos`, token, API_URL)
+    apiGetJson<{ items: Equipamento[] }>(`${API_URL}/api/v1/rma/equipamentos`, token)
       .then((data) => setEquipamentos(data.items ?? []))
       .catch(() => setEquipamentos([]));
   }, [token]);
@@ -116,7 +116,6 @@ export default function RmaPage({ token }: Props) {
         const data = await apiGetJson<{ items: string[] }>(
           `${API_URL}/api/v1/rma/competencias`,
           token,
-          API_URL,
         );
         if (cancelled) return;
         const items = data.items ?? [];
@@ -130,7 +129,9 @@ export default function RmaPage({ token }: Props) {
       }
 
       try {
-        const rows = await fetchResumo(token, "CRAS", null);
+        const ate = new Date().toISOString().slice(0, 10);
+        const desde = monthRangeStart(ate, 48);
+        const rows = await fetchResumo(token, "CRAS", null, { desde, ate });
         if (cancelled) return;
         const items = competenciasFromResumo(rows);
         setCompetencias(items);
@@ -156,18 +157,45 @@ export default function RmaPage({ token }: Props) {
     }
     setLoading(true);
     setError("");
+    const id = idEquipamento !== "__todos__" ? idEquipamento : null;
+    const params = new URLSearchParams({ competencia, tipo_equipamento: tipo });
+    if (id) params.set("id_equipamento", id);
+
     try {
-      const id = idEquipamento !== "__todos__" ? idEquipamento : null;
-      const [monthRows, serieRows] = await Promise.all([
-        fetchResumo(token, tipo, id, competencia),
-        fetchResumo(token, tipo, id),
-      ]);
-      setPainel(buildPainelFromResumo(monthRows, competencia, tipo, id));
-      setSerie(buildSerieFromResumo(serieRows, tipo));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Erro inesperado.");
-      setPainel(null);
-      setSerie([]);
+      const painelData = await apiGetJson<PainelRma>(
+        `${API_URL}/api/v1/rma/painel?${params}`,
+        token,
+      );
+      setPainel(painelData);
+
+      const serieParams = new URLSearchParams({ tipo_equipamento: tipo, meses: "24" });
+      if (id) serieParams.set("id_equipamento", id);
+      try {
+        const serieData = await apiGetJson<{ items: Array<{ competencia: string; valor: number }> }>(
+          `${API_URL}/api/v1/rma/serie?${serieParams}`,
+          token,
+        );
+        setSerie(serieData.items ?? []);
+      } catch {
+        const desde = monthRangeStart(competencia, 24);
+        const serieRows = await fetchResumo(token, tipo, id, { desde, ate: competencia });
+        setSerie(buildSerieFromResumo(serieRows, tipo));
+      }
+    } catch {
+      try {
+        const monthRows = await fetchResumo(token, tipo, id, {
+          desde: competencia,
+          ate: competencia,
+        });
+        setPainel(buildPainelFromResumo(monthRows, competencia, tipo, id));
+        const desde = monthRangeStart(competencia, 24);
+        const serieRows = await fetchResumo(token, tipo, id, { desde, ate: competencia });
+        setSerie(buildSerieFromResumo(serieRows, tipo));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Erro inesperado.");
+        setPainel(null);
+        setSerie([]);
+      }
     } finally {
       setLoading(false);
     }
@@ -185,7 +213,6 @@ export default function RmaPage({ token }: Props) {
       const data = await apiGetJson<{ items: ComparativoItem[] }>(
         `${API_URL}/api/v1/rma/comparativo/cras-demanda?${params}`,
         token,
-        API_URL,
       );
       setComparativo(data.items ?? []);
     } catch (e) {

@@ -245,6 +245,13 @@ def resumo_serie(
     if ate:
         clauses.append("competencia <= :ate::date")
         params["ate"] = ate
+    if not desde and not ate:
+        clauses.append(
+            f"competencia >= ("
+            f"SELECT COALESCE(MAX(competencia), CURRENT_DATE) - INTERVAL '48 months' "
+            f"FROM vig.{_qi(RESUMO_MVIEW)}"
+            f")"
+        )
 
     where_sql = " AND ".join(clauses)
     rows = conn.execute(
