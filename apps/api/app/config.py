@@ -3,12 +3,27 @@ from pathlib import Path
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+def _discover_env_files() -> tuple[str, ...]:
+    """Local: sobe até achar .env no monorepo. Docker/EasyPanel: só cwd ou variáveis de ambiente."""
+    found: list[str] = []
+    seen: set[str] = set()
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / ".env"
+        key = str(candidate)
+        if candidate.is_file() and key not in seen:
+            seen.add(key)
+            found.append(key)
+    cwd_env = Path.cwd() / ".env"
+    key = str(cwd_env)
+    if cwd_env.is_file() and key not in seen:
+        found.append(key)
+    return tuple(found) if found else (".env",)
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=(_REPO_ROOT / ".env", ".env"),
+        env_file=_discover_env_files(),
         env_file_encoding="utf-8",
         extra="ignore",
     )

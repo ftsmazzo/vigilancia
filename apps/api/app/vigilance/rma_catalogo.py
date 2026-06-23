@@ -19,6 +19,14 @@ def _qi(ident: str) -> str:
     return '"' + ident.replace('"', '""') + '"'
 
 
+def _monorepo_rma_dir() -> Path | None:
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "DadosBrutos" / "RMA"
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
 def resolve_rma_data_dir() -> Path:
     from ..config import settings
 
@@ -27,13 +35,13 @@ def resolve_rma_data_dir() -> Path:
         configured = Path(settings.rma_data_dir.strip())
         if configured.is_dir():
             return configured
-    repo = Path(__file__).resolve().parents[4] / "DadosBrutos" / "RMA"
-    if repo.is_dir():
-        return repo
     docker = Path("/DadosBrutos/RMA")
     if docker.is_dir():
         return docker
-    return configured or repo
+    monorepo = _monorepo_rma_dir()
+    if monorepo:
+        return monorepo
+    return configured or docker
 
 
 def default_rma_data_dir() -> Path:
